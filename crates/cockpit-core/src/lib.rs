@@ -1,9 +1,22 @@
 //! Shared domain model for Cockpit.
 //!
-//! Phase 1 adds the unified flight model (sessions, steps, tool calls, token
-//! usage, cost), redaction, SSE observation, pricing, and the data-driven
-//! adapter model. This crate stays free of I/O and platform dependencies so it
-//! can be tested quickly and reused by the daemon, CLI, and desktop app.
+//! This crate is deliberately free of network and database I/O. It owns the
+//! vocabulary every capture mode shares: flights (sessions), steps, token
+//! usage, cost, redaction, SSE observation, and proxy route parsing. The
+//! daemon and desktop app build on it.
+
+pub mod agent;
+pub mod collector;
+pub mod cost;
+pub mod ids;
+pub mod model;
+pub mod provider;
+pub mod redact;
+pub mod request_meta;
+pub mod routing;
+pub mod sse;
+pub mod text;
+pub mod usage;
 
 /// The Cockpit version compiled into this crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

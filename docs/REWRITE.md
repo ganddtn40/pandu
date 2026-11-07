@@ -85,9 +85,11 @@ Cut tables belong to the deferred features and are listed in
 `Recorded via proxy` or `Observed from logs` without guessing.
 
 The old database is not migrated in v1. The new daemon uses a fresh database at
-the platform data directory. Importing a 0.1.0 database is a future, separate
-migration because the cut tables and new capture columns make a blind copy
-unsafe.
+`~/.cockpit/v2/cockpit.db` (or `$COCKPIT_HOME/cockpit.db`), so a 0.1.0
+`~/.cockpit/cockpit.db` is never opened by accident. The store refuses a
+database whose `sessions` table lacks the new `capture_mode` column. Importing a
+0.1.0 database is a future, separate migration because the cut tables and new
+capture columns make a blind copy unsafe.
 
 ### 2.3 Guard rules worth keeping
 

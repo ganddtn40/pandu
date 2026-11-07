@@ -7,6 +7,23 @@
 //! The daemon is designed to fail open: a recording or storage failure must
 //! never change or block the bytes travelling to the upstream provider.
 
+pub mod api;
+pub mod config;
+pub mod error;
+pub mod live;
+pub mod proxy;
+pub mod recorder;
+pub mod server;
+pub mod sessions;
+pub mod state;
+pub mod store;
+pub mod ui;
+
+pub use config::Config;
+pub use error::{DaemonError, Result};
+pub use server::{ServerHandle, run, spawn};
+pub use state::AppState;
+
 pub use cockpit_core::VERSION;
 
 /// Human-readable crate purpose used by `cockpit doctor` once the CLI lands.
