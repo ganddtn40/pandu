@@ -7,10 +7,14 @@
 //! The daemon is designed to fail open: a recording or storage failure must
 //! never change or block the bytes travelling to the upstream provider.
 
+pub mod adapters;
 pub mod api;
 pub mod config;
 pub mod error;
 pub mod live;
+pub mod logparse;
+pub mod logwatch;
+pub mod pairing;
 pub mod proxy;
 pub mod recorder;
 pub mod server;

@@ -1,0 +1,17 @@
+schema_version = 1
+id = "openhands"
+name = "OpenHands"
+verified = false
+docs_url = "https://docs.all-hands.dev/"
+capture = ["proxy"]
+
+[detect]
+command = "openhands"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["openai-chat"]
+base_url_env = ["OPENAI_BASE_URL"]
+api_key_env = ["OPENAI_API_KEY"]
+setup_note = "Configure an OpenAI-compatible LLM with Cockpit as its base URL."
+verified = false

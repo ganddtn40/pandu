@@ -1,0 +1,23 @@
+schema_version = 1
+id = "codex"
+name = "Codex CLI"
+verified = false
+docs_url = "https://developers.openai.com/codex/cli/"
+capture = ["proxy", "log_watch"]
+
+[detect]
+command = "codex"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["openai-responses", "openai-chat"]
+base_url_env = ["OPENAI_BASE_URL"]
+api_key_env = ["OPENAI_API_KEY"]
+setup_note = "Set OPENAI_BASE_URL to Cockpit's local /v1 endpoint and use any local key."
+verified = false
+
+[log_watch]
+roots = ["~/.codex/sessions"]
+include = ["**/*.jsonl"]
+parser = "codex-jsonl"
+verified = false

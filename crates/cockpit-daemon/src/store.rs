@@ -172,6 +172,7 @@ pub struct NewSession {
     pub source: SessionSource,
     pub capture_mode: CaptureMode,
     pub source_label: Option<String>,
+    pub status: SessionStatus,
     pub protocol: Option<ProviderProtocol>,
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -179,6 +180,8 @@ pub struct NewSession {
     pub workspace_path: Option<String>,
     pub git_branch: Option<String>,
     pub git_base_commit: Option<String>,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
     pub tags: Vec<String>,
     pub metadata: Option<Value>,
 }
@@ -207,6 +210,29 @@ pub struct CompleteStep {
     pub error: Option<String>,
     pub ttft_ms: Option<u64>,
     pub latency_ms: u64,
+}
+
+/// A completed step reconstructed from an agent's own log file.
+///
+/// Unlike a proxied step it never passes through the "running" state, so it is
+/// inserted directly with its historical timestamps.
+#[derive(Debug, Clone)]
+pub struct ObservedStep {
+    pub kind: StepKind,
+    pub status: StepStatus,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub request: CapturedRequest,
+    pub response: Option<CapturedResponse>,
+    pub usage: TokenUsage,
+    pub cost_usd: Option<f64>,
+    pub cost_known: bool,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub error: Option<String>,
+    pub metadata: Option<Value>,
+    pub tool_calls: Vec<ToolCall>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,7 +384,11 @@ impl Store {
 
     pub fn create_session(&self, input: NewSession) -> Result<Session> {
         let id = cockpit_core::ids::create_id();
-        let started_at = now_iso();
+        let started_at = input.started_at.unwrap_or_else(now_iso);
+        let duration_ms = input
+            .ended_at
+            .as_deref()
+            .and_then(|ended_at| duration_between(&started_at, ended_at));
         let tags = serde_json::to_string(&input.tags)?;
         let metadata = input
             .metadata
@@ -382,14 +412,17 @@ impl Store {
                 "INSERT INTO sessions (
                    id, title, source, capture_mode, source_label, status, protocol, provider, model,
                    agent_name, agent_version, agent_user_agent, agent_detected_from,
-                   workspace_path, git_branch, git_base_commit, started_at, tags, metadata
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                   workspace_path, git_branch, git_base_commit, started_at, ended_at, duration_ms,
+                   tags, metadata
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                           ?16, ?17, ?18, ?19, ?20, ?21)",
                 params![
                     id,
                     input.title,
                     input.source.as_str(),
                     input.capture_mode.as_str(),
                     input.source_label,
+                    input.status.as_str(),
                     input.protocol.map(|protocol| protocol.as_str()),
                     input.provider,
                     input.model,
@@ -401,6 +434,8 @@ impl Store {
                     input.git_branch,
                     input.git_base_commit,
                     started_at,
+                    input.ended_at,
+                    duration_ms,
                     tags,
                     metadata,
                 ],
@@ -692,6 +727,256 @@ impl Store {
         drop(connection);
 
         self.get_step(step_id)
+    }
+
+    /// Insert a completed step reconstructed from an agent log.
+    ///
+    /// Tool calls are written in the same transaction, and the session totals
+    /// are updated exactly once. No live event is emitted for historical data.
+    pub fn insert_observed_step(&self, session_id: &str, input: ObservedStep) -> Result<Step> {
+        let id = cockpit_core::ids::create_id();
+        let request = &input.request;
+        let request_headers = serde_json::to_string(&request.headers)?;
+        let request_body = request
+            .body
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let response = input.response.as_ref();
+        let response_headers = match response {
+            Some(response) => serde_json::to_string(&response.headers)?,
+            None => "{}".to_string(),
+        };
+        let metadata = input
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let duration_ms = input.duration_ms.or_else(|| {
+            input
+                .ended_at
+                .as_deref()
+                .and_then(|ended_at| duration_between(&input.started_at, ended_at))
+                .map(|value| value.max(0) as u64)
+        });
+        let is_model = input.kind == StepKind::Model;
+        let model_call_increment = i64::from(is_model);
+        let unknown_cost_increment = i64::from(is_model && !input.cost_known);
+        let error_increment = i64::from(input.status == StepStatus::Failed);
+
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        let seq: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM steps WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+
+        transaction.execute(
+            "INSERT INTO steps (
+               id, session_id, seq, kind, status, provider, model, protocol, method, path,
+               request_headers, request_body, request_stream, request_system_prompt,
+               request_prompt_text, request_redaction_count, response_status, response_headers,
+               response_finish_reason, response_text, response_thinking, response_ttft_ms,
+               response_latency_ms, response_error, input_tokens, output_tokens,
+               cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_usd, cost_known,
+               started_at, ended_at, duration_ms, error, metadata
+             ) VALUES (
+               :id, :session_id, :seq, :kind, :status, :provider, :model, :protocol, :method,
+               :path, :request_headers, :request_body, :request_stream, :request_system_prompt,
+               :request_prompt_text, :request_redaction_count, :response_status,
+               :response_headers, :response_finish_reason, :response_text, :response_thinking,
+               :response_ttft_ms, :response_latency_ms, :response_error, :input_tokens,
+               :output_tokens, :cache_read_tokens, :cache_write_tokens, :reasoning_tokens,
+               :cost_usd, :cost_known, :started_at, :ended_at, :duration_ms, :error, :metadata
+             )",
+            rusqlite::named_params! {
+                ":id": id,
+                ":session_id": session_id,
+                ":seq": seq,
+                ":kind": input.kind.as_str(),
+                ":status": input.status.as_str(),
+                ":provider": input.provider,
+                ":model": input.model,
+                ":protocol": request.protocol.as_str(),
+                ":method": request.method,
+                ":path": request.path,
+                ":request_headers": request_headers,
+                ":request_body": request_body,
+                ":request_stream": request.stream as i64,
+                ":request_system_prompt": request.system_prompt,
+                ":request_prompt_text": request.prompt_text,
+                ":request_redaction_count": request.redaction_count as i64,
+                ":response_status": response.map(|response| response.status as i64),
+                ":response_headers": response_headers,
+                ":response_finish_reason": response
+                    .and_then(|response| response.finish_reason)
+                    .map(|reason| reason.as_str()),
+                ":response_text": response.and_then(|response| response.text.clone()),
+                ":response_thinking": response.and_then(|response| response.thinking.clone()),
+                ":response_ttft_ms": response
+                    .and_then(|response| response.ttft_ms)
+                    .map(|value| value as i64),
+                ":response_latency_ms": response
+                    .and_then(|response| response.latency_ms)
+                    .map(|value| value as i64),
+                ":response_error": response.and_then(|response| response.error.clone()),
+                ":input_tokens": input.usage.input_tokens as i64,
+                ":output_tokens": input.usage.output_tokens as i64,
+                ":cache_read_tokens": input.usage.cache_read_tokens as i64,
+                ":cache_write_tokens": input.usage.cache_write_tokens as i64,
+                ":reasoning_tokens": input.usage.reasoning_tokens as i64,
+                ":cost_usd": input.cost_usd,
+                ":cost_known": input.cost_known as i64,
+                ":started_at": input.started_at,
+                ":ended_at": input.ended_at,
+                ":duration_ms": duration_ms.map(|value| value as i64),
+                ":error": input.error,
+                ":metadata": metadata,
+            },
+        )?;
+
+        for call in &input.tool_calls {
+            transaction.execute(
+                "INSERT OR REPLACE INTO tool_calls
+                   (id, session_id, step_id, provider_tool_call_id, name, status, input, output,
+                    error, file_paths, started_at, ended_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    call.id,
+                    session_id,
+                    id,
+                    call.provider_tool_call_id,
+                    call.name,
+                    call.status.as_str(),
+                    call.input.as_ref().map(serde_json::to_string).transpose()?,
+                    call.output
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?,
+                    call.error,
+                    serde_json::to_string(&call.file_paths)?,
+                    call.started_at,
+                    call.ended_at,
+                ],
+            )?;
+        }
+
+        transaction.execute(
+            "UPDATE sessions SET
+               step_count = step_count + 1,
+               model_call_count = model_call_count + ?1,
+               tool_call_count = tool_call_count + ?2,
+               input_tokens = input_tokens + ?3,
+               output_tokens = output_tokens + ?4,
+               cache_read_tokens = cache_read_tokens + ?5,
+               cache_write_tokens = cache_write_tokens + ?6,
+               reasoning_tokens = reasoning_tokens + ?7,
+               total_cost_usd = total_cost_usd + ?8,
+               unknown_cost_calls = unknown_cost_calls + ?9,
+               error_count = error_count + ?10,
+               model = COALESCE(?11, model)
+             WHERE id = ?12",
+            params![
+                model_call_increment,
+                input.tool_calls.len() as i64,
+                input.usage.input_tokens as i64,
+                input.usage.output_tokens as i64,
+                input.usage.cache_read_tokens as i64,
+                input.usage.cache_write_tokens as i64,
+                input.usage.reasoning_tokens as i64,
+                input.cost_usd.unwrap_or(0.0),
+                unknown_cost_increment,
+                error_increment,
+                input.model,
+                session_id,
+            ],
+        )?;
+
+        transaction.commit()?;
+        drop(connection);
+
+        self.get_step(&id)?
+            .ok_or_else(|| DaemonError::other("observed step disappeared after insert"))
+    }
+
+    /// Attach a tool result that arrived after its tool call was stored.
+    pub fn update_tool_call_output(
+        &self,
+        session_id: &str,
+        provider_tool_call_id: &str,
+        output: Option<Value>,
+        error: Option<String>,
+        ended_at: Option<String>,
+    ) -> Result<bool> {
+        let status = if error.is_some() {
+            ToolCallStatus::Failed
+        } else {
+            ToolCallStatus::Completed
+        };
+        let output = output.as_ref().map(serde_json::to_string).transpose()?;
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE tool_calls SET output = ?1, error = ?2, status = ?3, ended_at = ?4
+             WHERE session_id = ?5 AND provider_tool_call_id = ?6",
+            params![
+                output,
+                error,
+                status.as_str(),
+                ended_at,
+                session_id,
+                provider_tool_call_id,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Mark an observed flight as finished and keep its latest log timestamp.
+    pub fn finish_observed_session(&self, session_id: &str, ended_at: &str) -> Result<()> {
+        let Some(session) = self.get_session(session_id)? else {
+            return Ok(());
+        };
+        let duration_ms = duration_between(&session.started_at, ended_at);
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE sessions SET status = 'completed', ended_at = ?1, duration_ms = ?2
+             WHERE id = ?3 AND source IN ('log_watch', 'hook_otel')",
+            params![ended_at, duration_ms, session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Reopen an observed flight when its log starts growing again.
+    pub fn mark_observed_active(&self, session_id: &str) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE sessions SET status = 'active', ended_at = NULL, duration_ms = NULL
+             WHERE id = ?1 AND source IN ('log_watch', 'hook_otel')",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Fill in session details that only become clear after a log is parsed.
+    pub fn update_observed_session(
+        &self,
+        session_id: &str,
+        title: Option<&str>,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE sessions SET
+               title = COALESCE(?1, title),
+               workspace_path = COALESCE(?2, workspace_path),
+               git_branch = COALESCE(?3, git_branch),
+               model = COALESCE(?4, model)
+             WHERE id = ?5 AND source IN ('log_watch', 'hook_otel')",
+            params![title, workspace_path, git_branch, model, session_id],
+        )?;
+        Ok(())
     }
 
     pub fn get_step(&self, id: &str) -> Result<Option<Step>> {
@@ -1158,6 +1443,8 @@ fn detected_from_str(value: DetectedFrom) -> &'static str {
         DetectedFrom::Wrapper => "wrapper",
         DetectedFrom::Manual => "manual",
         DetectedFrom::Demo => "demo",
+        DetectedFrom::LogWatch => "log_watch",
+        DetectedFrom::Hook => "hook",
         DetectedFrom::Unknown => "unknown",
     }
 }
@@ -1168,6 +1455,8 @@ fn parse_detected_from(value: &str) -> Option<DetectedFrom> {
         "wrapper" => Some(DetectedFrom::Wrapper),
         "manual" => Some(DetectedFrom::Manual),
         "demo" => Some(DetectedFrom::Demo),
+        "log_watch" => Some(DetectedFrom::LogWatch),
+        "hook" => Some(DetectedFrom::Hook),
         "unknown" => Some(DetectedFrom::Unknown),
         _ => None,
     }

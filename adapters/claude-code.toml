@@ -1,0 +1,21 @@
+schema_version = 1
+id = "claude-code"
+name = "Claude Code"
+verified = false
+docs_url = "https://docs.claude.com/en/docs/claude-code/overview"
+capture = ["log_watch", "hook_otel"]
+
+[detect]
+command = "claude"
+version_args = ["--version"]
+
+[log_watch]
+roots = ["~/.claude/projects"]
+include = ["**/*.jsonl"]
+parser = "claude-code-jsonl"
+verified = false
+
+[hook_otel]
+otlp_http = false
+hooks = ["session_start", "tool_call", "session_end"]
+verified = false

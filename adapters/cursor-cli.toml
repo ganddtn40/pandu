@@ -1,0 +1,16 @@
+schema_version = 1
+id = "cursor-cli"
+name = "Cursor CLI"
+verified = false
+docs_url = "https://cursor.com/docs/cli/overview"
+capture = ["log_watch"]
+
+[detect]
+command = "cursor-agent"
+version_args = ["--version"]
+
+[log_watch]
+roots = ["~/.cursor/chats"]
+include = ["**/*.json"]
+parser = "generic-json"
+verified = false

@@ -1,0 +1,23 @@
+schema_version = 1
+id = "antigravity"
+name = "Antigravity / Gemini CLI"
+verified = false
+docs_url = "https://github.com/google-gemini/gemini-cli"
+capture = ["proxy", "log_watch"]
+
+[detect]
+command = "gemini"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["gemini"]
+base_url_env = ["GOOGLE_GEMINI_BASE_URL"]
+api_key_env = ["GEMINI_API_KEY"]
+setup_note = "Set GOOGLE_GEMINI_BASE_URL to Cockpit and use a local placeholder key."
+verified = false
+
+[log_watch]
+roots = ["~/.gemini/tmp"]
+include = ["**/chats/*.json"]
+parser = "gemini-cli-json"
+verified = false

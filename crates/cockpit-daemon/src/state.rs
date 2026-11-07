@@ -3,9 +3,12 @@ use std::time::Instant;
 
 use reqwest::redirect::Policy;
 
+use crate::adapters;
 use crate::config::Config;
 use crate::error::Result;
 use crate::live::LiveBus;
+use crate::logwatch::LogWatcher;
+use crate::pairing::PairingManager;
 use crate::recorder::Recorder;
 use crate::sessions::SessionManager;
 use crate::store::Store;
@@ -17,6 +20,9 @@ pub struct AppState {
     pub live: Arc<LiveBus>,
     pub sessions: Arc<SessionManager>,
     pub recorder: Arc<Recorder>,
+    pub adapters: Arc<cockpit_core::adapter::AdapterRegistry>,
+    pub logwatch: Arc<LogWatcher>,
+    pub pairing: Arc<PairingManager>,
     pub client: reqwest::Client,
     pub started_at: Instant,
 }
@@ -28,6 +34,16 @@ impl AppState {
         let live = LiveBus::new(store.clone(), initial_sequence);
         let sessions = SessionManager::new(store.clone(), live.clone(), config.session_idle_ms);
         let recorder = Recorder::new(store.clone(), live.clone());
+        let adapters = Arc::new(adapters::load_registry_with(
+            &config.home,
+            config.builtin_adapters,
+        ));
+        let logwatch = Arc::new(LogWatcher::new(
+            store.clone(),
+            adapters.clone(),
+            live.clone(),
+        ));
+        let pairing = PairingManager::new();
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .connect_timeout(std::time::Duration::from_secs(30))
@@ -40,6 +56,9 @@ impl AppState {
             live,
             sessions,
             recorder,
+            adapters,
+            logwatch,
+            pairing,
             client,
             started_at: Instant::now(),
         })

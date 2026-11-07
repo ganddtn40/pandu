@@ -13,6 +13,7 @@ use tower_http::trace::TraceLayer;
 use crate::api;
 use crate::config::Config;
 use crate::error::{DaemonError, Result};
+use crate::logwatch;
 use crate::proxy::proxy_handler;
 use crate::state::AppState;
 use crate::ui;
@@ -29,6 +30,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/end", post(api::end_session))
         .route("/steps/{id}", get(api::get_step))
         .route("/settings", get(api::get_settings).put(api::put_settings))
+        .route("/adapters", get(api::list_adapters))
+        .route("/adapters/{id}", get(api::get_adapter))
+        .route("/logwatch", get(api::log_watch_status))
+        .route("/logwatch/scan", post(api::scan_log_watch))
+        .route("/pair/code", post(api::pair_code))
+        .route("/pair/claim", post(api::pair_claim))
+        .route("/pair/status", get(api::pair_status))
         .route("/demo/seed", post(api::seed_demo))
         .route("/live", get(api::live))
         .fallback(api::not_found)
@@ -160,6 +168,12 @@ async fn serve_on(
 ) -> Result<()> {
     let router = build_router(state.clone());
     let sweeper = tokio::spawn(sweep_sessions(state.clone()));
+    let watcher = state.config.log_watch.then(|| {
+        tokio::spawn(logwatch::watch_loop(
+            state.logwatch.clone(),
+            Duration::from_millis(state.config.log_watch_interval_ms.max(250)),
+        ))
+    });
 
     let graceful = async move {
         tokio::select! {
@@ -173,6 +187,9 @@ async fn serve_on(
         .await;
 
     sweeper.abort();
+    if let Some(watcher) = watcher {
+        watcher.abort();
+    }
     state.sessions.shutdown();
 
     result.map_err(DaemonError::from)

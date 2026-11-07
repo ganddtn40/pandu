@@ -1,0 +1,23 @@
+schema_version = 1
+id = "opencode"
+name = "OpenCode"
+verified = false
+docs_url = "https://opencode.ai/docs/"
+capture = ["proxy", "log_watch"]
+
+[detect]
+command = "opencode"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["openai-chat", "anthropic"]
+base_url_env = ["OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"]
+api_key_env = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+setup_note = "Point the OpenAI or Anthropic base URL at Cockpit and keep a local placeholder key."
+verified = false
+
+[log_watch]
+roots = ["~/.local/share/opencode/storage"]
+include = ["**/*.json"]
+parser = "generic-json"
+verified = false

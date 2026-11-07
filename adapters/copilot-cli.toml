@@ -1,0 +1,16 @@
+schema_version = 1
+id = "copilot-cli"
+name = "GitHub Copilot CLI"
+verified = false
+docs_url = "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli"
+capture = ["log_watch"]
+
+[detect]
+command = "copilot"
+version_args = ["--version"]
+
+[log_watch]
+roots = ["~/.copilot/session-state"]
+include = ["**/*.jsonl"]
+parser = "generic-jsonl"
+verified = false

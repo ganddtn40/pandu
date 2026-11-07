@@ -1,0 +1,17 @@
+schema_version = 1
+id = "pi"
+name = "Pi"
+verified = false
+docs_url = "https://github.com/badlogic/pi-mono"
+capture = ["proxy"]
+
+[detect]
+command = "pi"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["openai-chat"]
+base_url_env = ["OPENAI_BASE_URL"]
+api_key_env = ["OPENAI_API_KEY"]
+setup_note = "Point the OpenAI-compatible base URL at Cockpit before starting Pi."
+verified = false

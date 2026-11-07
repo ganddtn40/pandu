@@ -7,6 +7,7 @@ pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 4319;
 pub const DEFAULT_SESSION_IDLE_MS: u64 = 30 * 60 * 1000;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+pub const DEFAULT_LOG_WATCH_INTERVAL_MS: u64 = 2_000;
 pub const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
 pub const PROXY_KEY_SENTINEL: &str = "cockpit-proxy";
 
@@ -35,6 +36,9 @@ pub struct Config {
     pub allowed_origins: Vec<String>,
     pub session_idle_ms: u64,
     pub max_body_bytes: usize,
+    pub log_watch: bool,
+    pub log_watch_interval_ms: u64,
+    pub builtin_adapters: bool,
     pub demo_mode: bool,
 }
 
@@ -125,6 +129,28 @@ impl Config {
             })
             .unwrap_or(false);
 
+        let log_watch = take(&mut env, "COCKPIT_LOG_WATCH")
+            .map(|value| {
+                !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                )
+            })
+            .unwrap_or(true);
+        let log_watch_interval_ms = parse_u64(
+            take(&mut env, "COCKPIT_LOG_WATCH_INTERVAL_MS"),
+            DEFAULT_LOG_WATCH_INTERVAL_MS,
+            "COCKPIT_LOG_WATCH_INTERVAL_MS",
+        )?;
+        let builtin_adapters = take(&mut env, "COCKPIT_BUILTIN_ADAPTERS")
+            .map(|value| {
+                !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                )
+            })
+            .unwrap_or(true);
+
         let anthropic_version = take(&mut env, "COCKPIT_ANTHROPIC_VERSION")
             .unwrap_or_else(|| DEFAULT_ANTHROPIC_VERSION.to_string());
 
@@ -149,6 +175,9 @@ impl Config {
             allowed_origins,
             session_idle_ms,
             max_body_bytes,
+            log_watch,
+            log_watch_interval_ms,
+            builtin_adapters,
             demo_mode,
         })
     }
@@ -177,6 +206,11 @@ impl Config {
             allowed_origins: Vec::new(),
             session_idle_ms: DEFAULT_SESSION_IDLE_MS,
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            // Tests must never walk the developer's home directory. A real
+            // daemon starts with log watching on.
+            log_watch: false,
+            log_watch_interval_ms: DEFAULT_LOG_WATCH_INTERVAL_MS,
+            builtin_adapters: true,
             demo_mode: false,
         }
     }
@@ -234,6 +268,8 @@ mod tests {
         assert_eq!(config.openai.base_url, "https://api.openai.com");
         assert_eq!(config.anthropic.version, DEFAULT_ANTHROPIC_VERSION);
         assert_eq!(config.max_body_bytes, DEFAULT_MAX_BODY_BYTES);
+        assert!(config.log_watch);
+        assert_eq!(config.log_watch_interval_ms, DEFAULT_LOG_WATCH_INTERVAL_MS);
     }
 
     #[test]

@@ -263,6 +263,97 @@ pub async fn seed_demo(State(state): State<AppState>) -> Result<Json<Value>, Api
     })))
 }
 
+/// Every adapter, its install status, and any file that failed to load.
+pub async fn list_adapters(State(state): State<AppState>) -> Json<Value> {
+    let statuses = crate::adapters::statuses(&state.adapters);
+    let installed = statuses.iter().filter(|status| status.installed).count();
+    let verified = statuses.iter().filter(|status| status.verified).count();
+    Json(json!({
+        "adapters": statuses,
+        "issues": state.adapters.issues(),
+        "installed": installed,
+        "verified": verified,
+        "total": statuses.len(),
+        "logWatch": state.logwatch.status(),
+        "logWatchEnabled": state.config.log_watch,
+    }))
+}
+
+/// One adapter, including its full TOML data and detection result.
+pub async fn get_adapter(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let adapter = state
+        .adapters
+        .get(&id)
+        .ok_or_else(|| ApiError::not_found("That adapter does not exist."))?;
+    Ok(Json(json!({
+        "adapter": adapter,
+        "status": crate::adapters::status_for(adapter),
+    })))
+}
+
+/// Run one read-only log-watch pass right now. The UI uses this after the user
+/// changes an adapter; the background watcher keeps polling on its own.
+pub async fn scan_log_watch(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let watcher = state.logwatch.clone();
+    let status = tokio::task::spawn_blocking(move || watcher.scan())
+        .await
+        .map_err(|error| ApiError::internal(format!("The log scan could not run: {error}")))?;
+    Ok(Json(json!({ "status": status })))
+}
+
+pub async fn log_watch_status(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "enabled": state.config.log_watch,
+        "status": state.logwatch.status(),
+    }))
+}
+
+/// Issue a short-lived pairing code for the phone companion.
+pub async fn pair_code(State(state): State<AppState>) -> Json<Value> {
+    let issued = state.pairing.issue_code();
+    Json(json!({
+        "code": issued.code,
+        "expiresAt": issued.expires_at,
+        "expiresInSeconds": issued.expires_in_seconds,
+        "attemptsRemaining": issued.attempts_remaining,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairClaim {
+    pub code: String,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+pub async fn pair_claim(
+    State(state): State<AppState>,
+    Json(body): Json<PairClaim>,
+) -> Result<Json<Value>, ApiError> {
+    let claimed = state
+        .pairing
+        .claim(&body.code, body.device_name.as_deref())
+        .map_err(|error| {
+            ApiError::new(StatusCode::BAD_REQUEST, "pairing_failed", error.to_string())
+        })?;
+    Ok(Json(json!({
+        "token": claimed.token,
+        "deviceName": claimed.device_name,
+        "claimedAt": claimed.claimed_at,
+    })))
+}
+
+pub async fn pair_status(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "status": state.pairing.status(),
+        "devices": state.pairing.paired_devices(),
+    }))
+}
+
 pub async fn not_found() -> Response {
     ApiError::not_found("No Cockpit API route matches this path.").into_response()
 }

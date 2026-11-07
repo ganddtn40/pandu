@@ -5,6 +5,7 @@
 //! usage, cost, redaction, SSE observation, and proxy route parsing. The
 //! daemon and desktop app build on it.
 
+pub mod adapter;
 pub mod agent;
 pub mod collector;
 pub mod cost;

@@ -1,0 +1,23 @@
+schema_version = 1
+id = "goose"
+name = "Goose"
+verified = false
+docs_url = "https://block.github.io/goose/docs/"
+capture = ["proxy", "log_watch"]
+
+[detect]
+command = "goose"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["openai-chat"]
+base_url_env = ["OPENAI_BASE_URL"]
+api_key_env = ["OPENAI_API_KEY"]
+setup_note = "Use an OpenAI-compatible provider whose base URL points at Cockpit."
+verified = false
+
+[log_watch]
+roots = ["~/.local/share/goose/sessions"]
+include = ["**/*.jsonl"]
+parser = "generic-jsonl"
+verified = false

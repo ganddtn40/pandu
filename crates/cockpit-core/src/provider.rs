@@ -53,6 +53,8 @@ pub enum DetectedFrom {
     Wrapper,
     Manual,
     Demo,
+    LogWatch,
+    Hook,
     #[default]
     Unknown,
 }

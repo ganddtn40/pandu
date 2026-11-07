@@ -44,6 +44,8 @@ pub enum SessionSource {
     Proxy,
     Demo,
     Manual,
+    LogWatch,
+    HookOtel,
 }
 
 impl SessionSource {
@@ -52,6 +54,8 @@ impl SessionSource {
             Self::Proxy => "proxy",
             Self::Demo => "demo",
             Self::Manual => "manual",
+            Self::LogWatch => "log_watch",
+            Self::HookOtel => "hook_otel",
         }
     }
 
@@ -60,6 +64,8 @@ impl SessionSource {
             "proxy" => Some(Self::Proxy),
             "demo" => Some(Self::Demo),
             "manual" => Some(Self::Manual),
+            "log_watch" => Some(Self::LogWatch),
+            "hook_otel" => Some(Self::HookOtel),
             _ => None,
         }
     }

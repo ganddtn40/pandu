@@ -1,0 +1,23 @@
+schema_version = 1
+id = "qwen-code"
+name = "Qwen Code"
+verified = false
+docs_url = "https://github.com/QwenLM/qwen-code"
+capture = ["proxy", "log_watch"]
+
+[detect]
+command = "qwen"
+version_args = ["--version"]
+
+[proxy]
+protocols = ["openai-chat"]
+base_url_env = ["OPENAI_BASE_URL"]
+api_key_env = ["OPENAI_API_KEY"]
+setup_note = "Use an OpenAI-compatible endpoint whose base URL points at Cockpit."
+verified = false
+
+[log_watch]
+roots = ["~/.qwen/tmp"]
+include = ["**/chats/*.json"]
+parser = "gemini-cli-json"
+verified = false

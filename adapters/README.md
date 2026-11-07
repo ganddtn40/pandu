@@ -5,10 +5,10 @@ environment variables, and where its local session files live. They are
 data-driven TOML files so adding an agent is a one-file pull request, not a
 daemon change.
 
-> **Status:** the loader and shipped adapters land in Phase 2. This document is
-> the contract those files will follow. Every adapter starts with
-> `verified = false` until its commands and paths are checked against current
-> vendor documentation.
+> **Status:** the loader and all 15 adapters ship in 0.2.0. Built-ins are
+> embedded in the binary; a user can add or override one with a TOML file in
+> `<home>/adapters/`. Every adapter starts with `verified = false` until its
+> commands and paths are checked against current vendor documentation.
 
 ## Principles
 
@@ -89,14 +89,30 @@ verified = false
 | `log_watch.parser` | if log-watch | Must exist in the daemon's parser registry |
 | `hook_otel` | if hook | At least one capability |
 
-Paths are expanded with `~` and `${VAR}` only. Adapter files cannot run
-commands, read files, or make network calls. `detect.command` is executed by the
-daemon with a timeout and no shell.
+Path expansion happens in the daemon: `~` and `${VAR}` only. Adapter files
+cannot run commands, read files, or make network calls. `detect.command` is
+looked up on `PATH` by the daemon; no shell is involved.
 
-## Planned adapters
+## Parser registry
 
-The following adapters ship in Phase 2. Capture modes are provisional until
-verified against current vendor docs.
+`log_watch.parser` must be one of the parsers compiled into the daemon:
+
+| Parser | Format |
+| --- | --- |
+| `claude-code-jsonl` | Claude Code JSONL transcripts |
+| `codex-jsonl` | Codex CLI JSONL rollouts |
+| `gemini-cli-json` | Gemini CLI session JSON |
+| `generic-jsonl` | One record per line; OpenAI-style roles or wrappers |
+| `generic-json` | A whole-file session object or record array |
+
+An unknown parser name is rejected at load time and reported as an adapter
+issue; it never reaches the watcher.
+
+## Shipped adapters
+
+The following adapters ship with 0.2.0. Capture modes are provisional until
+verified against current vendor docs. `cockpit doctor` lists installed and
+verified counts; the API returns the same status per adapter.
 
 | Agent | File | Planned capture | Verified |
 | --- | --- | --- | --- |

@@ -28,25 +28,26 @@ come back without reopening old decisions.
 
 ### Capture
 
-- [ ] Proxy mode: OpenAI Chat + Responses, Anthropic Messages, Gemini
+- [x] Proxy mode: OpenAI Chat + Responses, Anthropic Messages, Gemini
       `generateContent`, OpenAI-compatible endpoints
-- [ ] Unbuffered SSE passthrough
-- [ ] Log-watch mode: read-only, observe-only, clearly labeled
+- [x] Unbuffered SSE passthrough
+- [x] Log-watch mode: read-only, observe-only, clearly labeled
 - [ ] Hook/OTel mode where supported
-- [ ] TOML adapters for OpenCode, Claude Code, Codex CLI, Cursor CLI, GitHub
+- [x] TOML adapters for OpenCode, Claude Code, Codex CLI, Cursor CLI, GitHub
       Copilot CLI, Antigravity/Gemini CLI, Cline, Roo/Kilo Code, Aider, Goose,
       Crush, Pi, OpenHands, Qwen Code, Amp
-- [ ] Adapter `verified` flag and `doctor` drift checks
+- [x] Adapter `verified` flag, surfaced by the API and `cockpit doctor`
+- [ ] Adapter drift checks against current vendor docs
 
 ### Trust and safety
 
 - [ ] Seven built-in guard rules
 - [ ] Budget policies with warn/pause enforcement
 - [ ] Approvals API and countdown
-- [ ] Redaction before storage; forwarded bytes untouched
+- [x] Redaction before storage; forwarded bytes untouched
 - [ ] Git snapshots with a temporary index; graceful no-git fallback
-- [ ] Fail-open everywhere: a Cockpit failure never breaks an agent
-- [ ] Loopback-only by default; hashed pairing codes and device tokens
+- [x] Fail-open everywhere: a Cockpit failure never breaks an agent
+- [x] Loopback-only by default; hashed pairing codes and device tokens
 
 ### App and UI
 
@@ -71,14 +72,14 @@ come back without reopening old decisions.
 
 ### Quality gates
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace`
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace`
 - [ ] `cargo deny check`
-- [ ] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
+- [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction
 - [ ] Guard and budget tests
-- [ ] Adapter parser tests on fixtures
+- [x] Adapter parser tests on fixtures
 - [ ] Crash-safe SQLite tests
 - [ ] CI matrix on Windows, macOS, Linux
 - [ ] Performance: binary < 12 MB, idle RAM < 40 MB, startup < 300 ms, UI JS

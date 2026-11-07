@@ -1,0 +1,16 @@
+schema_version = 1
+id = "amp"
+name = "Amp"
+verified = false
+docs_url = "https://ampcode.com/manual"
+capture = ["log_watch"]
+
+[detect]
+command = "amp"
+version_args = ["--version"]
+
+[log_watch]
+roots = ["~/.amp"]
+include = ["**/*.json"]
+parser = "generic-json"
+verified = false

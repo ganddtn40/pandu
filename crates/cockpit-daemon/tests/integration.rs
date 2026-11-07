@@ -442,6 +442,200 @@ async fn routes_gemini_paths_and_replaces_the_google_key() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn api_lists_adapters_and_pairs_a_device() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let adapters: Value = client
+        .get(format!("http://{}/api/adapters", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(adapters["total"], 15);
+    assert_eq!(adapters["verified"], 0);
+    assert_eq!(adapters["adapters"].as_array().unwrap().len(), 15);
+    assert!(adapters["issues"].as_array().unwrap().is_empty());
+    assert_eq!(adapters["logWatchEnabled"], false);
+
+    let one: Value = client
+        .get(format!("http://{}/api/adapters/opencode", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(one["adapter"]["id"], "opencode");
+    assert_eq!(one["status"]["verified"], false);
+    assert!(one["adapter"]["logWatch"]["parser"].is_string());
+
+    let missing = client
+        .get(format!("http://{}/api/adapters/nope", daemon.addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let issued: Value = client
+        .post(format!("http://{}/api/pair/code", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = issued["code"].as_str().unwrap();
+    assert_eq!(code.len(), 6);
+    assert!(code.chars().all(|character| character.is_ascii_digit()));
+    assert_eq!(issued["expiresInSeconds"], 300);
+
+    let claimed: Value = client
+        .post(format!("http://{}/api/pair/claim", daemon.addr))
+        .json(&json!({ "code": code, "deviceName": "Test phone" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed["deviceName"], "Test phone");
+    assert_eq!(claimed["token"].as_str().unwrap().len(), 64);
+
+    let reused = client
+        .post(format!("http://{}/api/pair/claim", daemon.addr))
+        .json(&json!({ "code": code }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reused.status(), StatusCode::BAD_REQUEST);
+
+    let status: Value = client
+        .get(format!("http://{}/api/pair/status", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["status"]["active"], false);
+    assert_eq!(status["devices"].as_array().unwrap().len(), 1);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_user_adapter_and_a_log_scan_create_an_observed_flight() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let logs = home.path().join("logs");
+    let adapters = home.path().join("adapters");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::create_dir_all(&adapters).unwrap();
+    std::fs::write(
+        logs.join("session.jsonl"),
+        concat!(
+            "{\"role\":\"user\",\"content\":\"Fix the login redirect\",\"timestamp\":\"2020-01-01T10:00:00Z\"}\n",
+            "{\"role\":\"assistant\",\"model\":\"gpt-4.1\",\"content\":\"Done.\",\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20},\"timestamp\":\"2020-01-01T10:00:02Z\"}\n",
+        ),
+    )
+    .unwrap();
+    let root = logs.display().to_string().replace('\\', "/");
+    std::fs::write(
+        adapters.join("test-agent.toml"),
+        format!(
+            r#"
+schema_version = 1
+id = "test-agent"
+name = "Test Agent"
+verified = false
+docs_url = "https://example.com/docs"
+capture = ["log_watch"]
+
+[detect]
+command = "test-agent"
+
+[log_watch]
+roots = ["{root}"]
+include = ["**/*.jsonl"]
+parser = "generic-jsonl"
+"#
+        ),
+    )
+    .unwrap();
+
+    let mut config = config(home.path(), mock.addr);
+    config.builtin_adapters = false;
+    let daemon = cockpit_daemon::spawn(config).await.unwrap();
+    let client = reqwest::Client::new();
+
+    let scan: Value = client
+        .post(format!("http://{}/api/logwatch/scan", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(scan["status"]["lastScanSteps"], 1);
+    assert_eq!(scan["status"]["filesTracked"], 1);
+
+    let sessions: Value = client
+        .get(format!("http://{}/api/sessions", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session = sessions["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["source"] == "log_watch")
+        .expect("an observed flight");
+    assert_eq!(session["captureMode"], "log_watch");
+    assert_eq!(session["title"], "Fix the login redirect");
+    assert_eq!(session["sourceLabel"], "Observed from logs · Test Agent");
+    assert_eq!(session["status"], "completed");
+
+    let steps: Value = client
+        .get(format!(
+            "http://{}/api/sessions/{}/steps",
+            daemon.addr,
+            session["id"].as_str().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let steps = steps["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0]["response"]["text"], "Done.");
+    assert_eq!(steps[0]["usage"]["inputTokens"], 100);
+    assert_eq!(steps[0]["usage"]["outputTokens"], 20);
+    assert_eq!(steps[0]["costKnown"], true);
+
+    let again: Value = client
+        .post(format!("http://{}/api/logwatch/scan", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(again["status"]["lastScanSteps"], 0);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_seeds_demo_flights_and_serves_settings() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();
