@@ -1,6 +1,6 @@
 # Cockpit 0.2.0 — Rewrite decision record
 
-Status: Phase 2 complete
+Status: Phase 3 complete
 Branch: `rewrite`
 Baseline: `main` at `1d65df2` (`feat: release Cockpit 0.1.0`)
 
@@ -77,7 +77,9 @@ three capture modes need:
 - `git_snapshots`, `file_changes`
 - `devices`, `pairing_tokens`
 - `live_events`
-- `replay_forks`
+
+Replay forks are not part of 0.2.0, so there is no `replay_forks` table yet. The
+replay response keeps an empty `forks` field so older clients still parse it.
 
 Cut tables belong to the deferred features and are listed in
 `docs/ROADMAP.md`. Sessions gain explicit `capture_mode` (`proxy`, `log_watch`,
@@ -118,9 +120,10 @@ Per step, snapshot the workspace with a temporary `GIT_INDEX_FILE`:
 5. Store the patch and per-file changes in SQLite
 
 Hard limits stay: 500 files, 300,000 characters per file diff, 2,000,000
-characters per patch. The user's index, HEAD, branches, and reflog are never
-touched. No git binary means snapshots are skipped with a visible warning, not a
-failed flight.
+characters per patch, and a 30-second git timeout. The user's index, HEAD,
+branches, and reflog are never touched. No git binary or no repository means
+snapshots are skipped with a logged warning, not a failed flight; Phase 5
+surfaces that warning in the UI.
 
 ### 2.5 Pairing and remote access worth keeping
 
@@ -363,6 +366,42 @@ Performance mode setting.
   user's real API key.
 - 123 tests pass at the Phase 2 gate (4 CLI, 65 core, 47 daemon unit, 7
   integration); fmt and clippy with `-D warnings` are clean.
+
+### Phase 3 implementation notes
+
+- Guards and redaction share one pattern list in `cockpit-core`. A secret is
+  masked before storage; the forwarded bytes are never changed. Overlapping
+  patterns are both reported, matching 0.1.0 behavior.
+- Seven built-in guard rules are seeded idempotently: private key (pause), API
+  key (warn), destructive command (pause), exfiltration endpoint (pause), git
+  rewrite (warn), release command (warn), and instruction loop (warn).
+- Pauses wait on an in-memory, single-use approval broker. The default window is
+  120 s (`COCKPIT_GUARD_APPROVAL_MS`). Deny and expiry return 403
+  `guard_blocked`; a budget block returns 402 `budget_exceeded`. Every detector
+  fails open: a guard or budget error is logged and the request continues.
+- Budgets are local arithmetic over recorded spend. Warn policies raise one
+  event at 80% per period; pause policies use the same broker; block policies
+  stop the request. A project-scoped policy is accepted but never applies because
+  0.2.0 sessions carry no project id.
+- Git snapshots run with a throwaway `GIT_INDEX_FILE`: `git add -A`,
+  `git write-tree`, then `git commit-tree` with the previous snapshot as parent.
+  Snapshot commits are unreferenced, so the user's index, HEAD, branch, and
+  reflog stay byte-for-byte unchanged. Captures are serialized, time out after
+  30 s, and degrade to a logged warning outside a repository.
+- Snapshot limits are 500 files, 300,000 characters per file diff, and 2,000,000
+  characters per patch. Temporary index files are removed on every path.
+- `/api/sessions/{id}/replay` returns the flight, its steps, snapshot summaries,
+  and an empty `forks` list. `/api/snapshots/{id}` returns the full patch and
+  per-file changes. Forks remain deferred.
+- Guard, budget, replay, snapshot, and secret-scan routes are live:
+  `/api/guards/rules`, `/api/guards/rules/{id}`, `/api/guards/events`,
+  `/api/guards/events/{id}/decision`, `/api/budgets`, `/api/budgets/{id}`,
+  `/api/sessions/{id}/budgets`, `/api/sessions/{id}/replay`,
+  `/api/sessions/{id}/scan`, and `/api/snapshots/{id}`.
+- 147 tests pass at the Phase 3 gate (4 CLI, 75 core, 60 daemon unit, 8
+  integration). Snapshot tests assert that HEAD, the real index, and the reflog
+  are unchanged; proxy tests assert that guard and budget blocks never reach the
+  upstream provider. fmt and clippy with `-D warnings` are clean.
 
 ## 9. Toolchain status
 

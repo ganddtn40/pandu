@@ -41,11 +41,11 @@ come back without reopening old decisions.
 
 ### Trust and safety
 
-- [ ] Seven built-in guard rules
-- [ ] Budget policies with warn/pause enforcement
-- [ ] Approvals API and countdown
+- [x] Seven built-in guard rules
+- [x] Budget policies with warn/pause enforcement
+- [x] Approvals API and countdown
 - [x] Redaction before storage; forwarded bytes untouched
-- [ ] Git snapshots with a temporary index; graceful no-git fallback
+- [x] Git snapshots with a temporary index; graceful no-git fallback
 - [x] Fail-open everywhere: a Cockpit failure never breaks an agent
 - [x] Loopback-only by default; hashed pairing codes and device tokens
 
@@ -78,7 +78,7 @@ come back without reopening old decisions.
 - [ ] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction
-- [ ] Guard and budget tests
+- [x] Guard and budget tests
 - [x] Adapter parser tests on fixtures
 - [ ] Crash-safe SQLite tests
 - [ ] CI matrix on Windows, macOS, Linux

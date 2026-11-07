@@ -3,6 +3,11 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{SecondsFormat, Utc};
+use cockpit_core::guard::{
+    BudgetEnforcement, BudgetPeriod, BudgetPolicy, BudgetPolicyInput, BudgetPolicyPatch,
+    BudgetScope, GuardAction, GuardEvent, GuardEventListQuery, GuardEventStatus, GuardEvidence,
+    GuardRule, GuardRuleInput, GuardRuleKind, GuardRulePatch, GuardRuleSource, GuardSeverity,
+};
 use cockpit_core::model::{
     CaptureMode, CapturedRequest, CapturedResponse, FinishReason, LiveEvent, Session,
     SessionSource, SessionStatus, SessionTotals, Step, StepKind, StepStatus, StreamChunk,
@@ -10,6 +15,7 @@ use cockpit_core::model::{
 };
 use cockpit_core::provider::{AgentInfo, DetectedFrom, ProviderProtocol};
 use cockpit_core::redact::{CaptureLocation, RedactionRow};
+use cockpit_core::replay::{FileChangeType, ReplayFileChange, ReplaySnapshot, SnapshotKind};
 use cockpit_core::usage::TokenUsage;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -160,6 +166,92 @@ CREATE TABLE IF NOT EXISTS live_events (
 
 CREATE INDEX IF NOT EXISTS idx_live_events_at ON live_events(sequence DESC);
 
+CREATE TABLE IF NOT EXISTS guard_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'user',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 100,
+  config TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_guard_rules_priority ON guard_rules(priority, id);
+
+CREATE TABLE IF NOT EXISTS guard_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  step_id TEXT REFERENCES steps(id) ON DELETE CASCADE,
+  rule_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  status TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  command TEXT,
+  evidence TEXT NOT NULL DEFAULT '[]',
+  requested_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by TEXT,
+  resolution_note TEXT,
+  metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_guard_events_session ON guard_events(session_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_guard_events_status ON guard_events(status, requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS budget_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  period TEXT NOT NULL,
+  project_id TEXT,
+  session_id TEXT,
+  limit_usd REAL NOT NULL,
+  enforcement TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS git_snapshots (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  step_id TEXT REFERENCES steps(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  commit_sha TEXT,
+  parent_commit_sha TEXT,
+  branch TEXT,
+  worktree_path TEXT,
+  patch TEXT,
+  files_changed INTEGER NOT NULL DEFAULT 0,
+  insertions INTEGER NOT NULL DEFAULT 0,
+  deletions INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON git_snapshots(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS file_changes (
+  id TEXT PRIMARY KEY,
+  snapshot_id TEXT NOT NULL REFERENCES git_snapshots(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  old_path TEXT,
+  change_type TEXT NOT NULL,
+  additions INTEGER NOT NULL DEFAULT 0,
+  deletions INTEGER NOT NULL DEFAULT 0,
+  diff TEXT,
+  ai_authored INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_changes_snapshot ON file_changes(snapshot_id, path);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -233,6 +325,67 @@ pub struct ObservedStep {
     pub error: Option<String>,
     pub metadata: Option<Value>,
     pub tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewGuardEvent {
+    pub session_id: String,
+    pub step_id: Option<String>,
+    pub rule_id: String,
+    pub kind: GuardRuleKind,
+    pub action: GuardAction,
+    pub severity: GuardSeverity,
+    pub status: GuardEventStatus,
+    pub title: String,
+    pub description: String,
+    pub command: Option<String>,
+    pub evidence: Vec<GuardEvidence>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GuardEventPatch {
+    pub status: Option<GuardEventStatus>,
+    pub resolved_at: Option<String>,
+    pub resolved_by: Option<String>,
+    pub resolution_note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRedactionRow {
+    pub step_id: String,
+    pub rule_id: String,
+    pub label: String,
+    pub location: CaptureLocation,
+    pub occurrences: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewFileChange {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub change_type: FileChangeType,
+    pub additions: u64,
+    pub deletions: u64,
+    pub diff: Option<String>,
+    pub ai_authored: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewSnapshot {
+    pub session_id: String,
+    pub step_id: Option<String>,
+    pub kind: SnapshotKind,
+    pub commit_sha: Option<String>,
+    pub parent_commit_sha: Option<String>,
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+    pub patch: Option<String>,
+    pub files_changed: u64,
+    pub insertions: u64,
+    pub deletions: u64,
+    pub created_at: Option<String>,
+    pub file_changes: Vec<NewFileChange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1269,6 +1422,606 @@ impl Store {
         Ok(removed as u64)
     }
 
+    // ----- Guard rules -----------------------------------------------------
+
+    /// Insert a built-in rule once. Existing rows are left untouched so a user
+    /// can keep a built-in disabled or tuned across restarts.
+    pub fn seed_guard_rule(&self, id: &str, input: &GuardRuleInput) -> Result<bool> {
+        let now = now_iso();
+        let config = serde_json::to_string(&input.config)?;
+        let connection = self.lock()?;
+        let inserted = connection.execute(
+            "INSERT OR IGNORE INTO guard_rules
+               (id, name, description, kind, action, severity, source, enabled, priority, config,
+                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'builtin', ?7, ?8, ?9, ?10, ?10)",
+            params![
+                id,
+                input.name,
+                input.description,
+                input.kind.as_str(),
+                input.action.as_str(),
+                input.severity.as_str(),
+                input.enabled as i64,
+                input.priority as i64,
+                config,
+                now,
+            ],
+        )?;
+        Ok(inserted > 0)
+    }
+
+    pub fn list_guard_rules(&self) -> Result<Vec<GuardRule>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT {GUARD_RULE_COLUMNS} FROM guard_rules ORDER BY priority ASC, id ASC"
+        ))?;
+        let rows = statement.query_map([], row_to_guard_rule)?;
+        let mut rules = Vec::new();
+        for row in rows {
+            rules.push(row?);
+        }
+        Ok(rules)
+    }
+
+    pub fn get_guard_rule(&self, id: &str) -> Result<Option<GuardRule>> {
+        let connection = self.lock()?;
+        let rule = connection
+            .query_row(
+                &format!("SELECT {GUARD_RULE_COLUMNS} FROM guard_rules WHERE id = ?1"),
+                params![id],
+                row_to_guard_rule,
+            )
+            .optional()?;
+        Ok(rule)
+    }
+
+    pub fn create_guard_rule(
+        &self,
+        id: Option<&str>,
+        input: &GuardRuleInput,
+        source: GuardRuleSource,
+    ) -> Result<GuardRule> {
+        let id = id
+            .map(str::to_string)
+            .unwrap_or_else(cockpit_core::ids::create_id);
+        let now = now_iso();
+        let config = serde_json::to_string(&input.config)?;
+        {
+            let connection = self.lock()?;
+            connection.execute(
+                "INSERT INTO guard_rules
+                   (id, name, description, kind, action, severity, source, enabled, priority, config,
+                    created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+                params![
+                    id,
+                    input.name,
+                    input.description,
+                    input.kind.as_str(),
+                    input.action.as_str(),
+                    input.severity.as_str(),
+                    source.as_str(),
+                    input.enabled as i64,
+                    input.priority as i64,
+                    config,
+                    now,
+                ],
+            )?;
+        }
+        self.get_guard_rule(&id)?
+            .ok_or_else(|| DaemonError::other("guard rule disappeared after insert"))
+    }
+
+    pub fn update_guard_rule(&self, id: &str, patch: &GuardRulePatch) -> Result<Option<GuardRule>> {
+        let Some(mut rule) = self.get_guard_rule(id)? else {
+            return Ok(None);
+        };
+        if let Some(name) = &patch.name {
+            rule.name = name.clone();
+        }
+        if let Some(description) = &patch.description {
+            rule.description = description.clone();
+        }
+        if let Some(kind) = patch.kind {
+            rule.kind = kind;
+        }
+        if let Some(action) = patch.action {
+            rule.action = action;
+        }
+        if let Some(severity) = patch.severity {
+            rule.severity = severity;
+        }
+        if let Some(enabled) = patch.enabled {
+            rule.enabled = enabled;
+        }
+        if let Some(priority) = patch.priority {
+            rule.priority = priority;
+        }
+        if let Some(config) = &patch.config {
+            rule.config = config.clone();
+        }
+        rule.updated_at = Some(now_iso());
+        let config = serde_json::to_string(&rule.config)?;
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE guard_rules SET
+               name = ?1, description = ?2, kind = ?3, action = ?4, severity = ?5,
+               enabled = ?6, priority = ?7, config = ?8, updated_at = ?9
+             WHERE id = ?10",
+            params![
+                rule.name,
+                rule.description,
+                rule.kind.as_str(),
+                rule.action.as_str(),
+                rule.severity.as_str(),
+                rule.enabled as i64,
+                rule.priority as i64,
+                config,
+                rule.updated_at,
+                id,
+            ],
+        )?;
+        drop(connection);
+        self.get_guard_rule(id)
+    }
+
+    pub fn delete_guard_rule(&self, id: &str) -> Result<bool> {
+        let connection = self.lock()?;
+        let removed = connection.execute("DELETE FROM guard_rules WHERE id = ?1", params![id])?;
+        Ok(removed > 0)
+    }
+
+    // ----- Guard events ----------------------------------------------------
+
+    pub fn insert_guard_event(&self, input: NewGuardEvent) -> Result<GuardEvent> {
+        let id = cockpit_core::ids::create_id();
+        let requested_at = now_iso();
+        let evidence = serde_json::to_string(&input.evidence)?;
+        let metadata = input
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        {
+            let connection = self.lock()?;
+            connection.execute(
+                "INSERT INTO guard_events
+                   (id, session_id, step_id, rule_id, kind, action, severity, status, title,
+                    description, command, evidence, requested_at, metadata)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![
+                    id,
+                    input.session_id,
+                    input.step_id,
+                    input.rule_id,
+                    input.kind.as_str(),
+                    input.action.as_str(),
+                    input.severity.as_str(),
+                    input.status.as_str(),
+                    input.title,
+                    input.description,
+                    input.command,
+                    evidence,
+                    requested_at,
+                    metadata,
+                ],
+            )?;
+        }
+        self.get_guard_event(&id)?
+            .ok_or_else(|| DaemonError::other("guard event disappeared after insert"))
+    }
+
+    pub fn get_guard_event(&self, id: &str) -> Result<Option<GuardEvent>> {
+        let connection = self.lock()?;
+        let event = connection
+            .query_row(
+                &format!("SELECT {GUARD_EVENT_COLUMNS} FROM guard_events WHERE id = ?1"),
+                params![id],
+                row_to_guard_event,
+            )
+            .optional()?;
+        Ok(event)
+    }
+
+    pub fn list_guard_events(&self, query: &GuardEventListQuery) -> Result<Vec<GuardEvent>> {
+        let limit = if query.limit == 0 {
+            100
+        } else {
+            query.limit.min(1_000)
+        };
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT {GUARD_EVENT_COLUMNS} FROM guard_events
+             WHERE (?1 IS NULL OR session_id = ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR kind = ?3)
+             ORDER BY requested_at DESC, id DESC
+             LIMIT ?4"
+        ))?;
+        let rows = statement.query_map(
+            params![
+                query.session_id,
+                query.status.map(GuardEventStatus::as_str),
+                query.kind.map(GuardRuleKind::as_str),
+                limit,
+            ],
+            row_to_guard_event,
+        )?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
+    pub fn list_pending_guard_events(&self, session_id: Option<&str>) -> Result<Vec<GuardEvent>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT {GUARD_EVENT_COLUMNS} FROM guard_events
+             WHERE status = 'pending' AND (?1 IS NULL OR session_id = ?1)
+             ORDER BY requested_at ASC"
+        ))?;
+        let rows = statement.query_map(params![session_id], row_to_guard_event)?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
+    pub fn update_guard_event(
+        &self,
+        id: &str,
+        patch: &GuardEventPatch,
+    ) -> Result<Option<GuardEvent>> {
+        let Some(mut event) = self.get_guard_event(id)? else {
+            return Ok(None);
+        };
+        if let Some(status) = patch.status {
+            event.status = status;
+        }
+        if patch.resolved_at.is_some() {
+            event.resolved_at = patch.resolved_at.clone();
+        }
+        if patch.resolved_by.is_some() {
+            event.resolved_by = patch.resolved_by.clone();
+        }
+        if patch.resolution_note.is_some() {
+            event.resolution_note = patch.resolution_note.clone();
+        }
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE guard_events SET
+               status = ?1, resolved_at = ?2, resolved_by = ?3, resolution_note = ?4
+             WHERE id = ?5",
+            params![
+                event.status.as_str(),
+                event.resolved_at,
+                event.resolved_by,
+                event.resolution_note,
+                id,
+            ],
+        )?;
+        drop(connection);
+        self.get_guard_event(id)
+    }
+
+    /// Remove only rows produced by a historical rescan. Request-time findings
+    /// stay visible because they are part of the flight record.
+    pub fn delete_secret_scan_events(&self, session_id: &str) -> Result<u64> {
+        let connection = self.lock()?;
+        let removed = connection.execute(
+            "DELETE FROM guard_events
+             WHERE session_id = ?1
+               AND rule_id LIKE 'secret-scan:%'
+               AND status != 'pending'
+               AND COALESCE(json_extract(metadata, '$.source'), 'scan') = 'scan'",
+            params![session_id],
+        )?;
+        Ok(removed as u64)
+    }
+
+    // ----- Budgets ---------------------------------------------------------
+
+    pub fn list_budget_policies(&self) -> Result<Vec<BudgetPolicy>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT {BUDGET_COLUMNS} FROM budget_policies ORDER BY created_at ASC, id ASC"
+        ))?;
+        let rows = statement.query_map([], row_to_budget_policy)?;
+        let mut policies = Vec::new();
+        for row in rows {
+            policies.push(row?);
+        }
+        Ok(policies)
+    }
+
+    pub fn get_budget_policy(&self, id: &str) -> Result<Option<BudgetPolicy>> {
+        let connection = self.lock()?;
+        let policy = connection
+            .query_row(
+                &format!("SELECT {BUDGET_COLUMNS} FROM budget_policies WHERE id = ?1"),
+                params![id],
+                row_to_budget_policy,
+            )
+            .optional()?;
+        Ok(policy)
+    }
+
+    pub fn create_budget_policy(&self, input: &BudgetPolicyInput) -> Result<BudgetPolicy> {
+        let id = cockpit_core::ids::create_id();
+        let now = now_iso();
+        {
+            let connection = self.lock()?;
+            connection.execute(
+                "INSERT INTO budget_policies
+                   (id, name, scope, period, project_id, session_id, limit_usd, enforcement, enabled,
+                    created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![
+                    id,
+                    input.name,
+                    input.scope.as_str(),
+                    input.period.as_str(),
+                    input.project_id,
+                    input.session_id,
+                    input.limit_usd,
+                    input.enforcement.as_str(),
+                    input.enabled as i64,
+                    now,
+                ],
+            )?;
+        }
+        self.get_budget_policy(&id)?
+            .ok_or_else(|| DaemonError::other("budget policy disappeared after insert"))
+    }
+
+    pub fn update_budget_policy(
+        &self,
+        id: &str,
+        patch: &BudgetPolicyPatch,
+    ) -> Result<Option<BudgetPolicy>> {
+        let Some(mut policy) = self.get_budget_policy(id)? else {
+            return Ok(None);
+        };
+        if let Some(name) = &patch.name {
+            policy.name = name.clone();
+        }
+        if let Some(scope) = patch.scope {
+            policy.scope = scope;
+        }
+        if let Some(period) = patch.period {
+            policy.period = period;
+        }
+        if patch.project_id.is_some() {
+            policy.project_id = patch.project_id.clone();
+        }
+        if patch.session_id.is_some() {
+            policy.session_id = patch.session_id.clone();
+        }
+        if let Some(limit_usd) = patch.limit_usd {
+            policy.limit_usd = limit_usd;
+        }
+        if let Some(enforcement) = patch.enforcement {
+            policy.enforcement = enforcement;
+        }
+        if let Some(enabled) = patch.enabled {
+            policy.enabled = enabled;
+        }
+        policy.updated_at = now_iso();
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE budget_policies SET
+               name = ?1, scope = ?2, period = ?3, project_id = ?4, session_id = ?5,
+               limit_usd = ?6, enforcement = ?7, enabled = ?8, updated_at = ?9
+             WHERE id = ?10",
+            params![
+                policy.name,
+                policy.scope.as_str(),
+                policy.period.as_str(),
+                policy.project_id,
+                policy.session_id,
+                policy.limit_usd,
+                policy.enforcement.as_str(),
+                policy.enabled as i64,
+                policy.updated_at,
+                id,
+            ],
+        )?;
+        drop(connection);
+        self.get_budget_policy(id)
+    }
+
+    pub fn delete_budget_policy(&self, id: &str) -> Result<bool> {
+        let connection = self.lock()?;
+        let removed =
+            connection.execute("DELETE FROM budget_policies WHERE id = ?1", params![id])?;
+        Ok(removed > 0)
+    }
+
+    /// Total spend for a period. Project-scoped policies never apply in 0.2.0
+    /// because sessions do not carry a project id yet.
+    pub fn spend_since(&self, period_start: &str, project_id: Option<&str>) -> Result<f64> {
+        if project_id.is_some() {
+            return Ok(0.0);
+        }
+        let connection = self.lock()?;
+        let spend: f64 = connection.query_row(
+            "SELECT COALESCE(SUM(total_cost_usd), 0) FROM sessions WHERE started_at >= ?1",
+            params![period_start],
+            |row| row.get(0),
+        )?;
+        Ok(spend)
+    }
+
+    pub fn session_cost_usd(&self, session_id: &str) -> Result<f64> {
+        let connection = self.lock()?;
+        let spend: f64 = connection.query_row(
+            "SELECT COALESCE(total_cost_usd, 0) FROM sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )?;
+        Ok(spend)
+    }
+
+    // ----- Replay and redactions ------------------------------------------
+
+    pub fn list_recent_prompt_texts(&self, session_id: &str, limit: u32) -> Result<Vec<String>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT request_prompt_text FROM steps
+             WHERE session_id = ?1 AND request_prompt_text IS NOT NULL
+             ORDER BY seq DESC LIMIT ?2",
+        )?;
+        let rows =
+            statement.query_map(params![session_id, limit], |row| row.get::<_, String>(0))?;
+        let mut prompts = Vec::new();
+        for row in rows {
+            prompts.push(row?);
+        }
+        Ok(prompts)
+    }
+
+    pub fn list_session_redactions(&self, session_id: &str) -> Result<Vec<SessionRedactionRow>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT redactions.step_id, redactions.rule_id, redactions.label, redactions.location,
+                    redactions.occurrences
+             FROM redactions
+             INNER JOIN steps ON redactions.step_id = steps.id
+             WHERE steps.session_id = ?1",
+        )?;
+        let rows = statement.query_map(params![session_id], |row| {
+            Ok(SessionRedactionRow {
+                step_id: row.get(0)?,
+                rule_id: row.get(1)?,
+                label: row.get(2)?,
+                location: CaptureLocation::parse(&row.get::<_, String>(3)?)
+                    .unwrap_or(CaptureLocation::RequestBody),
+                occurrences: row.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        let mut redactions = Vec::new();
+        for row in rows {
+            redactions.push(row?);
+        }
+        Ok(redactions)
+    }
+
+    pub fn update_session_git(
+        &self,
+        session_id: &str,
+        branch: Option<&str>,
+        base_commit: Option<&str>,
+    ) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE sessions SET
+               git_branch = COALESCE(?1, git_branch),
+               git_base_commit = COALESCE(?2, git_base_commit)
+             WHERE id = ?3",
+            params![branch, base_commit, session_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_snapshot(&self, input: NewSnapshot) -> Result<ReplaySnapshot> {
+        let id = cockpit_core::ids::create_id();
+        let created_at = input.created_at.unwrap_or_else(now_iso);
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO git_snapshots
+               (id, session_id, step_id, kind, commit_sha, parent_commit_sha, branch,
+                worktree_path, patch, files_changed, insertions, deletions, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                id,
+                input.session_id,
+                input.step_id,
+                input.kind.as_str(),
+                input.commit_sha,
+                input.parent_commit_sha,
+                input.branch,
+                input.worktree_path,
+                input.patch,
+                input.files_changed as i64,
+                input.insertions as i64,
+                input.deletions as i64,
+                created_at,
+            ],
+        )?;
+        for change in &input.file_changes {
+            transaction.execute(
+                "INSERT INTO file_changes
+                   (id, snapshot_id, path, old_path, change_type, additions, deletions, diff,
+                    ai_authored)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    cockpit_core::ids::create_id(),
+                    id,
+                    change.path,
+                    change.old_path,
+                    change.change_type.as_str(),
+                    change.additions as i64,
+                    change.deletions as i64,
+                    change.diff,
+                    change.ai_authored.map(|value| value as i64),
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        drop(connection);
+        self.get_snapshot(&id)?
+            .ok_or_else(|| DaemonError::other("snapshot disappeared after insert"))
+    }
+
+    pub fn get_snapshot(&self, id: &str) -> Result<Option<ReplaySnapshot>> {
+        let connection = self.lock()?;
+        let snapshot = connection
+            .query_row(
+                &format!("SELECT {SNAPSHOT_COLUMNS} FROM git_snapshots WHERE id = ?1"),
+                params![id],
+                row_to_snapshot,
+            )
+            .optional()?;
+        Ok(snapshot)
+    }
+
+    pub fn list_snapshots(&self, session_id: &str) -> Result<Vec<ReplaySnapshot>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT {SNAPSHOT_COLUMNS} FROM git_snapshots
+             WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
+        ))?;
+        let rows = statement.query_map(params![session_id], row_to_snapshot)?;
+        let mut snapshots = Vec::new();
+        for row in rows {
+            snapshots.push(row?);
+        }
+        Ok(snapshots)
+    }
+
+    pub fn latest_snapshot(&self, session_id: &str) -> Result<Option<ReplaySnapshot>> {
+        Ok(self.list_snapshots(session_id)?.pop())
+    }
+
+    pub fn list_snapshot_file_changes(&self, snapshot_id: &str) -> Result<Vec<ReplayFileChange>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, snapshot_id, path, old_path, change_type, additions, deletions, diff,
+                    ai_authored
+             FROM file_changes WHERE snapshot_id = ?1 ORDER BY path ASC",
+        )?;
+        let rows = statement.query_map(params![snapshot_id], row_to_file_change)?;
+        let mut changes = Vec::new();
+        for row in rows {
+            changes.push(row?);
+        }
+        Ok(changes)
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
         self.connection
             .lock()
@@ -1434,6 +2187,113 @@ fn row_to_step(row: &rusqlite::Row<'_>) -> rusqlite::Result<Step> {
         duration_ms: row.get::<_, Option<i64>>(34)?.map(|value| value as u64),
         error: row.get(35)?,
         metadata: metadata.and_then(|value| serde_json::from_str(&value).ok()),
+    })
+}
+
+const GUARD_RULE_COLUMNS: &str = "id, name, description, kind, action, severity, source, enabled,
+    priority, config, created_at, updated_at";
+
+fn row_to_guard_rule(row: &rusqlite::Row<'_>) -> rusqlite::Result<GuardRule> {
+    let config: String = row.get(9)?;
+    Ok(GuardRule {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        kind: GuardRuleKind::parse(&row.get::<_, String>(3)?).unwrap_or(GuardRuleKind::Custom),
+        action: GuardAction::parse(&row.get::<_, String>(4)?).unwrap_or(GuardAction::Warn),
+        severity: GuardSeverity::parse(&row.get::<_, String>(5)?).unwrap_or(GuardSeverity::Medium),
+        source: GuardRuleSource::parse(&row.get::<_, String>(6)?).unwrap_or(GuardRuleSource::User),
+        enabled: row.get::<_, i64>(7)? != 0,
+        priority: row.get::<_, i64>(8)? as u32,
+        config: serde_json::from_str(&config).unwrap_or(Value::Object(serde_json::Map::new())),
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
+const GUARD_EVENT_COLUMNS: &str =
+    "id, session_id, step_id, rule_id, kind, action, severity, status,
+    title, description, command, evidence, requested_at, resolved_at, resolved_by,
+    resolution_note, metadata";
+
+fn row_to_guard_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<GuardEvent> {
+    let evidence: String = row.get(11)?;
+    let metadata: Option<String> = row.get(16)?;
+    Ok(GuardEvent {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        step_id: row.get(2)?,
+        rule_id: row.get(3)?,
+        kind: GuardRuleKind::parse(&row.get::<_, String>(4)?).unwrap_or(GuardRuleKind::Custom),
+        action: GuardAction::parse(&row.get::<_, String>(5)?).unwrap_or(GuardAction::Warn),
+        severity: GuardSeverity::parse(&row.get::<_, String>(6)?).unwrap_or(GuardSeverity::Medium),
+        status: GuardEventStatus::parse(&row.get::<_, String>(7)?)
+            .unwrap_or(GuardEventStatus::Warned),
+        title: row.get(8)?,
+        description: row.get(9)?,
+        command: row.get(10)?,
+        evidence: serde_json::from_str(&evidence).unwrap_or_default(),
+        requested_at: row.get(12)?,
+        resolved_at: row.get(13)?,
+        resolved_by: row.get(14)?,
+        resolution_note: row.get(15)?,
+        metadata: metadata.and_then(|value| serde_json::from_str(&value).ok()),
+    })
+}
+
+const BUDGET_COLUMNS: &str = "id, name, scope, period, project_id, session_id, limit_usd,
+    enforcement, enabled, created_at, updated_at";
+
+fn row_to_budget_policy(row: &rusqlite::Row<'_>) -> rusqlite::Result<BudgetPolicy> {
+    Ok(BudgetPolicy {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        scope: BudgetScope::parse(&row.get::<_, String>(2)?).unwrap_or(BudgetScope::Global),
+        period: BudgetPeriod::parse(&row.get::<_, String>(3)?).unwrap_or(BudgetPeriod::Month),
+        project_id: row.get(4)?,
+        session_id: row.get(5)?,
+        limit_usd: row.get(6)?,
+        enforcement: BudgetEnforcement::parse(&row.get::<_, String>(7)?)
+            .unwrap_or(BudgetEnforcement::Warn),
+        enabled: row.get::<_, i64>(8)? != 0,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+const SNAPSHOT_COLUMNS: &str = "id, session_id, step_id, kind, commit_sha, parent_commit_sha,
+    branch, worktree_path, patch, files_changed, insertions, deletions, created_at";
+
+fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReplaySnapshot> {
+    Ok(ReplaySnapshot {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        step_id: row.get(2)?,
+        kind: SnapshotKind::parse(&row.get::<_, String>(3)?).unwrap_or(SnapshotKind::After),
+        commit_sha: row.get(4)?,
+        parent_commit_sha: row.get(5)?,
+        branch: row.get(6)?,
+        worktree_path: row.get(7)?,
+        patch: row.get(8)?,
+        files_changed: row.get::<_, i64>(9)? as u64,
+        insertions: row.get::<_, i64>(10)? as u64,
+        deletions: row.get::<_, i64>(11)? as u64,
+        created_at: row.get(12)?,
+    })
+}
+
+fn row_to_file_change(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReplayFileChange> {
+    Ok(ReplayFileChange {
+        id: row.get(0)?,
+        snapshot_id: row.get(1)?,
+        path: row.get(2)?,
+        old_path: row.get(3)?,
+        change_type: FileChangeType::parse(&row.get::<_, String>(4)?)
+            .unwrap_or(FileChangeType::Modified),
+        additions: row.get::<_, i64>(5)? as u64,
+        deletions: row.get::<_, i64>(6)? as u64,
+        diff: row.get(7)?,
+        ai_authored: row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
     })
 }
 

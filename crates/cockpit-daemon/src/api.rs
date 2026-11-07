@@ -354,6 +354,246 @@ pub async fn pair_status(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+// ----- Guards -------------------------------------------------------------
+
+fn guard_error(error: crate::guards::GuardError) -> ApiError {
+    let status = StatusCode::from_u16(error.status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    ApiError::new(status, error.code(), error.to_string())
+}
+
+pub async fn list_guard_rules(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let rules = state.guards.list_rules().map_err(guard_error)?;
+    Ok(Json(json!({ "rules": rules })))
+}
+
+pub async fn create_guard_rule(
+    State(state): State<AppState>,
+    Json(input): Json<cockpit_core::guard::GuardRuleInput>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if input.name.trim().is_empty() {
+        return Err(ApiError::bad_request("A guard rule needs a name."));
+    }
+    let rule = state.guards.create_rule(input).map_err(guard_error)?;
+    Ok((StatusCode::CREATED, Json(json!({ "rule": rule }))))
+}
+
+pub async fn update_guard_rule(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(patch): Json<cockpit_core::guard::GuardRulePatch>,
+) -> Result<Json<Value>, ApiError> {
+    let rule = state.guards.update_rule(&id, patch).map_err(guard_error)?;
+    Ok(Json(json!({ "rule": rule })))
+}
+
+pub async fn delete_guard_rule(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state.guards.delete_rule(&id).map_err(guard_error)?;
+    Ok(Json(json!({ "removed": true, "id": id })))
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardEventQuery {
+    pub session_id: Option<String>,
+    pub status: Option<String>,
+    pub kind: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn list_guard_events(
+    State(state): State<AppState>,
+    Query(query): Query<GuardEventQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let status = match query.status.as_deref() {
+        Some(value) if !value.trim().is_empty() => Some(
+            cockpit_core::guard::GuardEventStatus::parse(value.trim()).ok_or_else(|| {
+                ApiError::bad_request("status must be a known guard event status")
+            })?,
+        ),
+        _ => None,
+    };
+    let kind = match query.kind.as_deref() {
+        Some(value) if !value.trim().is_empty() => Some(
+            cockpit_core::guard::GuardRuleKind::parse(value.trim())
+                .ok_or_else(|| ApiError::bad_request("kind must be a known guard rule kind"))?,
+        ),
+        _ => None,
+    };
+    let events = state
+        .guards
+        .list_events(&cockpit_core::guard::GuardEventListQuery {
+            session_id: query.session_id,
+            status,
+            kind,
+            limit: query.limit.unwrap_or(100),
+        })
+        .map_err(guard_error)?;
+    Ok(Json(json!({ "events": events })))
+}
+
+pub async fn guard_decision(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(decision): Json<cockpit_core::guard::ApprovalDecisionInput>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The guard event id is not valid."));
+    }
+    let event = state
+        .guards
+        .resolve_event(&id, decision)
+        .await
+        .map_err(guard_error)?;
+    Ok(Json(json!({ "event": event })))
+}
+
+// ----- Budgets ------------------------------------------------------------
+
+pub async fn list_budgets(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let policies = state.store.list_budget_policies().map_err(store_error)?;
+    Ok(Json(json!({ "policies": policies })))
+}
+
+fn validate_budget(limit_usd: f64, name: &str) -> Result<(), ApiError> {
+    if !limit_usd.is_finite() || limit_usd < 0.0 {
+        return Err(ApiError::bad_request(
+            "The budget limit must be a non-negative number.",
+        ));
+    }
+    if name.trim().is_empty() {
+        return Err(ApiError::bad_request("A budget policy needs a name."));
+    }
+    Ok(())
+}
+
+pub async fn create_budget(
+    State(state): State<AppState>,
+    Json(input): Json<cockpit_core::guard::BudgetPolicyInput>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    validate_budget(input.limit_usd, &input.name)?;
+    let policy = state
+        .store
+        .create_budget_policy(&input)
+        .map_err(store_error)?;
+    Ok((StatusCode::CREATED, Json(json!({ "policy": policy }))))
+}
+
+pub async fn update_budget(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(patch): Json<cockpit_core::guard::BudgetPolicyPatch>,
+) -> Result<Json<Value>, ApiError> {
+    if let Some(limit) = patch.limit_usd {
+        if !limit.is_finite() || limit < 0.0 {
+            return Err(ApiError::bad_request(
+                "The budget limit must be a non-negative number.",
+            ));
+        }
+    }
+    let policy = state
+        .store
+        .update_budget_policy(&id, &patch)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("The budget policy was not found."))?;
+    Ok(Json(json!({ "policy": policy })))
+}
+
+pub async fn delete_budget(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let removed = state.store.delete_budget_policy(&id).map_err(store_error)?;
+    if !removed {
+        return Err(ApiError::not_found("The budget policy was not found."));
+    }
+    Ok(Json(json!({ "removed": true, "id": id })))
+}
+
+pub async fn session_budgets(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    if state.store.get_session(&id).map_err(store_error)?.is_none() {
+        return Err(ApiError::not_found("That flight does not exist."));
+    }
+    let statuses = state.budgets.statuses(&id).map_err(store_error)?;
+    Ok(Json(json!({ "statuses": statuses })))
+}
+
+// ----- Replay and secret scans -------------------------------------------
+
+pub async fn session_replay(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    let session = state
+        .store
+        .get_session(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
+    let steps = state.store.list_steps(&id, 2_000).map_err(store_error)?;
+    let snapshots = state
+        .store
+        .list_snapshots(&id)
+        .map_err(store_error)?
+        .into_iter()
+        .map(|snapshot| snapshot.summary())
+        .collect::<Vec<_>>();
+    Ok(Json(json!(cockpit_core::replay::SessionReplayResponse {
+        session,
+        steps,
+        snapshots,
+        // Replay forks are not part of 0.2.0; the field stays for older clients.
+        forks: Vec::new(),
+    })))
+}
+
+pub async fn snapshot_detail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The snapshot id is not valid."));
+    }
+    let snapshot = state
+        .store
+        .get_snapshot(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("The requested snapshot was not found."))?;
+    let file_changes = state
+        .store
+        .list_snapshot_file_changes(&id)
+        .map_err(store_error)?;
+    Ok(Json(json!(cockpit_core::replay::SnapshotDetailResponse {
+        snapshot,
+        file_changes,
+    })))
+}
+
+pub async fn session_scan(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    let guards = state.guards.clone();
+    let result = tokio::task::spawn_blocking(move || guards.scan_session(&id))
+        .await
+        .map_err(|error| ApiError::internal(format!("The secret scan could not run: {error}")))?
+        .map_err(guard_error)?;
+    Ok(Json(json!(result)))
+}
+
 pub async fn not_found() -> Response {
     ApiError::not_found("No Cockpit API route matches this path.").into_response()
 }

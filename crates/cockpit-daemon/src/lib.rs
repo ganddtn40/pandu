@@ -9,8 +9,10 @@
 
 pub mod adapters;
 pub mod api;
+pub mod budget;
 pub mod config;
 pub mod error;
+pub mod guards;
 pub mod live;
 pub mod logparse;
 pub mod logwatch;
@@ -19,6 +21,7 @@ pub mod proxy;
 pub mod recorder;
 pub mod server;
 pub mod sessions;
+pub mod snapshots;
 pub mod state;
 pub mod store;
 pub mod ui;

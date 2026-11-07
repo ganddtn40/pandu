@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use axum::Router;
 use axum::http::{HeaderValue, Method};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -28,7 +28,26 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}", get(api::get_session))
         .route("/sessions/{id}/steps", get(api::list_steps))
         .route("/sessions/{id}/end", post(api::end_session))
+        .route("/sessions/{id}/replay", get(api::session_replay))
+        .route("/sessions/{id}/scan", post(api::session_scan))
+        .route("/sessions/{id}/budgets", get(api::session_budgets))
         .route("/steps/{id}", get(api::get_step))
+        .route("/snapshots/{id}", get(api::snapshot_detail))
+        .route(
+            "/guards/rules",
+            get(api::list_guard_rules).post(api::create_guard_rule),
+        )
+        .route(
+            "/guards/rules/{id}",
+            patch(api::update_guard_rule).delete(api::delete_guard_rule),
+        )
+        .route("/guards/events", get(api::list_guard_events))
+        .route("/guards/events/{id}/decision", post(api::guard_decision))
+        .route("/budgets", get(api::list_budgets).post(api::create_budget))
+        .route(
+            "/budgets/{id}",
+            patch(api::update_budget).delete(api::delete_budget),
+        )
         .route("/settings", get(api::get_settings).put(api::put_settings))
         .route("/adapters", get(api::list_adapters))
         .route("/adapters/{id}", get(api::get_adapter))
@@ -54,7 +73,14 @@ pub fn build_router(state: AppState) -> Router {
 
 fn cors_layer(state: &AppState) -> CorsLayer {
     let layer = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     if state.config.allowed_origins.is_empty() {

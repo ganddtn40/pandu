@@ -9,6 +9,7 @@ pub const DEFAULT_SESSION_IDLE_MS: u64 = 30 * 60 * 1000;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_LOG_WATCH_INTERVAL_MS: u64 = 2_000;
 pub const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
+pub const DEFAULT_GUARD_APPROVAL_MS: u64 = 120_000;
 pub const PROXY_KEY_SENTINEL: &str = "cockpit-proxy";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,11 @@ pub struct Config {
     pub log_watch_interval_ms: u64,
     pub builtin_adapters: bool,
     pub demo_mode: bool,
+    /// Workspace captured by git snapshots. Unset in tests so they never
+    /// snapshot the developer's repository.
+    pub workspace_path: Option<PathBuf>,
+    pub snapshots_directory: PathBuf,
+    pub guard_approval_timeout_ms: u64,
 }
 
 impl Config {
@@ -154,6 +160,18 @@ impl Config {
         let anthropic_version = take(&mut env, "COCKPIT_ANTHROPIC_VERSION")
             .unwrap_or_else(|| DEFAULT_ANTHROPIC_VERSION.to_string());
 
+        let workspace_path = take(&mut env, "COCKPIT_WORKSPACE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok());
+        let snapshots_directory = take(&mut env, "COCKPIT_SNAPSHOTS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("snapshots"));
+        let guard_approval_timeout_ms = parse_u64(
+            take(&mut env, "COCKPIT_GUARD_APPROVAL_MS"),
+            DEFAULT_GUARD_APPROVAL_MS,
+            "COCKPIT_GUARD_APPROVAL_MS",
+        )?;
+
         Ok(Self {
             home,
             host,
@@ -179,12 +197,16 @@ impl Config {
             log_watch_interval_ms,
             builtin_adapters,
             demo_mode,
+            workspace_path,
+            snapshots_directory,
+            guard_approval_timeout_ms,
         })
     }
 
     /// A config rooted in a temporary or test directory with no real keys.
     pub fn for_home(home: impl AsRef<Path>) -> Self {
         let home = home.as_ref().to_path_buf();
+        let snapshots_directory = home.join("snapshots");
         Self {
             database_path: home.join("cockpit.db"),
             home,
@@ -212,6 +234,10 @@ impl Config {
             log_watch_interval_ms: DEFAULT_LOG_WATCH_INTERVAL_MS,
             builtin_adapters: true,
             demo_mode: false,
+            // Tests must never snapshot the repository they run in.
+            workspace_path: None,
+            snapshots_directory,
+            guard_approval_timeout_ms: DEFAULT_GUARD_APPROVAL_MS,
         }
     }
 

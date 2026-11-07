@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7,7 +8,9 @@ use cockpit_core::provider::{AgentInfo, ProviderProtocol};
 use serde_json::json;
 
 use crate::error::Result;
+use crate::guards::GuardService;
 use crate::live::LiveBus;
+use crate::snapshots::GitSnapshotService;
 use crate::store::{NewSession, Store};
 
 struct AmbientSession {
@@ -23,15 +26,28 @@ pub struct SessionManager {
     store: Arc<Store>,
     bus: Arc<LiveBus>,
     idle_timeout_ms: u64,
+    workspace_path: Option<PathBuf>,
+    guards: Option<Arc<GuardService>>,
+    snapshots: Option<Arc<GitSnapshotService>>,
     ambient: Mutex<HashMap<ProviderProtocol, AmbientSession>>,
 }
 
 impl SessionManager {
-    pub fn new(store: Arc<Store>, bus: Arc<LiveBus>, idle_timeout_ms: u64) -> Arc<Self> {
+    pub fn new(
+        store: Arc<Store>,
+        bus: Arc<LiveBus>,
+        idle_timeout_ms: u64,
+        workspace_path: Option<PathBuf>,
+        guards: Option<Arc<GuardService>>,
+        snapshots: Option<Arc<GitSnapshotService>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             store,
             bus,
             idle_timeout_ms,
+            workspace_path,
+            guards,
+            snapshots,
             ambient: Mutex::new(HashMap::new()),
         })
     }
@@ -71,6 +87,10 @@ impl SessionManager {
             protocol: Some(protocol),
             provider: Some(protocol.default_provider().to_string()),
             agent,
+            workspace_path: self
+                .workspace_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
             tags: vec!["ambient".to_string()],
             metadata: Some(json!({ "autoCreated": true, "protocol": protocol.as_str() })),
             ..NewSession::default()
@@ -139,6 +159,21 @@ impl SessionManager {
                 "totals": totals_payload(&session),
             }),
         );
+        if let Some(snapshots) = &self.snapshots {
+            snapshots.note_session_ended(&session.id);
+        }
+        if let Some(guards) = &self.guards {
+            let guards = guards.clone();
+            let session_id = session.id.clone();
+            tokio::spawn(async move {
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Err(error) = guards.scan_session(&session_id) {
+                        tracing::warn!(%error, session_id, "could not scan a finished session for secrets");
+                    }
+                })
+                .await;
+            });
+        }
         Some(session)
     }
 

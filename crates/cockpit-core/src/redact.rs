@@ -132,13 +132,18 @@ const SENSITIVE_KEYS: &[&str] = &[
     "awssecretaccesskey",
 ];
 
-struct SecretPattern {
-    rule_id: &'static str,
-    label: &'static str,
-    pattern: Regex,
+/// One recognizable secret shape.
+///
+/// The guard scanner reuses these patterns so a value is classified exactly
+/// the same way whether it is being redacted or reported.
+#[derive(Debug, Clone)]
+pub struct SecretPattern {
+    pub rule_id: &'static str,
+    pub label: &'static str,
+    pub pattern: Regex,
 }
 
-static SECRET_PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
+pub static SECRET_PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
     vec![
         SecretPattern {
             rule_id: "anthropic-api-key",
@@ -200,6 +205,24 @@ fn normalized_key(key: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+/// Mask a secret before it reaches a guard event or the database.
+///
+/// Long values keep four leading and four trailing characters so a user can
+/// recognize which credential leaked without storing it again.
+pub fn mask_secret(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.contains("BEGIN") && trimmed.contains("PRIVATE KEY") {
+        return "-----BEGIN PRIVATE KEY----- [redacted]".to_string();
+    }
+    let characters: Vec<char> = trimmed.chars().collect();
+    if characters.len() <= 10 {
+        return "[redacted]".to_string();
+    }
+    let head: String = characters[..4].iter().collect();
+    let tail: String = characters[characters.len() - 4..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 pub fn redact_headers(
@@ -359,5 +382,15 @@ mod tests {
         let redacted = redact_text(text, &mut collector, CaptureLocation::RequestBody);
         assert_eq!(redacted.matches("[REDACTED:OpenAI API key]").count(), 2);
         assert_eq!(collector.total(None), 2);
+    }
+
+    #[test]
+    fn masks_secrets_without_retaining_them() {
+        assert_eq!(mask_secret("short"), "[redacted]");
+        assert_eq!(mask_secret("sk-ant-abcdefghijklmnop"), "sk-a…mnop");
+        assert_eq!(
+            mask_secret("-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----"),
+            "-----BEGIN PRIVATE KEY----- [redacted]"
+        );
     }
 }

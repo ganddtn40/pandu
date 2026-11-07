@@ -805,3 +805,79 @@ async fn api_seeds_demo_flights_and_serves_settings() {
 
     daemon.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn guards_and_budgets_stop_requests_before_they_reach_the_provider() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let mut config = config(home.path(), mock.addr);
+    // Keep the pause path fast; a real installation waits two minutes.
+    config.guard_approval_timeout_ms = 25;
+    let daemon = cockpit_daemon::spawn(config).await.unwrap();
+    let client = reqwest::Client::new();
+    let prompt = json!({
+        "model": "gpt-4.1",
+        "messages": [{ "role": "user", "content": "Say hi" }]
+    });
+
+    // A built-in guard pauses on a destructive command; without an approval
+    // the pause expires and the request never reaches the provider.
+    let blocked = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "please rm -rf / now" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), StatusCode::FORBIDDEN);
+    let blocked_body: Value = blocked.json().await.unwrap();
+    assert_eq!(blocked_body["error"]["code"], "guard_blocked");
+    assert!(
+        mock.captured.lock().unwrap().is_empty(),
+        "the guard-blocked request must not reach the provider"
+    );
+
+    let allowed = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .json(&prompt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), StatusCode::OK);
+    let session_id = allowed.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // A zero-dollar session budget blocks as soon as the session has spend.
+    let created = client
+        .post(format!("http://{}/api/budgets", daemon.addr))
+        .json(&json!({
+            "name": "Tiny",
+            "scope": "session",
+            "period": "session",
+            "sessionId": session_id,
+            "limitUsd": 0.0,
+            "enforcement": "block",
+            "enabled": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let denied = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .json(&prompt)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::PAYMENT_REQUIRED);
+    let denied_body: Value = denied.json().await.unwrap();
+    assert_eq!(denied_body["error"]["code"], "budget_exceeded");
+    assert_eq!(mock.captured.lock().unwrap().len(), 1);
+
+    daemon.shutdown().await.unwrap();
+}

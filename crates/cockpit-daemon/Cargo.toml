@@ -33,6 +33,7 @@ tracing = { workspace = true }
 directories = { workspace = true }
 rust-embed = { workspace = true }
 glob = { workspace = true }
+regex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

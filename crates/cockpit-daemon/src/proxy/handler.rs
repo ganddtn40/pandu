@@ -150,6 +150,73 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
             );
         }
     };
+    let body_text = String::from_utf8_lossy(&body_bytes).to_string();
+
+    if let Some(session) = &session {
+        if recordable {
+            // Budgets run first: a blocked budget must not spend time on the
+            // guard detectors or on a git snapshot.
+            match state.budgets.check(&session.id).await {
+                Ok(result) => {
+                    if let Some(blocked) = result.blocked {
+                        let message = format!(
+                            "Cockpit blocked this request: the \"{}\" budget is exhausted ({:.4} USD of {:.4} USD).",
+                            blocked.policy.name, blocked.status.spent_usd, blocked.status.limit_usd
+                        );
+                        return proxy_error_response(
+                            route.protocol,
+                            StatusCode::PAYMENT_REQUIRED,
+                            &message,
+                            Some("budget_exceeded"),
+                        );
+                    }
+                }
+                Err(error) => {
+                    // Fail open: a budget lookup failure must never break the
+                    // proxy, and the request is still recorded and guarded.
+                    tracing::warn!(%error, "Cockpit budget evaluation failed");
+                }
+            }
+
+            let guard_input = crate::guards::GuardRequestInput {
+                session_id: session.id.clone(),
+                protocol: route.protocol,
+                path: route.upstream_path.clone(),
+                headers: collect_header_map(&headers),
+                body_text: body_text.clone(),
+            };
+            match state.guards.evaluate_request(guard_input).await {
+                Ok(result) => {
+                    if !result.allowed {
+                        let status = result
+                            .status
+                            .and_then(|value| StatusCode::from_u16(value).ok())
+                            .unwrap_or(StatusCode::FORBIDDEN);
+                        return proxy_error_response(
+                            route.protocol,
+                            status,
+                            result.message.as_deref().unwrap_or(
+                                "Cockpit blocked this request because a guard rule matched.",
+                            ),
+                            result.code.as_deref().or(Some("guard_blocked")),
+                        );
+                    }
+                }
+                Err(error) => {
+                    // Guard evaluation fails open by design. The recorder
+                    // still redacts secrets and stores every step.
+                    tracing::warn!(%error, "Cockpit guard evaluation failed");
+                }
+            }
+
+            if let Err(error) = state.snapshots.ensure_baseline(session).await {
+                tracing::warn!(%error, session_id = session.id, "could not capture a baseline snapshot");
+            }
+            if let Err(error) = state.snapshots.settle_pending_step(&session.id).await {
+                tracing::warn!(%error, session_id = session.id, "could not settle a pending snapshot");
+            }
+        }
+    }
 
     let mut handle = if recordable {
         session.as_ref().and_then(|session| {
@@ -160,7 +227,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
                 method: method.as_str().to_string(),
                 path: route.upstream_path.clone(),
                 headers: collect_header_map(&headers),
-                body_text: String::from_utf8_lossy(&body_bytes).to_string(),
+                body_text: body_text.clone(),
             };
             match state.recorder.begin(input) {
                 Ok(handle) => Some(handle),

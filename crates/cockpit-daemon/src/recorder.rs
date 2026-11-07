@@ -21,8 +21,10 @@ use cockpit_core::text::{
 use serde_json::{Value, json};
 
 use crate::error::Result;
+use crate::guards::{GuardService, GuardStepInput};
 use crate::live::LiveBus;
 use crate::sessions::totals_payload;
+use crate::snapshots::GitSnapshotService;
 use crate::store::{BeginStep, CompleteStep, Store, now_iso};
 
 const MAX_STORED_CHUNK_BYTES: usize = 32 * 1024 * 1024;
@@ -76,11 +78,23 @@ impl RecordedStep {
 pub struct Recorder {
     store: Arc<Store>,
     bus: Arc<LiveBus>,
+    guards: Option<Arc<GuardService>>,
+    snapshots: Option<Arc<GitSnapshotService>>,
 }
 
 impl Recorder {
-    pub fn new(store: Arc<Store>, bus: Arc<LiveBus>) -> Arc<Self> {
-        Arc::new(Self { store, bus })
+    pub fn new(
+        store: Arc<Store>,
+        bus: Arc<LiveBus>,
+        guards: Option<Arc<GuardService>>,
+        snapshots: Option<Arc<GitSnapshotService>>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            store,
+            bus,
+            guards,
+            snapshots,
+        })
     }
 
     pub fn begin(&self, input: BeginRecordedStep) -> Result<RecordedStep> {
@@ -144,6 +158,10 @@ impl Recorder {
                 "stream": metadata.stream,
             }),
         );
+
+        if let Some(snapshots) = &self.snapshots {
+            snapshots.note_step_started(&input.session_id, &step.id);
+        }
 
         Ok(RecordedStep {
             step,
@@ -225,6 +243,24 @@ impl Recorder {
         } else {
             input.status
         };
+
+        if let Some(guards) = &self.guards {
+            let guard_input = GuardStepInput {
+                session_id: handle.step.session_id.clone(),
+                step_id: handle.step.id.clone(),
+                response_text: (!collected.text.is_empty()).then(|| collected.text.clone()),
+                response_thinking: (!collected.thinking.is_empty())
+                    .then(|| collected.thinking.clone()),
+                tool_calls: collected
+                    .tool_calls
+                    .iter()
+                    .map(|call| (call.name.clone(), call.input.clone()))
+                    .collect(),
+            };
+            if let Err(error) = guards.evaluate_step(guard_input) {
+                tracing::warn!(%error, "post-step guard evaluation failed");
+            }
+        }
 
         let response_text = truncate_text(
             &redact_text(
