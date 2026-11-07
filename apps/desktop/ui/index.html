@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#070a0e" />
+    <title>Cockpit Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+            <circle cx="20" cy="20" r="15.5" fill="none" stroke="currentColor" />
+            <circle cx="20" cy="20" r="8" fill="none" stroke="currentColor" />
+            <path d="M20 2v6M20 32v6M2 20h6M32 20h6" stroke="currentColor" />
+            <path d="M20 20l7-7" stroke="currentColor" />
+            <circle cx="20" cy="20" r="2.5" fill="currentColor" stroke="none" />
+          </svg>
+          <div>
+            <p class="brand-name">Cockpit</p>
+            <p class="brand-tag">Desktop flight recorder</p>
+          </div>
+        </div>
+        <div id="connection" class="connection" data-state="idle">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connection-label">Not connected</span>
+        </div>
+      </header>
+
+      <main class="main">
+        <section id="launcher" class="launcher" aria-labelledby="launcher-title">
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> Local daemon</p>
+          <h1 id="launcher-title">
+            Connect to Cockpit<span class="title-dot" aria-hidden="true">.</span>
+          </h1>
+          <p class="lede">
+            Cockpit Desktop embeds the dashboard served by your local daemon. Nothing leaves this
+            machine, and no account is required.
+          </p>
+
+          <form id="connect-form" class="connect-form" novalidate>
+            <label class="field" for="daemon-url">
+              <span>Daemon URL</span>
+              <input
+                id="daemon-url"
+                name="daemon-url"
+                type="url"
+                inputmode="url"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="http://127.0.0.1:4319"
+                required
+              />
+            </label>
+            <button id="connect-button" class="primary-button" type="submit">Open dashboard</button>
+          </form>
+
+          <p id="launcher-error" class="form-error" role="alert" hidden></p>
+
+          <div class="launcher-grid">
+            <div class="card">
+              <h2>Start the daemon</h2>
+              <p>From any terminal:</p>
+              <code class="command">cockpit start</code>
+              <p class="muted">
+                Keep it running while you work. The dashboard reconnects automatically.
+              </p>
+            </div>
+            <div class="card">
+              <h2>Pair a phone</h2>
+              <p>
+                Open the dashboard's pairing page to create a one-time code for the Android app.
+              </p>
+              <button id="pair-button" class="ghost-button" type="button" disabled>
+                Open pairing page
+              </button>
+            </div>
+          </div>
+
+          <p class="footnote">
+            Windows build · Tauri v2 · The embedded dashboard is served by your own daemon on
+            loopback.
+          </p>
+        </section>
+
+        <section id="dashboard" class="dashboard" aria-label="Cockpit dashboard" hidden>
+          <div class="dashboard-bar">
+            <div class="dashboard-meta">
+              <span id="dashboard-url" class="mono"></span>
+              <span class="dashboard-note">embedded dashboard</span>
+            </div>
+            <div class="dashboard-actions">
+              <button id="reload-button" class="ghost-button button-small" type="button">
+                Reload
+              </button>
+              <button id="home-button" class="ghost-button button-small" type="button">
+                Change server
+              </button>
+            </div>
+          </div>
+          <iframe
+            id="dashboard-frame"
+            class="dashboard-frame"
+            title="Cockpit dashboard"
+            referrerpolicy="no-referrer"
+          ></iframe
+          >>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

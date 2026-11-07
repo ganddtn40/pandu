@@ -1,0 +1,127 @@
+name: Bug report
+description: Report something that does not work as documented.
+title: 'bug: '
+labels: ['bug', 'needs triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        **Do not paste provider API keys, device tokens, or unredacted prompts.**
+        Cockpit redacts known secret patterns, but screenshots and logs can still
+        contain sensitive material. Replace values with `[REDACTED]` before posting.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the observed behavior.
+      placeholder: The daemon returned a 500 when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: The smallest sequence that reproduces the problem.
+      placeholder: |
+        1. Run `cockpit start`
+        2. Point OpenCode at http://127.0.0.1:4319/v1
+        3. Send a request with...
+        4. See the error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The request should be recorded and forwarded.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: '`cockpit doctor` output'
+      description: Paste the full output. It contains no credentials.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Cockpit version
+      description: Output of `cockpit --version`.
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install Cockpit?
+      options:
+        - npx cockpit
+        - Global npm install
+        - Source checkout (pnpm)
+        - Desktop app
+        - Android app
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node.js version, and the agent you were recording.
+      placeholder: Windows 11, Node 22.11.0, OpenCode 1.x
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Recording proxy
+        - Dashboard
+        - CLI
+        - Storage or migrations
+        - Run Guard or budgets
+        - Replay, snapshots, or trust
+        - Context Doctor
+        - Project Brain, Arena, or handoff
+        - Analytics or journal
+        - Plugins
+        - Pairing or remote access
+        - Desktop app
+        - Android app
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Daemon logs live in `$COCKPIT_HOME/logs`. Remove secrets before pasting.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed API keys, tokens, and private prompt content from this report.
+          required: true

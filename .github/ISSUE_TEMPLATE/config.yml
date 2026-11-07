@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/OWNER/cockpit/security/advisories/new
+    about: Report security issues privately. Do not open a public issue.
+  - name: Question or setup help
+    url: https://github.com/OWNER/cockpit/discussions
+    about: Ask about setup, agents, providers, or the architecture.
+  - name: Documentation
+    url: https://github.com/OWNER/cockpit/tree/main/docs
+    about: Getting started, architecture, plugins, and the security model.

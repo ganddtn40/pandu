@@ -1,0 +1,12 @@
+pnpm-lock.yaml
+LICENSE
+dist/
+coverage/
+node_modules/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/mobile/android/
+apps/mobile/dist/
+apps/android/.gradle/
+apps/android/app/build/
+packages/daemon/drizzle/meta/

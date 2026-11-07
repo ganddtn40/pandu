@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.9.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.11.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Demo smoke test
+        env:
+          COCKPIT_HOME: ${{ runner.temp }}/cockpit-home
+        run: |
+          node packages/cli/dist/index.js demo --json > "$RUNNER_TEMP/demo.json"
+          node -e "
+            const fs = require('node:fs');
+            const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+            if (typeof data.sessionId !== 'string' || data.sessionId.length === 0) {
+              throw new Error('demo did not return a session id');
+            }
+            if (!data.totals || data.totals.steps < 8) {
+              throw new Error('demo seeded an incomplete flight');
+            }
+            if (data.sessions.length !== 3) {
+              throw new Error('demo expected three flights');
+            }
+            console.log('demo ok:', data.sessionId, JSON.stringify(data.totals));
+          " "$RUNNER_TEMP/demo.json"

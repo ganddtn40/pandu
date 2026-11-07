@@ -1,0 +1,111 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish @cockpit/core, @cockpit/daemon, and cockpit
+# to npm, then attach the packed tarballs to the GitHub release.
+#
+# Manual runs build, verify, and pack without publishing. They are useful for
+# checking the release pipeline before a tag.
+#
+# Required repository secret: NPM_TOKEN (an npm automation token with publish
+# rights for the @cockpit scope and the cockpit package).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  CI: 'true'
+
+jobs:
+  publish:
+    name: Publish npm packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.9.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.11.0
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Verify tag matches package version
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p "require('./packages/cli/package.json').version")"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match cockpit version $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Publish @cockpit/core
+        if: github.event_name == 'push'
+        run: pnpm --filter @cockpit/core publish --no-git-checks --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @cockpit/daemon
+        if: github.event_name == 'push'
+        run: pnpm --filter @cockpit/daemon publish --no-git-checks --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish cockpit CLI
+        if: github.event_name == 'push'
+        run: pnpm --filter cockpit publish --no-git-checks --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Pack npm tarballs
+        run: |
+          mkdir -p artifacts
+          pnpm --filter @cockpit/core pack --pack-destination artifacts
+          pnpm --filter @cockpit/daemon pack --pack-destination artifacts
+          pnpm --filter cockpit pack --pack-destination artifacts
+
+      - name: Upload npm tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: artifacts/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach packages to the GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tgz
+          generate_release_notes: true
+          fail_on_unmatched_files: true

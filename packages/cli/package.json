@@ -1,0 +1,49 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "description": "Local-first flight recorder and control tower for AI coding agents",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cockpit": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.11.0"
+  },
+  "keywords": [
+    "ai-agents",
+    "observability",
+    "flight-recorder",
+    "local-first",
+    "openai",
+    "anthropic",
+    "opencode",
+    "claude-code"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests vitest.config.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cockpit/core": "workspace:*",
+    "@cockpit/daemon": "workspace:*",
+    "commander": "^15.0.0",
+    "cross-spawn": "^7.0.6"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^26.6.6",
+    "tsup": "^9.0.0",
+    "typescript": "6.0.3",
+    "vitest": "^5.1.0",
+    "zod": "^4.6.7"
+  }
+}
