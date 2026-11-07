@@ -1,29 +1,53 @@
-# Dependencies
-node_modules/
+# Rust
+/target/
+**/target/
+*.rs.bk
+*.pdb
+*.profraw
 
-# Build output
+# Node, Vite, Svelte
+node_modules/
 dist/
-build/
+.svelte-kit/
+.vite/
 coverage/
 *.tsbuildinfo
 
-# Local data
-.cockpit/
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
+# Tauri
+/app/src-tauri/target/
+/app/src-tauri/gen/
+/app/src-tauri/.tauri/
+/app/gen/
 
-# Environment
-.env
-.env.*
-!.env.example
+# Android
+*.apk
+*.aab
+*.keystore
+*.jks
+/android/.gradle/
+/android/app/build/
+/android/build/
+/android/local.properties
 
-# Test artifacts
+# Playwright
 test-results/
 playwright-report/
 blob-report/
+
+# Cockpit local data
+.cockpit/
+data/
+tmp/
+/*.db
+/*.db-shm
+/*.db-wal
+/*.sqlite
+/*.sqlite3
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
 
 # OS and editor
 .DS_Store
@@ -33,16 +57,16 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/settings.json
 
-# Desktop and mobile build output
-apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/gen/
-apps/mobile/android/.gradle/
-apps/mobile/android/app/build/
-apps/mobile/android/build/
-apps/mobile/android/local.properties
-apps/mobile/android/app/src/main/assets/public/
-apps/mobile/dist/
+# Local toolchains (optional, repo-local only)
+/.toolchain/
+/.rustup/
+/.cargo/
 
-# Generated data
-data/
-tmp/
+# Legacy dependencies and build output (kept out of the legacy tree)
+/legacy/node_modules/
+/legacy/**/node_modules/
+/legacy/**/dist/
+/legacy/**/target/
+/legacy/apps/mobile/android/.gradle/
+/legacy/apps/mobile/android/app/build/
+/legacy/apps/mobile/android/build/

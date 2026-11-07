@@ -1,0 +1,28 @@
+//! Cockpit's local daemon.
+//!
+//! Phase 1 adds the axum proxy and API, SSE passthrough, recording, redaction,
+//! and SQLite storage. Phase 2 adds adapter loading and log watchers. Phase 3
+//! adds git snapshots, guards, budgets, and approvals.
+//!
+//! The daemon is designed to fail open: a recording or storage failure must
+//! never change or block the bytes travelling to the upstream provider.
+
+pub use cockpit_core::VERSION;
+
+/// Human-readable crate purpose used by `cockpit doctor` once the CLI lands.
+pub const DESCRIPTION: &str = "Cockpit local daemon";
+
+/// Returns the daemon's version.
+pub fn version() -> &'static str {
+    VERSION
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_matches_core() {
+        assert_eq!(version(), cockpit_core::VERSION);
+    }
+}
