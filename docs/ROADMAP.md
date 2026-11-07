@@ -53,10 +53,10 @@ come back without reopening old decisions.
 
 - [ ] Tauri 2 desktop embedding the daemon (single exe)
 - [ ] Tauri 2 Android companion with QR/short-code pairing
-- [ ] Svelte 5 + TypeScript + Vite
-- [ ] Custom WebGL2 glass engine with CSS fallback, reduced transparency,
+- [x] Svelte 5 + TypeScript + Vite
+- [x] Custom WebGL2 glass engine with CSS fallback, reduced transparency,
       reduced motion, and Performance mode
-- [ ] Light/dark/system themes and bundled abstract wallpapers
+- [x] Light/dark/system themes and a procedural abstract wallpaper
 - [ ] 14 language catalogs, RTL, missing-key CI gate
 - [ ] Playwright e2e for the four screens
 

@@ -1,6 +1,6 @@
 # Cockpit 0.2.0 — Rewrite decision record
 
-Status: Phase 3 complete
+Status: Phase 4 complete — awaiting visual approval
 Branch: `rewrite`
 Baseline: `main` at `1d65df2` (`feat: release Cockpit 0.1.0`)
 
@@ -402,6 +402,46 @@ Performance mode setting.
   integration). Snapshot tests assert that HEAD, the real index, and the reflog
   are unchanged; proxy tests assert that guard and budget blocks never reach the
   upstream provider. fmt and clippy with `-D warnings` are clean.
+
+### Phase 4 implementation notes
+
+- `ui/` is a standalone Svelte 5 + TypeScript + Vite app with two gate routes:
+  `/` (shell preview) and `/glass-preview` (visual test page). The daemon keeps
+  its placeholder until Phase 5/6, so a clean `cargo build` does not depend on
+  `ui/dist`.
+- The glass engine is one custom WebGL2 canvas in `ui/src/glass`. A procedural
+  wallpaper is rendered once to a full-resolution texture; a quarter-resolution
+  two-pass blur feeds instanced SDF squircle shapes (max 12) with edge
+  refraction, chromatic aberration, specular rim light, tint, depth, and pointer
+  parallax. Rendering is on demand, capped at 60 fps desktop / 30 fps mobile,
+  and paused while the page is hidden.
+- Inner tiles are clipped to their nearest `[data-glass]` ancestor in the
+  fragment shader, so scrolling content cannot paint outside the main panel.
+- Fallbacks: `?glass=off`, `?perf=1` or the stored Performance preference,
+  `prefers-reduced-transparency`, missing WebGL2, and init failure. The engine
+  sets `data-glass-mode` to `webgl` or `fallback`; CSS `backdrop-filter` is the
+  fallback. Reduced transparency also disables backdrop blur.
+- Light and dark themes resolve from a forced URL value, then
+  `localStorage['cockpit.theme']`, then the OS preference. The theme is applied
+  before first paint and survives reloads.
+- The bundled font is a 48 KB Inter variable Latin subset, used after system UI
+  fonts with `font-display: swap`. No font-loading layout shift.
+- Text contrast was raised for the gate: `--text-soft` and `--text-faint` are
+  darker, status text uses `--accent-ink`, `--success`, and `--danger`, and
+  filled accent buttons use `--accent-strong` with white text.
+- Phone controls are at least 44×44 px. Playwright checks the top bar, tab bar,
+  buttons, segmented controls, text links, and toggles.
+- `pnpm check` is clean. Vitest covers routing, theme resolution, preferences,
+  DPR/radius clamping, visibility, and instance packing (26 tests). Playwright
+  covers 1440×900 and 390×844, light/dark, `/` and `/glass-preview`, WebGL and
+  fallback, horizontal overflow, theme persistence, focus rings, and touch
+  targets (10 tests). Headless Chromium reports reduced transparency by default,
+  so the visual spec overrides that one media query to exercise the real WebGL
+  path.
+- The built UI is 27.2 KB JavaScript + 4.1 KB CSS gzip, well under the 150 KB
+  budget.
+- Screenshots are committed in `docs/screenshots/phase4/`. Phase 4 stops here
+  for user visual approval before the four screens are built.
 
 ## 9. Toolchain status
 

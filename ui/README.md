@@ -3,8 +3,9 @@
 Svelte 5 + TypeScript + Vite. No heavy UI or animation libraries. The glass
 renderer is custom WebGL2 code in `src/glass`.
 
-> **Status:** Phase 4 adds the shell, glass engine, and `/glass-preview`; Phase 5
-> adds the four screens, onboarding, and i18n catalogs.
+> **Status:** Phase 4 adds the shell, glass engine, and `/glass-preview`. It stops
+> for visual approval; Phase 5 adds the four screens, onboarding, and i18n
+> catalogs.
 
 ## Design direction
 
@@ -33,14 +34,14 @@ full-screen WebGL2 pass:
 - SDF squircle geometry with edge refraction from the SDF gradient
 - Frost from a pre-blurred quarter-resolution wallpaper texture
 - Chromatic aberration on the rim
-- Top-left specular rim light following pointer or device tilt
+- Top-left specular rim light with pointer parallax
 - Inner shadow, tint, saturation boost
 - ResizeObserver + rAF geometry sync, on-demand rendering, 12-shape cap,
   60 fps desktop / 30 fps mobile, paused when hidden
 
 Fallbacks: no WebGL2 → CSS `backdrop-filter: blur(24px) saturate(160%)`;
-`prefers-reduced-transparency` → opaque frosted; `prefers-reduced-motion` →
-static; Performance mode → CSS fallback.
+`prefers-reduced-transparency` → CSS glass without backdrop blur;
+`prefers-reduced-motion` → static; Performance mode → CSS fallback.
 
 ## Budgets
 
@@ -60,3 +61,6 @@ pnpm check
 pnpm test
 pnpm exec playwright test
 ```
+
+Screenshots from the visual suite land in `../docs/screenshots/phase4/`.
+The built shell is about 27 KB of JavaScript gzip.
