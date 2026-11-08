@@ -379,7 +379,7 @@ export interface ApprovalDecision {
 // ----- Remote access -------------------------------------------------------
 
 export type RemoteMode = 'loopback' | 'tailscale' | 'tunnel' | 'lan';
-export type RemoteScope = 'view' | 'respond' | 'prompt';
+export type RemoteScope = 'view:status' | 'view:content' | 'respond' | 'prompt';
 export type RemoteClaimStatus = 'pending' | 'confirmed' | 'denied' | 'expired';
 
 export interface RemoteToolStatus {

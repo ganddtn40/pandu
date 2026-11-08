@@ -63,6 +63,7 @@
 
   const info = $derived(remoteState.info);
   const scopes = $derived(info?.scopes ?? []);
+  const canViewContent = $derived(scopes.includes('view:content'));
   const canRespond = $derived(scopes.includes('respond'));
   const canPrompt = $derived(scopes.includes('prompt'));
   const pendingGuards = $derived(remoteState.guards.filter((event) => event.status === 'pending'));
@@ -175,6 +176,7 @@
   async function openFlight(session: Session): Promise<void> {
     openSession = session;
     openSteps = [];
+    if (!canViewContent) return;
     stepsBusy = true;
     try {
       openSteps = (await remoteDeviceApi.steps(session.id)).steps;
@@ -188,6 +190,7 @@
   async function loadOutput(id: string): Promise<void> {
     openAgentId = id;
     openOutput = null;
+    if (!canViewContent) return;
     outputBusy = true;
     try {
       openOutput = await remoteDeviceApi.agent(id);
@@ -539,7 +542,12 @@
             {#if openSession.durationMs !== undefined}· {formatDuration(openSession.durationMs)}{/if}
           </p>
           <h3>{t('remote.flightSteps')}</h3>
-          {#if stepsBusy}
+          {#if !canViewContent}
+            <p class="remote-app__note">
+              <Icon name="lock" size={15} />
+              {t('remote.contentNoScope')}
+            </p>
+          {:else if stepsBusy}
             <p class="remote-app__empty">{t('common.loading')}</p>
           {:else if openSteps.length === 0}
             <p class="remote-app__empty">{t('remote.flightsEmpty')}</p>
@@ -612,12 +620,22 @@
 
           <div class="remote-app__section-head">
             <h3>{t('remote.agentOutput')}</h3>
-            <button class="text-link" type="button" onclick={refreshOutput} disabled={outputBusy}>
+            <button
+              class="text-link"
+              type="button"
+              onclick={refreshOutput}
+              disabled={outputBusy || !canViewContent}
+            >
               <Icon name="refresh" size={14} />
               {t('common.refresh')}
             </button>
           </div>
-          {#if outputBusy}
+          {#if !canViewContent}
+            <p class="remote-app__note">
+              <Icon name="lock" size={15} />
+              {t('remote.contentNoScope')}
+            </p>
+          {:else if outputBusy}
             <p class="remote-app__empty">{t('common.loading')}</p>
           {:else}
             <pre class="remote-app__output">{openOutput?.output ?? t('remote.agentsEmpty')}</pre>

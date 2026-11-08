@@ -391,7 +391,7 @@ impl PairingManager {
                 token_hash: hash_token(&token),
                 pin_salt: claim.pin_salt.clone(),
                 pin_hash: claim.pin_hash.clone(),
-                scopes: vec!["view".to_string()],
+                scopes: vec!["view:status".to_string()],
                 require_host_confirmation: true,
                 created_at: created_at.clone(),
             })
@@ -591,7 +591,7 @@ mod tests {
         }
         let devices = pairing.store.list_remote_devices().unwrap();
         assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].scopes, vec!["view".to_string()]);
+        assert_eq!(devices[0].scopes, vec!["view:status".to_string()]);
         assert!(devices[0].pin_hash.is_some());
     }
 

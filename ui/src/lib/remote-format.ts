@@ -16,23 +16,27 @@ export function remoteModeKey(mode: RemoteMode): MessageKey {
 
 export function remoteScopeKey(scope: RemoteScope): MessageKey {
   switch (scope) {
+    case 'view:content':
+      return 'remote.scopeContent';
     case 'respond':
       return 'remote.scopeRespond';
     case 'prompt':
       return 'remote.scopePrompt';
     default:
-      return 'remote.scopeView';
+      return 'remote.scopeStatus';
   }
 }
 
 export function remoteScopeNoteKey(scope: RemoteScope): MessageKey {
   switch (scope) {
+    case 'view:content':
+      return 'remote.scopeContentNote';
     case 'respond':
       return 'remote.scopeRespondNote';
     case 'prompt':
       return 'remote.scopePromptNote';
     default:
-      return 'remote.scopeViewNote';
+      return 'remote.scopeStatusNote';
   }
 }
 

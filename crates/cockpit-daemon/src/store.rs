@@ -284,7 +284,7 @@ CREATE TABLE IF NOT EXISTS remote_devices (
   token_hash TEXT NOT NULL UNIQUE,
   pin_salt TEXT,
   pin_hash TEXT,
-  scopes TEXT NOT NULL DEFAULT '["view"]',
+  scopes TEXT NOT NULL DEFAULT '["view:status"]',
   require_host_confirmation INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   last_seen_at TEXT,

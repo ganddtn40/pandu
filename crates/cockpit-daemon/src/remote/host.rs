@@ -520,7 +520,7 @@ impl RemoteDeviceView {
         Self {
             id: row.id.clone(),
             name: row.name.clone(),
-            scopes: row.scopes.clone(),
+            scopes: ScopeSet::from_strings(&row.scopes).to_strings(),
             require_host_confirmation: row.require_host_confirmation,
             has_pin: row.pin_hash.is_some(),
             created_at: row.created_at.clone(),

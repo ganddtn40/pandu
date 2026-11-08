@@ -104,11 +104,11 @@ test.describe('remote access', () => {
     await card.getByRole('button', { name: 'Confirm pairing' }).click();
     const device = card.locator('.remote-device').filter({ hasText: 'Pixel 8' });
     await expect(device).toBeVisible();
-    await expect(device).toContainText('View');
+    await expect(device).toContainText('Status');
 
     await expect(remote.locator('.remote-app__tabs')).toBeVisible({ timeout: 15_000 });
     await expect(remote.getByRole('button', { name: /Inbox/ })).toBeVisible();
-    await expect(remote.locator('.remote-app__meta')).toContainText('View');
+    await expect(remote.locator('.remote-app__meta')).toContainText('Status');
     await shot(remote, '05-remote-paired-dashboard.png');
 
     // The host audit trail records the code, the request, and the confirmation.

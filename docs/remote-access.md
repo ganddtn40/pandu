@@ -41,8 +41,8 @@ listener; it does not change how the local app works.
 
 1. Remote access is off until you turn it on from **Settings → Remote access**
    on the computer. A remote device can never turn it on.
-2. New devices start with **View** only. You raise scopes per device, one at a
-   time.
+2. New devices start with **Status** only. Content is opt-in and can read code
+   and anything your agent printed. You raise scopes per device, one at a time.
 3. **Prompt** is the dangerous scope. The host warns you: *"Prompt lets this
    device make your agent run commands."*
 4. High-risk approvals require a PIN you set when pairing. If no PIN was set,
@@ -220,7 +220,7 @@ Pairing is always a two-step flow: the device asks, and the host confirms.
    ![Host confirms the device by name](screenshots/phase7/04-host-pair-confirm.png)
 
 8. Click **Confirm pairing**. The device receives its token exactly once and
-   starts with **View** only.
+   starts with **Status** only.
 
    ![Paired device dashboard](screenshots/phase7/05-remote-paired-dashboard.png)
 
@@ -244,7 +244,8 @@ Scopes are enforced by the daemon, not by hiding buttons in the UI.
 
 | Scope | What it allows | Notes |
 | --- | --- | --- |
-| **View** | See flights, sessions, steps, agents, sanitized terminal output, pending approvals, and inbox events. | Every device starts here. |
+| **Status** (`view:status`) | See flights, sessions, agents, costs, counts, pending approvals, and inbox events. | Every device starts here. |
+| **Content** (`view:content`) | Read terminal output, steps, diffs, prompts, and responses. | Opt-in. The host warns: *"Content can read code and anything your agent printed."* |
 | **Respond** | Approve or deny guarded actions. | High-risk actions also need the pairing PIN. |
 | **Prompt** | Type into an agent session that is already running. | The host warns: *"Prompt lets this device make your agent run commands."* |
 
@@ -457,20 +458,20 @@ The remote listener exposes only the routes below. The same matrix is shown in
 | --- | --- | --- | --- |
 | POST | `/api/remote/pair/claim` | none | Pairing code + device name |
 | POST | `/api/remote/pair/claim/{id}` | none | One-time claim secret |
-| GET | `/api/remote/session` | view | This device's scopes |
-| GET | `/api/remote/overview` | view | Flights and totals |
-| GET | `/api/remote/sessions` | view | Flight list |
-| GET | `/api/remote/sessions/{id}` | view | Flight detail |
-| GET | `/api/remote/sessions/{id}/steps` | view | Captured steps |
-| GET | `/api/remote/guards/events` | view | Pending and past approvals |
-| GET | `/api/remote/agents` | view | Running agent sessions |
-| GET | `/api/remote/agents/{id}` | view | Sanitized terminal output |
-| GET | `/api/remote/agent-events` | view | Inbox events |
-| GET | `/api/remote/live` | view | WebSocket ticket in `Sec-WebSocket-Protocol` |
-| POST | `/api/remote/ws-ticket` | view | 30-second single-use ticket |
+| GET | `/api/remote/session` | view:status | This device's scopes |
+| GET | `/api/remote/overview` | view:status | Flights and totals |
+| GET | `/api/remote/sessions` | view:status | Flight list |
+| GET | `/api/remote/sessions/{id}` | view:status | Flight detail |
+| GET | `/api/remote/sessions/{id}/steps` | view:content | Captured steps, prompts, and responses |
+| GET | `/api/remote/guards/events` | view:status | Pending and past approvals |
+| GET | `/api/remote/agents` | view:status | Running agent sessions |
+| GET | `/api/remote/agents/{id}` | view:content | Sanitized terminal output |
+| GET | `/api/remote/agent-events` | view:status | Inbox events |
+| GET | `/api/remote/live` | view:status | WebSocket ticket in `Sec-WebSocket-Protocol`; content events need `view:content` |
+| POST | `/api/remote/ws-ticket` | view:status | 30-second single-use ticket |
 | POST | `/api/remote/guards/events/{id}/decision` | respond | Approve or deny; high risk needs the pairing PIN |
 | POST | `/api/remote/agents/{id}/prompt` | prompt | Keystrokes only; host confirmation by default |
-| POST | `/api/remote/logout` | view | Revoke this device |
+| POST | `/api/remote/logout` | view:status | Revoke this device |
 
 Everything else, including `/v1`, `/openai`, `/anthropic`, `/s/...`, and the
 host management routes, returns 404 on the remote listener.

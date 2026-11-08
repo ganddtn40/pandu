@@ -822,67 +822,67 @@ impl RemoteAccess {
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/session",
-                scope: "view",
+                scope: "view:status",
                 note: "This device's scopes",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/overview",
-                scope: "view",
+                scope: "view:status",
                 note: "Flights and totals",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/sessions",
-                scope: "view",
+                scope: "view:status",
                 note: "Flight list",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/sessions/{id}",
-                scope: "view",
+                scope: "view:status",
                 note: "Flight detail",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/sessions/{id}/steps",
-                scope: "view",
-                note: "Captured steps",
+                scope: "view:content",
+                note: "Captured steps, prompts, and responses",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/guards/events",
-                scope: "view",
+                scope: "view:status",
                 note: "Pending and past approvals",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/agents",
-                scope: "view",
+                scope: "view:status",
                 note: "Running agent sessions",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/agents/{id}",
-                scope: "view",
+                scope: "view:content",
                 note: "Sanitized terminal output",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/agent-events",
-                scope: "view",
+                scope: "view:status",
                 note: "Inbox events",
             },
             EndpointScope {
                 method: "GET",
                 path: "/api/remote/live",
-                scope: "view",
-                note: "WebSocket ticket in Sec-WebSocket-Protocol",
+                scope: "view:status",
+                note: "WebSocket ticket in Sec-WebSocket-Protocol; content events need view:content",
             },
             EndpointScope {
                 method: "POST",
                 path: "/api/remote/ws-ticket",
-                scope: "view",
+                scope: "view:status",
                 note: "30-second single-use ticket",
             },
             EndpointScope {
@@ -900,7 +900,7 @@ impl RemoteAccess {
             EndpointScope {
                 method: "POST",
                 path: "/api/remote/logout",
-                scope: "view",
+                scope: "view:status",
                 note: "Revoke this device",
             },
         ]
@@ -1135,7 +1135,10 @@ mod tests {
         assert!(!matrix.is_empty());
         for endpoint in matrix {
             assert!(
-                matches!(endpoint.scope, "view" | "respond" | "prompt" | "none"),
+                matches!(
+                    endpoint.scope,
+                    "view:status" | "view:content" | "respond" | "prompt" | "none"
+                ),
                 "unexpected scope {}",
                 endpoint.scope
             );

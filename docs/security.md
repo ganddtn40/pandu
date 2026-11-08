@@ -226,10 +226,12 @@ token, or read the audit log.
   `Authorization: Bearer` header, compared in constant time, and expires after
   30 days without use. Rotation invalidates the old token immediately.
   Revocation closes open WebSockets immediately.
-- **Scopes.** View, Respond, and Prompt are enforced by the daemon on every
-  request and every live message. New devices get View only. Prompt grants
-  keystroke injection into a running session and is presented with the warning
-  "Prompt lets this device make your agent run commands."
+- **Scopes.** Status (`view:status`), Content (`view:content`), Respond, and
+  Prompt are enforced by the daemon on every request and every live message. New
+  devices get Status only. Content is opt-in and can read terminal output,
+  steps, diffs, prompts, and responses — code and anything an agent printed.
+  Prompt grants keystroke injection into a running session and is presented with
+  the warning "Prompt lets this device make your agent run commands."
 - **High-risk approvals.** Severity High/Critical or a dangerous command needs
   the PIN set at pairing. Without a PIN, the decision must happen at the
   computer. Approve and deny both require the PIN. Replayed, late, and expired
@@ -274,6 +276,9 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote_approvals_need_the_pin_and_cannot_be_replayed`,
 `expired_remote_approvals_are_refused`,
 `remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim`,
+`remote_prompts_require_an_explicit_awaiting_state`,
+`auto_approve_sessions_always_wait_for_the_host`,
+`live_events_hide_content_from_status_only_devices`,
 `host_confirmation_is_required_for_remote_prompts_by_default`,
 `authentication_prompts_must_be_completed_at_the_computer`,
 `audit_log_records_sensitive_transitions_and_exports`,
@@ -282,7 +287,7 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote_access_refuses_unauthenticated_configurations`. Unit tests:
 `remote::auth::tests::constant_time_comparison_matches_normal_equality`,
 `remote::auth::tests::pins_are_salted_and_verified`,
-`remote::auth::tests::scopes_always_include_view`,
+`remote::auth::tests::scopes_always_include_status_and_legacy_view_is_status`,
 `remote::auth::tests::rate_limiter_blocks_after_the_budget`,
 `remote::auth::tests::failures_lock_out_exponentially`,
 `remote::pairing::tests::a_claim_waits_for_the_host_and_the_code_is_single_use`,
@@ -337,14 +342,16 @@ bound the damage, but they do not make a stolen token harmless.
 
 | Token scope | What an attacker can do | What they still cannot do |
 | --- | --- | --- |
-| **View** | Read flights, sessions, captured steps, agent lists, sanitized terminal output, pending approvals, and inbox events. This can expose source code, file paths, project names, and anything an agent printed. Open the live socket and watch new activity. Revoke the device (self-logout). | Approve or deny anything, send prompts, pair devices, change scopes, rotate tokens, read the audit log, or reach the model proxy. |
-| **View + Respond** | Everything View can do, plus approve or deny guarded actions that are not high risk. A destructive action that the guard did not classify as High/Critical or dangerous could be approved. Denying is also a denial-of-service. | High-risk approvals without the pairing PIN. Manage the host, pair devices, or read the audit log. |
-| **View + Respond + Prompt** | Everything above, plus send up to 2,000 characters as keystrokes into an already-running agent session. If host confirmation is off for that device, the text is queued immediately with Enter. The agent may then run commands with the user's privileges. | Start a new process, choose a working directory, or bypass the CLI-owned PTY. High-risk approvals still need the PIN. |
+| **Status** (`view:status`) | Read flights, sessions, agent lists, costs, counts, pending approvals, and inbox events. Open the live socket and watch new activity. Revoke the device (self-logout). | Read terminal output, steps, diffs, prompts, or responses. Approve or deny anything, send prompts, pair devices, change scopes, rotate tokens, read the audit log, or reach the model proxy. |
+| **Status + Content** (`view:content`) | Everything Status can do, plus read captured steps, terminal output, diffs, prompts, and responses. This can expose source code, file paths, project names, and anything an agent printed. | Approve or deny anything, send prompts, pair devices, change scopes, rotate tokens, read the audit log, or reach the model proxy. |
+| **Status + Respond** | Everything Status can do, plus approve or deny guarded actions that are not high risk. A destructive action that the guard did not classify as High/Critical or dangerous could be approved. Denying is also a denial-of-service. | High-risk approvals without the pairing PIN. Content, prompts, host management, pairing, or the audit log. |
+| **Status + Content + Respond + Prompt** | Everything above, plus send up to 2,000 characters as keystrokes into an already-running agent session. If host confirmation is off for that device, the text is queued immediately with Enter. The agent may then run commands with the user's privileges. | Start a new process, choose a working directory, or bypass the CLI-owned PTY. High-risk approvals still need the PIN. |
 | **Any scope + PIN** | High-risk approve/deny, subject to rate limits and lockout. | Everything outside the granted scopes; the PIN is not a host login. |
 
-A token with no scopes cannot exist: every device always has View. The safest
-response to a lost or exposed device is **Panic**, not just lowering scopes,
-because a stolen token can still read until it is revoked.
+A token with no scopes cannot exist: every device always has Status. Content is
+opt-in and can read code and anything an agent printed. The safest response to a
+lost or exposed device is **Panic**, not just lowering scopes, because a stolen
+token can still read status until it is revoked.
 
 ### 5.2 Revocation steps
 
@@ -378,20 +385,20 @@ matrix, and the integration test iterates it.
 | --- | --- | --- | --- |
 | POST | `/api/remote/pair/claim` | none | Pairing code + device name |
 | POST | `/api/remote/pair/claim/{id}` | none | One-time claim secret |
-| GET | `/api/remote/session` | view | This device's scopes |
-| GET | `/api/remote/overview` | view | Flights and totals |
-| GET | `/api/remote/sessions` | view | Flight list |
-| GET | `/api/remote/sessions/{id}` | view | Flight detail |
-| GET | `/api/remote/sessions/{id}/steps` | view | Captured steps |
-| GET | `/api/remote/guards/events` | view | Pending and past approvals |
-| GET | `/api/remote/agents` | view | Running agent sessions |
-| GET | `/api/remote/agents/{id}` | view | Sanitized terminal output |
-| GET | `/api/remote/agent-events` | view | Inbox events |
-| GET | `/api/remote/live` | view | WebSocket ticket in `Sec-WebSocket-Protocol` |
-| POST | `/api/remote/ws-ticket` | view | 30-second single-use ticket |
+| GET | `/api/remote/session` | view:status | This device's scopes |
+| GET | `/api/remote/overview` | view:status | Flights and totals |
+| GET | `/api/remote/sessions` | view:status | Flight list |
+| GET | `/api/remote/sessions/{id}` | view:status | Flight detail |
+| GET | `/api/remote/sessions/{id}/steps` | view:content | Captured steps, prompts, and responses |
+| GET | `/api/remote/guards/events` | view:status | Pending and past approvals |
+| GET | `/api/remote/agents` | view:status | Running agent sessions |
+| GET | `/api/remote/agents/{id}` | view:content | Sanitized terminal output |
+| GET | `/api/remote/agent-events` | view:status | Inbox events |
+| GET | `/api/remote/live` | view:status | WebSocket ticket in `Sec-WebSocket-Protocol`; content events need `view:content` |
+| POST | `/api/remote/ws-ticket` | view:status | 30-second single-use ticket |
 | POST | `/api/remote/guards/events/{id}/decision` | respond | Approve or deny; high risk needs the pairing PIN |
 | POST | `/api/remote/agents/{id}/prompt` | prompt | Keystrokes only; host confirmation by default |
-| POST | `/api/remote/logout` | view | Revoke this device |
+| POST | `/api/remote/logout` | view:status | Revoke this device |
 
 `/api/remote/health` is an unauthenticated liveness probe that returns only
 `ok`, `remote`, and the version. It is not a data route.
@@ -408,11 +415,11 @@ These are known limits of this build. They are not silently accepted; they are
 listed so a reviewer can decide whether a later phase must close them.
 
 1. **A stolen device token is powerful within its scopes.** Remote access is
-   opt-in, but a bearer token needs no further user presence. View can leak
-   source code, paths, project names, and terminal output; Respond can approve
-   non-high-risk actions; Prompt can drive the running agent. See section 5.1
-   for the full impact table. Revoke or Panic immediately; lowering scopes is
-   not enough while the token is still valid.
+   opt-in, but a bearer token needs no further user presence. Status can leak
+   project names and activity; Content can leak source code, paths, and terminal
+   output; Respond can approve non-high-risk actions; Prompt can drive the
+   running agent. See section 5.1 for the full impact table. Revoke or Panic
+   immediately; lowering scopes is not enough while the token is still valid.
 2. **Transport depends on the mode.** Loopback is plain HTTP/WebSocket.
    Tailscale direct access is plain HTTP inside WireGuard; use
    `tailscale serve` when you want browser HTTPS. Tunnel mode relies on
@@ -432,8 +439,8 @@ listed so a reviewer can decide whether a later phase must close them.
    or its environment.
 5. **Terminal output is not secret-scanned.** The sanitizer removes control
    sequences, not API keys or passwords. If an agent prints a secret, the live
-   session can display it, and a View-scoped remote device can read it. Output is
-   memory-only, but it is not redacted like proxy traffic.
+   session can display it, and a Content-scoped remote device can read it. Output
+   is memory-only, but it is not redacted like proxy traffic.
 6. **Prompt detection is heuristic.** Even a verified adapter can miss a prompt or
    misclassify one. Unverified adapters intentionally degrade to `needs_you`
    without a typed event. The UI must not be treated as an authoritative

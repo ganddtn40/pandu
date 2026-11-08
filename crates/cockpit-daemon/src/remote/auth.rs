@@ -19,19 +19,26 @@ pub const PAIR_CODE_BYTES: usize = 16;
 pub const PIN_MIN_DIGITS: usize = 4;
 pub const PIN_MAX_DIGITS: usize = 8;
 
-/// Server-enforced scopes. A new device always starts with `View` only.
+/// Server-enforced scopes. A new device always starts with `ViewStatus` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum Scope {
-    View,
+    /// Status, costs, counts, and events. The default floor for every device.
+    #[serde(rename = "view:status")]
+    ViewStatus,
+    /// Terminal output, steps, diffs, prompts, and responses. Opt-in.
+    #[serde(rename = "view:content")]
+    ViewContent,
+    #[serde(rename = "respond")]
     Respond,
+    #[serde(rename = "prompt")]
     Prompt,
 }
 
 impl Scope {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::View => "view",
+            Self::ViewStatus => "view:status",
+            Self::ViewContent => "view:content",
             Self::Respond => "respond",
             Self::Prompt => "prompt",
         }
@@ -39,7 +46,10 @@ impl Scope {
 
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "view" => Some(Self::View),
+            // `view` is the pre-split name. It always meant status only, so
+            // old rows keep exactly the access they had.
+            "view" | "view:status" => Some(Self::ViewStatus),
+            "view:content" => Some(Self::ViewContent),
             "respond" => Some(Self::Respond),
             "prompt" => Some(Self::Prompt),
             _ => None,
@@ -49,7 +59,12 @@ impl Scope {
     /// Plain-language warning shown when the host raises a scope.
     pub fn warning(self) -> &'static str {
         match self {
-            Self::View => "View lets this device read flights, inbox items, and live events.",
+            Self::ViewStatus => {
+                "Status lets this device see flights, costs, counts, inbox events, and pending approvals."
+            }
+            Self::ViewContent => {
+                "Content lets this device read terminal output, steps, diffs, prompts, and responses. It can read code and anything your agent printed."
+            }
             Self::Respond => {
                 "Respond lets this device approve or deny actions your agent asks about."
             }
@@ -65,7 +80,7 @@ pub struct ScopeSet(Vec<Scope>);
 
 impl ScopeSet {
     pub fn view_only() -> Self {
-        Self(vec![Scope::View])
+        Self(vec![Scope::ViewStatus])
     }
 
     pub fn from_strings(values: &[String]) -> Self {
@@ -76,11 +91,12 @@ impl ScopeSet {
         scopes.sort();
         scopes.dedup();
         if scopes.is_empty() {
-            scopes.push(Scope::View);
+            scopes.push(Scope::ViewStatus);
         }
-        // View is the floor: every paired device can read what it is paired to.
-        if !scopes.contains(&Scope::View) {
-            scopes.insert(0, Scope::View);
+        // Status is the floor: every paired device can read status, and
+        // content access always implies it.
+        if !scopes.contains(&Scope::ViewStatus) {
+            scopes.insert(0, Scope::ViewStatus);
         }
         Self(scopes)
     }
@@ -345,11 +361,23 @@ mod tests {
     }
 
     #[test]
-    fn scopes_always_include_view() {
+    fn scopes_always_include_status_and_legacy_view_is_status() {
         let scopes = ScopeSet::from_strings(&["prompt".to_string()]);
-        assert!(scopes.contains(Scope::View));
+        assert!(scopes.contains(Scope::ViewStatus));
         assert!(scopes.contains(Scope::Prompt));
+        assert!(!scopes.contains(Scope::ViewContent));
         assert!(!scopes.contains(Scope::Respond));
+
+        let legacy = ScopeSet::from_strings(&["view".to_string()]);
+        assert_eq!(legacy.to_strings(), vec!["view:status".to_string()]);
+
+        let content = ScopeSet::from_strings(&["view:content".to_string()]);
+        assert!(content.contains(Scope::ViewStatus));
+        assert!(content.contains(Scope::ViewContent));
+        assert_eq!(
+            content.to_strings(),
+            vec!["view:status".to_string(), "view:content".to_string()]
+        );
     }
 
     #[test]

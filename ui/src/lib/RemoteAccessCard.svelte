@@ -54,7 +54,7 @@
     },
   ];
 
-  const SCOPES: RemoteScope[] = ['view', 'respond', 'prompt'];
+  const SCOPES: RemoteScope[] = ['view:status', 'view:content', 'respond', 'prompt'];
 
   let selectedMode = $state<ModeChoice>('tailscale');
   let publicUrl = $state('');
@@ -62,6 +62,7 @@
   let pairing = $state<RemotePairingCode | null>(null);
   let now = $state(Date.now());
   let confirmPrompt = $state<string | null>(null);
+  let confirmContent = $state<string | null>(null);
   let confirmRevoke = $state<string | null>(null);
   let rotated = $state<{ deviceId: string; token: string } | null>(null);
   let notifyEnabled = $state(false);
@@ -191,8 +192,11 @@
 
   async function updateScopes(device: RemoteDevice, scopes: RemoteScope[]): Promise<void> {
     await run(`scopes-${device.id}`, async () => {
+      const withStatus: RemoteScope[] = scopes.includes('view:status')
+        ? scopes
+        : ['view:status', ...scopes];
       const result = await remoteApi.updateDevice(device.id, {
-        scopes: scopes.includes('view') ? scopes : ['view', ...scopes],
+        scopes: withStatus,
       });
       const index = remoteHostState.devices.findIndex((item) => item.id === device.id);
       if (index >= 0) remoteHostState.devices[index] = result.device;
@@ -202,10 +206,14 @@
   }
 
   function toggleScope(device: RemoteDevice, scope: RemoteScope): void {
-    if (scope === 'view' || busy || device.revokedAt) return;
+    if (scope === 'view:status' || busy || device.revokedAt) return;
     const active = device.scopes.includes(scope);
     if (scope === 'prompt' && !active) {
       confirmPrompt = device.id;
+      return;
+    }
+    if (scope === 'view:content' && !active) {
+      confirmContent = device.id;
       return;
     }
     const next = active
@@ -217,6 +225,11 @@
   async function allowPrompt(device: RemoteDevice): Promise<void> {
     confirmPrompt = null;
     await updateScopes(device, [...device.scopes, 'prompt']);
+  }
+
+  async function allowContent(device: RemoteDevice): Promise<void> {
+    confirmContent = null;
+    await updateScopes(device, [...device.scopes, 'view:content']);
   }
 
   async function toggleHostConfirmation(device: RemoteDevice): Promise<void> {
@@ -684,12 +697,18 @@
                       class:is-active={device.scopes.includes(scope)}
                       type="button"
                       aria-pressed={device.scopes.includes(scope)}
-                      disabled={scope === 'view' || Boolean(device.revokedAt) || busy !== null}
+                      disabled={scope === 'view:status' || Boolean(device.revokedAt) || busy !== null}
                       title={t(remoteScopeKey(scope))}
                       onclick={() => toggleScope(device, scope)}
                     >
                       <Icon
-                        name={scope === 'view' ? 'eye' : scope === 'respond' ? 'approvals' : 'terminal'}
+                        name={scope === 'view:status'
+                          ? 'eye'
+                          : scope === 'view:content'
+                            ? 'logs'
+                            : scope === 'respond'
+                              ? 'approvals'
+                              : 'terminal'}
                         size={13}
                       />
                       {t(remoteScopeKey(scope))}
@@ -698,11 +717,41 @@
                 </div>
                 <p class="settings-card__note">{t('remote.scopesNote')}</p>
 
+                {#if device.scopes.includes('view:content')}
+                  <p class="remote-warning">
+                    <Icon name="alert" size={14} />
+                    {t('remote.contentScopeWarning')}
+                  </p>
+                {/if}
+
                 {#if device.scopes.includes('prompt')}
                   <p class="remote-warning">
                     <Icon name="alert" size={14} />
                     {t('remote.promptScopeWarning')}
                   </p>
+                {/if}
+
+                {#if confirmContent === device.id}
+                  <div class="remote-inline-confirm">
+                    <p>{t('remote.contentScopeConfirm', { name: device.name })}</p>
+                    <div class="button-row button-row--tight">
+                      <button
+                        class="btn btn--small btn--primary"
+                        type="button"
+                        onclick={() => allowContent(device)}
+                        disabled={busy !== null}
+                      >
+                        {t('remote.allowContent')}
+                      </button>
+                      <button
+                        class="btn btn--small btn--ghost"
+                        type="button"
+                        onclick={() => (confirmContent = null)}
+                      >
+                        {t('common.cancel')}
+                      </button>
+                    </div>
+                  </div>
                 {/if}
 
                 {#if confirmPrompt === device.id}

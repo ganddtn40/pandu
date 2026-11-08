@@ -257,9 +257,16 @@ async fn get_session(
 
 async fn list_steps(
     State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    loopback::list_steps(State(state), Path(id)).await
+) -> Response {
+    if let Some(response) = require_scope(&principal, Scope::ViewContent) {
+        return response;
+    }
+    match loopback::list_steps(State(state), Path(id)).await {
+        Ok(Json(value)) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 async fn list_guard_events(
@@ -275,9 +282,16 @@ async fn list_agents(State(state): State<AppState>) -> Result<Json<Value>, ApiEr
 
 async fn get_agent(
     State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    loopback::get_agent(State(state), Path(id)).await
+) -> Response {
+    if let Some(response) = require_scope(&principal, Scope::ViewContent) {
+        return response;
+    }
+    match loopback::get_agent(State(state), Path(id)).await {
+        Ok(Json(value)) => Json(value).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 async fn list_agent_events(
@@ -657,7 +671,7 @@ async fn ws_ticket(
     State(state): State<AppState>,
     Extension(principal): Extension<RemotePrincipal>,
 ) -> Response {
-    if let Some(response) = require_scope(&principal, Scope::View) {
+    if let Some(response) = require_scope(&principal, Scope::ViewStatus) {
         return response;
     }
     let ticket = state.remote.issue_ws_ticket(&principal.device_id);
@@ -702,11 +716,11 @@ async fn live(ws: WebSocketUpgrade, State(state): State<AppState>, headers: Head
             "This device was revoked by the host.",
         );
     };
-    if !principal.allows(Scope::View) {
+    if !principal.allows(Scope::ViewStatus) {
         return api_error(
             StatusCode::FORBIDDEN,
             "scope_required",
-            "This device does not have the View scope.",
+            "This device does not have the View status scope.",
         );
     }
     ws.protocols([protocol])
@@ -716,6 +730,7 @@ async fn live(ws: WebSocketUpgrade, State(state): State<AppState>, headers: Head
 async fn remote_live_socket(mut socket: WebSocket, state: AppState, principal: RemotePrincipal) {
     let mut receiver = state.live.subscribe();
     let mut last_sequence = 0;
+    let mut content = principal.allows(Scope::ViewContent);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut revocation_check = tokio::time::interval(Duration::from_secs(3));
@@ -737,6 +752,12 @@ async fn remote_live_socket(mut socket: WebSocket, state: AppState, principal: R
 
     for event in state.live.replay(50) {
         last_sequence = event.sequence;
+        // Status-only devices get the event stream, not terminal output or
+        // file paths. Content events are skipped but still advance the cursor
+        // so a later content grant does not replay old output.
+        if event_needs_content(&event.event_type) && !content {
+            continue;
+        }
         if send_json(&mut socket, &event).await.is_err() {
             return;
         }
@@ -757,9 +778,14 @@ async fn remote_live_socket(mut socket: WebSocket, state: AppState, principal: R
                             let _ = close_revoked(&mut socket, "revoked").await;
                             return;
                         };
-                        if !current.allows(Scope::View) {
+                        if !current.allows(Scope::ViewStatus) {
                             let _ = close_revoked(&mut socket, "scope").await;
                             return;
+                        }
+                        content = current.allows(Scope::ViewContent);
+                        if event_needs_content(&event.event_type) && !content {
+                            last_sequence = event.sequence;
+                            continue;
                         }
                         last_sequence = event.sequence;
                         if send_json(&mut socket, &event).await.is_err() {
@@ -1072,6 +1098,12 @@ fn client_ip(headers: &HeaderMap) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("unknown")
         .to_string()
+}
+
+/// Live events that carry terminal text or file paths. A status-only device
+/// still receives the event stream, but these are filtered out.
+fn event_needs_content(event_type: &str) -> bool {
+    matches!(event_type, "agent.output" | "tool.completed")
 }
 
 fn require_scope(principal: &RemotePrincipal, scope: Scope) -> Option<Response> {

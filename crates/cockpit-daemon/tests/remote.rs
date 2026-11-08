@@ -444,7 +444,13 @@ async fn every_remote_endpoint_enforces_its_scope() {
 
     let viewer = pair_device(&daemon, &remote, "Viewer", None).await;
     let full = pair_device(&daemon, &remote, "Full", Some("1234")).await;
-    set_scopes(&daemon, &full.id, &["view", "respond", "prompt"], true).await;
+    set_scopes(
+        &daemon,
+        &full.id,
+        &["view:status", "view:content", "respond", "prompt"],
+        true,
+    )
+    .await;
 
     for endpoint in RemoteAccess::scope_matrix() {
         if endpoint.path.ends_with("/logout") {
@@ -487,16 +493,16 @@ async fn every_remote_endpoint_enforces_its_scope() {
         .await;
         if endpoint.scope == "none" {
             assert_ne!(as_viewer.status(), StatusCode::FORBIDDEN, "{path}");
-        } else if endpoint.scope == "view" {
+        } else if endpoint.scope == "view:status" {
             assert_ne!(
                 as_viewer.status(),
                 StatusCode::UNAUTHORIZED,
-                "{path} should accept the View scope"
+                "{path} should accept the View status scope"
             );
             assert_ne!(
                 as_viewer.status(),
                 StatusCode::FORBIDDEN,
-                "{path} should accept the View scope"
+                "{path} should accept the View status scope"
             );
         } else {
             assert_eq!(
@@ -605,6 +611,114 @@ async fn revocation_closes_a_live_socket_immediately() {
     assert_eq!(after.status(), StatusCode::FORBIDDEN);
     let body: Value = after.json().await.unwrap();
     assert_eq!(body["error"]["code"], "remote_device_revoked");
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_events_hide_content_from_status_only_devices() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device(&daemon, &remote, "Status phone", None).await;
+
+    let ticket: Value = client
+        .post(format!("{remote}/api/remote/ws-ticket"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let protocol = ticket["protocol"].as_str().unwrap().to_string();
+    let ws_url = remote.replacen("http://", "ws://", 1) + "/api/remote/live";
+    let mut request = ws_url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("sec-websocket-protocol", protocol.parse().unwrap());
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("the live socket connects");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    let ready = tokio::time::timeout(Duration::from_secs(5), socket.next())
+        .await
+        .expect("a live.ready message")
+        .expect("a message")
+        .expect("a valid frame");
+    assert!(ready.to_text().unwrap().contains("live.ready"));
+
+    // Status events still flow to a status-only device.
+    let registered: Value = client
+        .post(format!("{host}/api/agents/register"))
+        .json(&json!({
+            "agentName": "Live agent",
+            "workingDir": "C:/work",
+            "adapter": "opencode",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = registered["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let saw_started = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(frame)) = socket.next().await {
+            if let Message::Text(text) = frame {
+                if text.contains("agent.started") {
+                    return true;
+                }
+            }
+        }
+        false
+    })
+    .await
+    .expect("agent.started reaches the status device");
+    assert!(saw_started);
+
+    // Terminal output is content, so it never leaves the daemon for this
+    // device, and the payload text never appears on the socket.
+    append_agent_output(&client, &host, &session_id, "terminal-secret-value").await;
+    let leaked = tokio::time::timeout(Duration::from_millis(1200), async {
+        while let Some(Ok(frame)) = socket.next().await {
+            if let Message::Text(text) = frame {
+                if text.contains("agent.output") || text.contains("terminal-secret-value") {
+                    return true;
+                }
+            }
+        }
+        false
+    })
+    .await;
+    assert!(
+        leaked.is_err(),
+        "status-only device received terminal output"
+    );
+
+    // Raising the Content scope takes effect on the existing socket without a
+    // replay of anything it already missed.
+    set_scopes(&daemon, &device.id, &["view:status", "view:content"], false).await;
+    append_agent_output(&client, &host, &session_id, "visible-now").await;
+    let saw_output = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(frame)) = socket.next().await {
+            if let Message::Text(text) = frame {
+                if text.contains("agent.output") && text.contains("visible-now") {
+                    return true;
+                }
+            }
+        }
+        false
+    })
+    .await
+    .expect("content events flow after the grant");
+    assert!(saw_output);
 
     daemon.shutdown().await.unwrap();
 }
