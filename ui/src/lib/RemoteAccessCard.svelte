@@ -60,6 +60,7 @@
   let publicUrl = $state('');
   let busy = $state<string | null>(null);
   let pairing = $state<RemotePairingCode | null>(null);
+  let verificationByClaim = $state<Record<string, string>>({});
   let now = $state(Date.now());
   let confirmPrompt = $state<string | null>(null);
   let confirmContent = $state<string | null>(null);
@@ -175,8 +176,14 @@
   }
 
   async function confirmClaim(claim: RemotePendingPairing): Promise<void> {
+    const typed = (verificationByClaim[claim.id] ?? '').trim();
+    if (!/^\d{4}$/.test(typed)) {
+      toast(t('remote.verificationRequired'));
+      return;
+    }
     await run(`pair-confirm-${claim.id}`, async () => {
-      await remoteApi.confirmPairing(claim.id);
+      await remoteApi.confirmPairing(claim.id, typed);
+      delete verificationByClaim[claim.id];
       toast(t('remote.pairConfirmed', { name: claim.deviceName }));
       await refreshRemoteHost({ audit: true });
     });
@@ -185,7 +192,18 @@
   async function denyClaim(claim: RemotePendingPairing): Promise<void> {
     await run(`pair-deny-${claim.id}`, async () => {
       await remoteApi.denyPairing(claim.id);
+      delete verificationByClaim[claim.id];
       toast(t('remote.pairDenied'));
+      await refreshRemoteHost({ audit: true });
+    });
+  }
+
+  async function resetRespond(device: RemoteDevice): Promise<void> {
+    await run(`reset-respond-${device.id}`, async () => {
+      const result = await remoteApi.resetRespond(device.id);
+      const index = remoteHostState.devices.findIndex((item) => item.id === device.id);
+      if (index >= 0) remoteHostState.devices[index] = result.device;
+      toast(t('remote.respondReset', { name: device.name }));
       await refreshRemoteHost({ audit: true });
     });
   }
@@ -633,13 +651,30 @@
                   <strong>{t('remote.pairRequest', { name: claim.deviceName })}</strong>
                   <span>{claim.ip ? t('remote.pairMeta', { ip: claim.ip }) : t('remote.pairMetaUnknown')}</span>
                   <span>{claim.hasPin ? t('remote.pairHasPin') : t('remote.pairNoPin')}</span>
+                  <div class="remote-claim__verify">
+                    <span class="kicker">{t('remote.verificationCode')}</span>
+                    <code class="remote-code">{claim.verificationCode}</code>
+                    <small>{t('remote.verificationHostBody')}</small>
+                  </div>
+                  <label class="remote-claim__field">
+                    <span>{t('remote.verificationEnter')}</span>
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="one-time-code"
+                      maxlength="4"
+                      pattern={'\\d{4}'}
+                      placeholder="0000"
+                      bind:value={verificationByClaim[claim.id]}
+                    />
+                  </label>
                 </div>
                 <div class="button-row button-row--tight">
                   <button
                     class="btn btn--small btn--primary"
                     type="button"
                     onclick={() => confirmClaim(claim)}
-                    disabled={busy !== null}
+                    disabled={busy !== null || !/^\d{4}$/.test((verificationByClaim[claim.id] ?? '').trim())}
                   >
                     <Icon name="check" size={14} />
                     {t('remote.confirmPair')}
@@ -681,6 +716,9 @@
                     <strong>{device.name}</strong>
                     {#if device.revokedAt}
                       <span class="status-pill status-pill--danger">{t('remote.revoked')}</span>
+                    {/if}
+                    {#if device.respondLocked}
+                      <span class="status-pill status-pill--warn">{t('remote.respondLockedBadge')}</span>
                     {/if}
                   </div>
                   <span class="remote-device__seen">
@@ -792,7 +830,25 @@
                   </div>
                   <p class="settings-card__note">{t('remote.hostConfirmNote')}</p>
 
+                  {#if device.respondLocked}
+                    <p class="remote-warning">
+                      <Icon name="lock" size={14} />
+                      {t('remote.respondLockedNote')}
+                    </p>
+                  {/if}
+
                   <div class="button-row button-row--tight remote-device__actions">
+                    {#if device.respondLocked}
+                      <button
+                        class="btn btn--small btn--ghost"
+                        type="button"
+                        onclick={() => resetRespond(device)}
+                        disabled={busy !== null}
+                      >
+                        <Icon name="lock" size={14} />
+                        {t('remote.resetRespond')}
+                      </button>
+                    {/if}
                     <button
                       class="btn btn--small btn--ghost"
                       type="button"

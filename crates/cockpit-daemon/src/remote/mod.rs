@@ -939,6 +939,8 @@ fn principal_from_row(device: &RemoteDeviceRow) -> RemotePrincipal {
         require_host_confirmation: device.require_host_confirmation,
         pin_salt: device.pin_salt.clone(),
         pin_hash: device.pin_hash.clone(),
+        pin_failures: device.pin_failures,
+        respond_locked: device.respond_locked_at.is_some(),
     }
 }
 

@@ -253,7 +253,7 @@ async fn pair_device(
         .unwrap();
     let code = issued["code"].as_str().unwrap().to_string();
     assert_eq!(code.len(), 32);
-    let mut body = json!({ "code": code, "deviceName": name });
+    let mut body = json!({ "verificationCode": "1234", "code": code, "deviceName": name });
     if let Some(pin) = pin {
         body["pin"] = json!(pin);
     }
@@ -289,6 +289,7 @@ async fn pair_device(
     let confirmed = client
         .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
         .headers(host_headers(daemon))
+        .json(&json!({ "verificationCode": "1234" }))
         .send()
         .await
         .unwrap();
@@ -401,6 +402,7 @@ fn request_body(path: &str) -> Option<Value> {
         return Some(json!({
             "code": "00000000000000000000000000000000",
             "deviceName": "Fuzzer",
+            "verificationCode": "1234",
         }));
     }
     None
@@ -502,7 +504,7 @@ async fn every_remote_endpoint_enforces_its_scope() {
     let client = reqwest::Client::new();
 
     let viewer = pair_device(&daemon, &remote, "Viewer", None).await;
-    let full = pair_device(&daemon, &remote, "Full", Some("1234")).await;
+    let full = pair_device(&daemon, &remote, "Full", Some("123456")).await;
     set_scopes(
         &daemon,
         &full.id,
@@ -808,7 +810,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     for attempt in 1..=5 {
         let response = client
             .post(format!("{remote}/api/remote/pair/claim"))
-            .json(&json!({ "code": wrong, "deviceName": "Attacker" }))
+            .json(&json!({ "verificationCode": "1234", "code": wrong, "deviceName": "Attacker" }))
             .send()
             .await
             .unwrap();
@@ -828,7 +830,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     }
     let locked = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": good_code, "deviceName": "Attacker" }))
+        .json(&json!({ "verificationCode": "1234", "code": good_code, "deviceName": "Attacker" }))
         .send()
         .await
         .unwrap();
@@ -852,9 +854,20 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
         .unwrap();
     let code = issued["code"].as_str().unwrap().to_string();
 
+    // The PIN is set on the device and must be at least six digits.
+    let short_pin = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Pixel", "pin": "12345" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(short_pin.status(), StatusCode::BAD_REQUEST);
+    let short_pin: Value = short_pin.json().await.unwrap();
+    assert_eq!(short_pin["error"]["code"], "pairing_bad_pin");
+
     let claim: Value = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "Pixel", "pin": "1234" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Pixel", "pin": "123456" }))
         .send()
         .await
         .unwrap()
@@ -868,7 +881,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     // The code is single use even before the host answers.
     let reused = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "Other" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Other" }))
         .send()
         .await
         .unwrap();
@@ -895,9 +908,39 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
         .unwrap();
     assert_eq!(wrong_secret.status(), StatusCode::BAD_REQUEST);
 
+    // The host sees the four-digit code the device is showing.
+    let pending: Value = client
+        .get(format!("{host}/api/remote/pair/pending"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let visible = pending["pairings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pairing| pairing["deviceName"] == "Pixel")
+        .expect("the pending device is listed");
+    assert_eq!(visible["verificationCode"], "1234");
+
+    // A host that types the wrong code does not pair the device.
+    let mismatched = client
+        .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "verificationCode": "0000" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mismatched.status(), StatusCode::BAD_REQUEST);
+    let mismatched: Value = mismatched.json().await.unwrap();
+    assert_eq!(mismatched["error"]["code"], "pairing_verification_mismatch");
+
     let confirmed = client
         .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
         .headers(host_headers(&daemon))
+        .json(&json!({ "verificationCode": "1234" }))
         .send()
         .await
         .unwrap();
@@ -945,7 +988,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     let code = issued["code"].as_str().unwrap().to_string();
     let denied_claim: Value = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "Denied" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Denied" }))
         .send()
         .await
         .unwrap()
@@ -1004,7 +1047,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
     let claim = client
         .post(format!("{remote}/api/remote/pair/claim"))
         .header("cf-connecting-ip", "203.0.113.9")
-        .json(&json!({ "code": code, "deviceName": "Tunnel phone" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Tunnel phone" }))
         .send()
         .await
         .unwrap();
@@ -1031,7 +1074,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
     let code = issue(client.clone(), host.clone(), daemon.state.csrf.to_string()).await;
     let claim = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "Untrusted phone" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Untrusted phone" }))
         .send()
         .await
         .unwrap();
@@ -1061,7 +1104,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
     let claim = client
         .post(format!("{remote}/api/remote/pair/claim"))
         .header("cf-connecting-ip", "not-an-ip")
-        .json(&json!({ "code": code, "deviceName": "Spoof phone" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Spoof phone" }))
         .send()
         .await
         .unwrap();
@@ -1107,7 +1150,7 @@ async fn pairing_queue_is_capped_at_three_claims() {
         let code = issued["code"].as_str().unwrap().to_string();
         let claim: Value = client
             .post(format!("{remote}/api/remote/pair/claim"))
-            .json(&json!({ "code": code, "deviceName": format!("Queue {index}") }))
+            .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": format!("Queue {index}") }))
             .send()
             .await
             .unwrap()
@@ -1133,7 +1176,7 @@ async fn pairing_queue_is_capped_at_three_claims() {
     let code = issued["code"].as_str().unwrap().to_string();
     let blocked = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "Queue 3" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Queue 3" }))
         .send()
         .await
         .unwrap();
@@ -1148,13 +1191,14 @@ async fn pairing_queue_is_capped_at_three_claims() {
             first_claim.unwrap()
         ))
         .headers(host_headers(&daemon))
+        .json(&json!({ "verificationCode": "1234" }))
         .send()
         .await
         .unwrap();
     assert!(confirmed.status().is_success());
     let retried = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "Queue 3" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "Queue 3" }))
         .send()
         .await
         .unwrap();
@@ -1315,7 +1359,7 @@ async fn host_mutations_reject_cross_origin_forms_and_require_csrf() {
     let code = issued["code"].as_str().unwrap().to_string();
     let claim: Value = client
         .post(format!("{remote}/api/remote/pair/claim"))
-        .json(&json!({ "code": code, "deviceName": "CSRF pending" }))
+        .json(&json!({ "verificationCode": "1234", "code": code, "deviceName": "CSRF pending" }))
         .send()
         .await
         .unwrap()
@@ -1561,6 +1605,7 @@ async fn host_mutations_reject_cross_origin_forms_and_require_csrf() {
     let confirmed = client
         .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
         .headers(host_headers(&daemon))
+        .json(&json!({ "verificationCode": "1234" }))
         .send()
         .await
         .unwrap();
@@ -1685,7 +1730,7 @@ async fn remote_approvals_need_the_pin_and_cannot_be_replayed() {
     let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
     let client = reqwest::Client::new();
     let host = host_base(&daemon);
-    let device = pair_device(&daemon, &remote, "Approver", Some("1234")).await;
+    let device = pair_device(&daemon, &remote, "Approver", Some("123456")).await;
     set_scopes(&daemon, &device.id, &["view", "respond"], true).await;
 
     let proxy = client.clone();
@@ -1731,7 +1776,7 @@ async fn remote_approvals_need_the_pin_and_cannot_be_replayed() {
             "decision": "approve",
             "nonce": nonce,
             "sessionId": session_id,
-            "pin": "9999",
+            "pin": "999999",
         }))
         .send()
         .await
@@ -1747,7 +1792,7 @@ async fn remote_approvals_need_the_pin_and_cannot_be_replayed() {
             "decision": "approve",
             "nonce": nonce,
             "sessionId": session_id,
-            "pin": "1234",
+            "pin": "123456",
         }))
         .send()
         .await
@@ -1772,7 +1817,7 @@ async fn remote_approvals_need_the_pin_and_cannot_be_replayed() {
             "decision": "approve",
             "nonce": nonce,
             "sessionId": session_id,
-            "pin": "1234",
+            "pin": "123456",
         }))
         .send()
         .await
@@ -1800,6 +1845,146 @@ async fn remote_approvals_need_the_pin_and_cannot_be_replayed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn respond_locks_after_five_wrong_pins_until_the_host_resets_it() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device(&daemon, &remote, "Locked", Some("123456")).await;
+    set_scopes(&daemon, &device.id, &["view", "respond"], true).await;
+
+    let proxy = client.clone();
+    let proxy_url = format!("{host}/v1/chat/completions");
+    let pending_request = tokio::spawn(async move {
+        proxy
+            .post(proxy_url)
+            .json(&destructive_request())
+            .send()
+            .await
+            .unwrap()
+    });
+
+    let event = wait_for_pending_event(&client, &host).await;
+    let event_id = event["id"].as_str().unwrap().to_string();
+    let nonce = event["approvalNonce"].as_str().unwrap().to_string();
+    let session_id = event["sessionId"].as_str().unwrap().to_string();
+
+    for attempt in 1..=5 {
+        let response = client
+            .post(format!(
+                "{remote}/api/remote/guards/events/{event_id}/decision"
+            ))
+            .bearer_auth(&device.token)
+            .json(&json!({
+                "decision": "approve",
+                "nonce": nonce,
+                "sessionId": session_id,
+                "pin": "999999",
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().await.unwrap();
+        if attempt < 5 {
+            assert_eq!(status, StatusCode::FORBIDDEN);
+            assert_eq!(body["error"]["code"], "pin_invalid");
+        } else {
+            assert_eq!(status, StatusCode::LOCKED);
+            assert_eq!(body["error"]["code"], "respond_locked");
+        }
+    }
+
+    // Even the right PIN is refused while Respond is locked.
+    let locked = client
+        .post(format!(
+            "{remote}/api/remote/guards/events/{event_id}/decision"
+        ))
+        .bearer_auth(&device.token)
+        .json(&json!({
+            "decision": "approve",
+            "nonce": nonce,
+            "sessionId": session_id,
+            "pin": "123456",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(locked.status(), StatusCode::LOCKED);
+
+    let listed: Value = client
+        .get(format!("{host}/api/remote/devices"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let row = listed["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == device.id)
+        .expect("the device is listed");
+    assert_eq!(row["respondLocked"], true);
+    assert_eq!(row["pinFailures"], 5);
+
+    let reset = client
+        .post(format!(
+            "{host}/api/remote/devices/{}/reset-respond",
+            device.id
+        ))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(reset.status().is_success());
+    let reset: Value = reset.json().await.unwrap();
+    assert_eq!(reset["device"]["respondLocked"], false);
+    assert_eq!(reset["device"]["pinFailures"], 0);
+
+    let approved = client
+        .post(format!(
+            "{remote}/api/remote/guards/events/{event_id}/decision"
+        ))
+        .bearer_auth(&device.token)
+        .json(&json!({
+            "decision": "approve",
+            "nonce": nonce,
+            "sessionId": session_id,
+            "pin": "123456",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(approved.status(), StatusCode::OK);
+    tokio::time::timeout(Duration::from_secs(5), pending_request)
+        .await
+        .expect("the proxy request finishes")
+        .unwrap();
+
+    let audit: Value = client
+        .get(format!("{host}/api/remote/audit?limit=200"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events: Vec<String> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|entry| entry["event"].as_str().map(str::to_string))
+        .collect();
+    assert!(events.iter().any(|event| event == "device.respond_locked"));
+    assert!(events.iter().any(|event| event == "device.respond_reset"));
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn expired_remote_approvals_are_refused() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();
@@ -1820,7 +2005,7 @@ async fn expired_remote_approvals_are_refused() {
     assert!(response.status().is_success());
 
     let client = reqwest::Client::new();
-    let device = pair_device(&daemon, &remote, "Slow", Some("1234")).await;
+    let device = pair_device(&daemon, &remote, "Slow", Some("123456")).await;
     set_scopes(&daemon, &device.id, &["view", "respond"], true).await;
 
     let proxy = client.clone();
@@ -1848,7 +2033,7 @@ async fn expired_remote_approvals_are_refused() {
             "decision": "approve",
             "nonce": nonce,
             "sessionId": session_id,
-            "pin": "1234",
+            "pin": "123456",
         }))
         .send()
         .await
@@ -1873,7 +2058,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
     let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
     let client = reqwest::Client::new();
     let host = host_base(&daemon);
-    let device = pair_device(&daemon, &remote, "Prompter", Some("1234")).await;
+    let device = pair_device(&daemon, &remote, "Prompter", Some("123456")).await;
     set_scopes(&daemon, &device.id, &["view", "respond", "prompt"], false).await;
 
     let registered: Value = client
@@ -2299,7 +2484,7 @@ async fn authentication_prompts_must_be_completed_at_the_computer() {
     let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
     let client = reqwest::Client::new();
     let host = host_base(&daemon);
-    let device = pair_device(&daemon, &remote, "Approver", Some("1234")).await;
+    let device = pair_device(&daemon, &remote, "Approver", Some("123456")).await;
     set_scopes(&daemon, &device.id, &["view", "respond"], true).await;
 
     let (event_id, session_id) = insert_pending_event(
@@ -2318,7 +2503,7 @@ async fn authentication_prompts_must_be_completed_at_the_computer() {
             "decision": "approve",
             "nonce": "auth-prompt-nonce",
             "sessionId": session_id,
-            "pin": "1234",
+            "pin": "123456",
         }))
         .send()
         .await
@@ -2364,7 +2549,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
     let client = reqwest::Client::new();
     let host = host_base(&daemon);
 
-    let device = pair_device(&daemon, &remote, "Audit phone", Some("1234")).await;
+    let device = pair_device(&daemon, &remote, "Audit phone", Some("123456")).await;
     set_scopes(&daemon, &device.id, &["view", "respond", "prompt"], false).await;
 
     let registered: Value = client
@@ -2445,6 +2630,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         .json(&json!({
             "code": issued["code"].as_str().unwrap(),
             "deviceName": "Denied phone",
+            "verificationCode": "1234",
         }))
         .send()
         .await

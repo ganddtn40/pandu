@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::error::{DaemonError, Result};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -286,6 +286,11 @@ CREATE TABLE IF NOT EXISTS remote_devices (
   pin_hash TEXT,
   scopes TEXT NOT NULL DEFAULT '["view:status"]',
   require_host_confirmation INTEGER NOT NULL DEFAULT 1,
+  pin_failures INTEGER NOT NULL DEFAULT 0,
+  respond_locked_at TEXT,
+  expires_at TEXT,
+  previous_token_hash TEXT,
+  previous_token_expires_at TEXT,
   created_at TEXT NOT NULL,
   last_seen_at TEXT,
   revoked_at TEXT
@@ -302,7 +307,9 @@ CREATE TABLE IF NOT EXISTS remote_audit (
   ip TEXT,
   detail TEXT NOT NULL DEFAULT '{}',
   size_bytes INTEGER,
-  content_hash TEXT
+  content_hash TEXT,
+  prev_hash TEXT,
+  entry_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_remote_audit_at ON remote_audit(at DESC);
@@ -493,6 +500,25 @@ fn migrate_schema(connection: &Connection, from: u32) -> Result<()> {
     if from < 2 {
         add_column_if_missing(connection, "guard_events", "approval_nonce", "TEXT")?;
         add_column_if_missing(connection, "guard_events", "approval_expires_at", "TEXT")?;
+    }
+    if from < 4 {
+        add_column_if_missing(
+            connection,
+            "remote_devices",
+            "pin_failures",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(connection, "remote_devices", "respond_locked_at", "TEXT")?;
+        add_column_if_missing(connection, "remote_devices", "expires_at", "TEXT")?;
+        add_column_if_missing(connection, "remote_devices", "previous_token_hash", "TEXT")?;
+        add_column_if_missing(
+            connection,
+            "remote_devices",
+            "previous_token_expires_at",
+            "TEXT",
+        )?;
+        add_column_if_missing(connection, "remote_audit", "prev_hash", "TEXT")?;
+        add_column_if_missing(connection, "remote_audit", "entry_hash", "TEXT")?;
     }
     Ok(())
 }
@@ -2327,8 +2353,10 @@ impl Store {
         connection.execute(
             "INSERT INTO remote_devices
                 (id, name, token_hash, pin_salt, pin_hash, scopes,
-                 require_host_confirmation, created_at, last_seen_at, revoked_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)",
+                 require_host_confirmation, pin_failures, respond_locked_at,
+                 expires_at, previous_token_hash, previous_token_expires_at,
+                 created_at, last_seen_at, revoked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, NULL, NULL, NULL, NULL, ?8, NULL, NULL)",
             params![
                 device.id,
                 device.name,
@@ -2348,7 +2376,9 @@ impl Store {
         let connection = self.lock()?;
         let mut statement = connection.prepare(
             "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
-                    require_host_confirmation, created_at, last_seen_at, revoked_at
+                    require_host_confirmation, pin_failures, respond_locked_at,
+                    expires_at, previous_token_hash, previous_token_expires_at,
+                    created_at, last_seen_at, revoked_at
              FROM remote_devices ORDER BY created_at DESC",
         )?;
         let rows = statement.query_map([], row_to_remote_device)?;
@@ -2372,7 +2402,9 @@ impl Store {
         Ok(connection
             .query_row(
                 "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
-                        require_host_confirmation, created_at, last_seen_at, revoked_at
+                        require_host_confirmation, pin_failures, respond_locked_at,
+                    expires_at, previous_token_hash, previous_token_expires_at,
+                    created_at, last_seen_at, revoked_at
                  FROM remote_devices WHERE token_hash = ?1",
                 params![token_hash],
                 row_to_remote_device,
@@ -2397,7 +2429,9 @@ impl Store {
         Ok(connection
             .query_row(
                 "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
-                        require_host_confirmation, created_at, last_seen_at, revoked_at
+                        require_host_confirmation, pin_failures, respond_locked_at,
+                    expires_at, previous_token_hash, previous_token_expires_at,
+                    created_at, last_seen_at, revoked_at
                  FROM remote_devices WHERE id = ?1",
                 params![id],
                 row_to_remote_device,
@@ -2442,6 +2476,41 @@ impl Store {
             )?;
         }
         self.get_remote_device_with(&connection, id)
+    }
+
+    /// Count a wrong high-risk PIN. The fifth failure locks Respond for this
+    /// device until the host explicitly resets it. The update and the read are
+    /// one statement so two concurrent attempts cannot both see "four".
+    pub fn record_remote_pin_failure(
+        &self,
+        id: &str,
+        threshold: u32,
+    ) -> Result<Option<RemoteDeviceRow>> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE remote_devices
+             SET pin_failures = pin_failures + 1,
+                 respond_locked_at = CASE
+                     WHEN pin_failures + 1 >= ?2 AND respond_locked_at IS NULL THEN ?3
+                     ELSE respond_locked_at
+                 END
+             WHERE id = ?1",
+            params![id, threshold as i64, now_iso()],
+        )?;
+        self.get_remote_device_with(&connection, id)
+    }
+
+    /// Clear the PIN failure count and the Respond lock after a correct PIN or
+    /// an explicit host reset.
+    pub fn clear_remote_pin_failures(&self, id: &str) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE remote_devices
+             SET pin_failures = 0, respond_locked_at = NULL
+             WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn revoke_remote_device(&self, id: &str, at: &str) -> Result<bool> {
@@ -2543,6 +2612,11 @@ pub struct RemoteDeviceRow {
     pub pin_hash: Option<String>,
     pub scopes: Vec<String>,
     pub require_host_confirmation: bool,
+    pub pin_failures: u32,
+    pub respond_locked_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub previous_token_hash: Option<String>,
+    pub previous_token_expires_at: Option<String>,
     pub created_at: String,
     pub last_seen_at: Option<String>,
     pub revoked_at: Option<String>,
@@ -2590,9 +2664,14 @@ fn row_to_remote_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteDevic
         pin_hash: row.get(4)?,
         scopes: serde_json::from_str(&scopes).unwrap_or_default(),
         require_host_confirmation: row.get::<_, i64>(6)? != 0,
-        created_at: row.get(7)?,
-        last_seen_at: row.get(8)?,
-        revoked_at: row.get(9)?,
+        pin_failures: row.get::<_, i64>(7)? as u32,
+        respond_locked_at: row.get(8)?,
+        expires_at: row.get(9)?,
+        previous_token_hash: row.get(10)?,
+        previous_token_expires_at: row.get(11)?,
+        created_at: row.get(12)?,
+        last_seen_at: row.get(13)?,
+        revoked_at: row.get(14)?,
     })
 }
 

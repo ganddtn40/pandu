@@ -33,6 +33,8 @@ use crate::remote::{
 use crate::state::AppState;
 
 pub const REMOTE_BODY_LIMIT: usize = 64 * 1024;
+/// Wrong high-risk PINs before Respond locks for this device until a host reset.
+pub const MAX_PIN_FAILURES: u32 = 5;
 
 pub fn build_remote_router(state: AppState) -> Router {
     let public = Router::new()
@@ -108,6 +110,7 @@ struct PairClaimInput {
     device_name: String,
     #[serde(default)]
     pin: Option<String>,
+    verification_code: String,
 }
 
 async fn pair_claim(
@@ -138,6 +141,7 @@ async fn pair_claim(
         &input.code,
         &input.device_name,
         input.pin.as_deref(),
+        &input.verification_code,
         audit_ip.as_deref(),
     ) {
         Ok(ticket) => {
@@ -234,6 +238,8 @@ async fn session_info(
         "scopes": principal.scopes.to_strings(),
         "requireHostConfirmation": principal.require_host_confirmation,
         "hasPin": principal.has_pin(),
+        "pinFailures": principal.pin_failures,
+        "respondLocked": principal.respond_locked,
         "mode": state.remote.mode().as_str(),
         "url": state.remote.url(),
     }))
@@ -327,6 +333,13 @@ async fn guard_decision(
     if let Some(response) = require_scope(&principal, Scope::Respond) {
         return response;
     }
+    if principal.respond_locked {
+        return api_error(
+            StatusCode::LOCKED,
+            "respond_locked",
+            "Too many wrong PINs. Unlock Respond from the host before this device can approve or deny again.",
+        );
+    }
     if !is_id(&id) {
         return api_error(
             StatusCode::BAD_REQUEST,
@@ -362,10 +375,6 @@ async fn guard_decision(
         GuardSeverity::High | GuardSeverity::Critical
     ) || event.kind == GuardRuleKind::DangerousCommand;
     if high_risk {
-        let pin_key = format!("pin:{}", principal.device_id);
-        if let Some(remaining) = state.remote.lockout_for(&pin_key) {
-            return rate_limited(remaining);
-        }
         if !principal.has_pin() {
             return api_error(
                 StatusCode::CONFLICT,
@@ -381,25 +390,52 @@ async fn guard_decision(
             );
         };
         if !principal.verify_pin(pin) {
-            let lock = state.remote.record_auth_failure(&pin_key);
+            let updated = state
+                .store
+                .record_remote_pin_failure(&principal.device_id, MAX_PIN_FAILURES)
+                .ok()
+                .flatten();
+            let failures = updated
+                .as_ref()
+                .map(|device| device.pin_failures)
+                .unwrap_or(principal.pin_failures.saturating_add(1));
+            let locked = updated
+                .as_ref()
+                .is_some_and(|device| device.respond_locked_at.is_some());
+            if locked {
+                state.remote.audit(
+                    "device.respond_locked",
+                    Some((&principal.device_id, &principal.device_name)),
+                    identity.audit_ip(),
+                    json!({ "eventId": event.id, "failures": failures }),
+                    None,
+                    None,
+                );
+                return api_error(
+                    StatusCode::LOCKED,
+                    "respond_locked",
+                    "Too many wrong PINs. Unlock Respond from the host before this device can approve or deny again.",
+                );
+            }
             state.remote.audit(
                 "approval.pin_failed",
                 Some((&principal.device_id, &principal.device_name)),
                 identity.audit_ip(),
-                json!({ "eventId": event.id }),
+                json!({ "eventId": event.id, "failures": failures }),
                 None,
                 None,
             );
-            if lock > Duration::ZERO {
-                return rate_limited(lock);
-            }
+            let remaining = MAX_PIN_FAILURES.saturating_sub(failures);
             return api_error(
                 StatusCode::FORBIDDEN,
                 "pin_invalid",
-                "That PIN is not correct.",
+                format!("That PIN is not correct. {remaining} attempts left before Respond locks."),
             );
         }
-        state.remote.clear_auth_failures(&pin_key);
+        let _ = state.store.clear_remote_pin_failures(&principal.device_id);
+        state
+            .remote
+            .clear_auth_failures(&format!("pin:{}", principal.device_id));
     }
 
     let decision = ApprovalDecisionInput {

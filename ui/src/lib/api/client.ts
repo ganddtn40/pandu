@@ -317,10 +317,10 @@ export const remoteApi = {
   pairCode: () => request<RemotePairingCode>('/remote/pair/code', { method: 'POST' }),
   pendingPairings: () =>
     request<{ pairings: RemotePendingPairing[] }>('/remote/pair/pending'),
-  confirmPairing: (id: string) =>
+  confirmPairing: (id: string, verificationCode: string) =>
     request<{ pairing: { deviceId: string; deviceName: string; createdAt: string } }>(
       `/remote/pair/pending/${encodeURIComponent(id)}/confirm`,
-      { method: 'POST' },
+      { method: 'POST', body: JSON.stringify({ verificationCode }) },
     ),
   denyPairing: (id: string) =>
     request<{ denied: boolean }>(`/remote/pair/pending/${encodeURIComponent(id)}/deny`, {
@@ -339,6 +339,11 @@ export const remoteApi = {
     request<{ revoked: boolean }>(`/remote/devices/${encodeURIComponent(id)}/revoke`, {
       method: 'POST',
     }),
+  resetRespond: (id: string) =>
+    request<{ device: RemoteDevice }>(
+      `/remote/devices/${encodeURIComponent(id)}/reset-respond`,
+      { method: 'POST' },
+    ),
   rotateDevice: (id: string) =>
     request<{ token: string; device: RemoteDevice; note: string }>(
       `/remote/devices/${encodeURIComponent(id)}/rotate`,
@@ -374,10 +379,15 @@ export const remoteApi = {
  * in the Authorization header; no token ever appears in a URL.
  */
 export const remoteDeviceApi = {
-  claim: (code: string, deviceName: string, pin?: string) =>
+  claim: (code: string, deviceName: string, pin: string | undefined, verificationCode: string) =>
     requestAt<RemoteClaimTicket>(daemonOrigin(), '/remote/pair/claim', {
       method: 'POST',
-      body: JSON.stringify({ code, deviceName, ...(pin ? { pin } : {}) }),
+      body: JSON.stringify({
+        code,
+        deviceName,
+        verificationCode,
+        ...(pin ? { pin } : {}),
+      }),
     }),
   pollClaim: (id: string, secret: string) =>
     requestAt<RemoteClaimPoll>(

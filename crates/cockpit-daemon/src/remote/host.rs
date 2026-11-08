@@ -160,11 +160,33 @@ pub async fn pending_pairings(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "pairings": state.pairing.pending() }))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmPairingInput {
+    pub verification_code: String,
+}
+
 pub async fn confirm_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Json(input): Json<ConfirmPairingInput>,
 ) -> Result<Json<Value>, ApiError> {
-    let pairing = state.pairing.confirm(&id).map_err(pairing_error)?;
+    let pairing = match state.pairing.confirm(&id, &input.verification_code) {
+        Ok(pairing) => pairing,
+        Err(error) => {
+            if error == crate::remote::pairing::PairingError::VerificationMismatch {
+                state.remote.audit(
+                    "pair.verify_failed",
+                    None,
+                    None,
+                    json!({ "claimId": id }),
+                    None,
+                    None,
+                );
+            }
+            return Err(pairing_error(error));
+        }
+    };
     state.remote.audit(
         "pair.confirm",
         Some((&pairing.device_id, &pairing.device_name)),
@@ -248,6 +270,37 @@ pub async fn update_device(
             "scopes": updated.scopes,
             "requireHostConfirmation": updated.require_host_confirmation,
         }),
+        None,
+        None,
+    );
+    Ok(Json(
+        json!({ "device": RemoteDeviceView::from_row(&updated) }),
+    ))
+}
+
+pub async fn reset_device_respond(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let device = state
+        .store
+        .get_remote_device(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That device does not exist."))?;
+    state
+        .store
+        .clear_remote_pin_failures(&id)
+        .map_err(store_error)?;
+    let updated = state
+        .store
+        .get_remote_device(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That device does not exist."))?;
+    state.remote.audit(
+        "device.respond_reset",
+        Some((&device.id, &device.name)),
+        None,
+        json!({ "previousFailures": device.pin_failures }),
         None,
         None,
     );
@@ -510,6 +563,8 @@ pub struct RemoteDeviceView {
     pub scopes: Vec<String>,
     pub require_host_confirmation: bool,
     pub has_pin: bool,
+    pub pin_failures: u32,
+    pub respond_locked: bool,
     pub created_at: String,
     pub last_seen_at: Option<String>,
     pub revoked_at: Option<String>,
@@ -523,6 +578,8 @@ impl RemoteDeviceView {
             scopes: ScopeSet::from_strings(&row.scopes).to_strings(),
             require_host_confirmation: row.require_host_confirmation,
             has_pin: row.pin_hash.is_some(),
+            pin_failures: row.pin_failures,
+            respond_locked: row.respond_locked_at.is_some(),
             created_at: row.created_at.clone(),
             last_seen_at: row.last_seen_at.clone(),
             revoked_at: row.revoked_at.clone(),

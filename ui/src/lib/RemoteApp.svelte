@@ -42,6 +42,9 @@
   let pairStatus = $state<PairStatus>('idle');
   let pairError = $state<string | null>(null);
   let ticket = $state<RemoteClaimTicket | null>(null);
+  let verificationCode = $state('');
+  let pairedHasPin = $state(false);
+  let showPairingSummary = $state(false);
   let pollTimer: number | undefined;
 
   // Flights
@@ -95,6 +98,16 @@
     pollTimer = undefined;
   }
 
+  function newVerificationCode(): string {
+    const values = new Uint32Array(1);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(values);
+    } else {
+      values[0] = Math.floor(Math.random() * 10_000);
+    }
+    return String(values[0] % 10_000).padStart(4, '0');
+  }
+
   async function submitPairing(): Promise<void> {
     if (pairBusy) return;
     pairError = null;
@@ -102,9 +115,20 @@
       pairError = t('remote.pairFailed');
       return;
     }
+    const trimmedPin = pin.trim();
+    if (trimmedPin && !/^\d{6,12}$/.test(trimmedPin)) {
+      pairError = t('remote.pairPinInvalid');
+      return;
+    }
     pairBusy = true;
     try {
-      ticket = await claimPairing(code.trim(), deviceName.trim() || 'Remote device', pin.trim() || undefined);
+      verificationCode = newVerificationCode();
+      ticket = await claimPairing(
+        code.trim(),
+        deviceName.trim() || 'Remote device',
+        trimmedPin || undefined,
+        verificationCode,
+      );
       pairStatus = 'waiting';
       stopPolling();
       pollTimer = window.setInterval(() => void pollOnce(), 1_500);
@@ -124,6 +148,8 @@
         stopPolling();
         ticket = null;
         pairStatus = 'idle';
+        pairedHasPin = pin.trim().length > 0;
+        showPairingSummary = true;
         toast(t('remote.pairApproved'));
         acceptPairingToken(result.token);
       } else if (result.status === 'denied') {
@@ -262,6 +288,11 @@
             <span>{deviceName}</span>
           </div>
         </div>
+        <div class="remote-verify" aria-live="polite">
+          <span class="kicker">{t('remote.verificationCode')}</span>
+          <strong class="remote-verify__code">{verificationCode}</strong>
+          <p>{t('remote.verificationBody')}</p>
+        </div>
         <button class="text-link" type="button" onclick={() => { stopPolling(); ticket = null; pairStatus = 'idle'; }}>
           {t('common.cancel')}
         </button>
@@ -295,7 +326,9 @@
               bind:value={pin}
               autocomplete="new-password"
               inputmode="numeric"
+              minlength="6"
               maxlength="12"
+              pattern={'\\d{6,12}'}
             />
             <small>{t('remote.pairPinNote')}</small>
           </label>
@@ -326,6 +359,36 @@
       </label>
       <button class="btn btn--small btn--ghost" type="button" onclick={useToken} disabled={!pasteToken.trim()}>
         {t('remote.useToken')}
+      </button>
+    </section>
+  </main>
+{:else if showPairingSummary}
+  <main class="remote-app remote-app--gate">
+    <div class="remote-app__brand">
+      <span class="remote-app__mark"><Icon name="check" size={22} /></span>
+      <div>
+        <strong>{t('remote.appTitle')}</strong>
+        <span>{t('remote.appSubtitle')}</span>
+      </div>
+    </div>
+    <section class="card remote-app__panel">
+      <div class="remote-app__panel-head">
+        <h1>{t('remote.pairedTitle')}</h1>
+        <p>{t('remote.pairedBody')}</p>
+      </div>
+      <ul class="remote-app__paired-list">
+        <li>{t('remote.pairedStatus')}</li>
+        <li>{t('remote.pairedNoContent')}</li>
+        <li>{pairedHasPin ? t('remote.pairedPin') : t('remote.pairedNoPin')}</li>
+      </ul>
+      <button
+        class="btn btn--primary remote-app__submit"
+        type="button"
+        disabled={remoteState.phase !== 'ready'}
+        onclick={() => (showPairingSummary = false)}
+      >
+        <Icon name="plane" size={16} />
+        {t('remote.openDashboard')}
       </button>
     </section>
   </main>
@@ -449,6 +512,12 @@
             {t('remote.inboxNoScope')}
           </p>
         {/if}
+        {#if info?.respondLocked}
+          <p class="remote-app__note remote-app__note--warn">
+            <Icon name="lock" size={15} />
+            {t('remote.respondLocked')}
+          </p>
+        {/if}
 
         {#if pendingGuards.length === 0}
           <p class="remote-app__empty">{t('remote.inboxEmpty')}</p>
@@ -477,7 +546,7 @@
                       <p>{t('remote.needsHostBody')}</p>
                     </div>
                   </div>
-                {:else if canRespond}
+                {:else if canRespond && !info?.respondLocked}
                   {#if isHighRisk(event) && info?.hasPin}
                     <label class="remote-app__field remote-app__field--inline">
                       <span>{t('remote.pinRequired')}</span>

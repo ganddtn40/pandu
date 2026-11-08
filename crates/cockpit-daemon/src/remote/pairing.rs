@@ -14,8 +14,7 @@ use serde::Serialize;
 use tokio::sync::Notify;
 
 use crate::remote::auth::{
-    constant_time_eq, hash_pin, hash_token, new_pair_code, new_salt, new_token, valid_pair_code,
-    valid_pin,
+    constant_time_eq, hash_pin, hash_token, new_pair_code, new_token, valid_pair_code, valid_pin,
 };
 use crate::store::{NewRemoteDevice, Store, now_iso};
 
@@ -43,6 +42,9 @@ pub struct PendingPairing {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ip: Option<String>,
     pub has_pin: bool,
+    /// Four digits shown on the waiting device. The host must compare it and
+    /// send it back before the device receives a token.
+    pub verification_code: String,
 }
 
 /// What the host is allowed to see after confirming. The token is deliberately
@@ -88,6 +90,9 @@ pub enum PairingError {
     ClaimNotFound,
     AlreadyResolved,
     BadPin,
+    BadVerification,
+    VerificationMismatch,
+    Internal,
     Busy,
 }
 
@@ -102,7 +107,12 @@ impl PairingError {
             Self::Invalid => "That pairing code is not correct.",
             Self::ClaimNotFound => "That pairing request is no longer waiting.",
             Self::AlreadyResolved => "That pairing request was already answered.",
-            Self::BadPin => "The PIN must be 4 to 8 digits.",
+            Self::BadPin => "The PIN must be 6 to 12 digits.",
+            Self::BadVerification => "The verification code must be four digits.",
+            Self::VerificationMismatch => {
+                "That verification code does not match the one shown on the device."
+            }
+            Self::Internal => "Cockpit could not secure the PIN. Try pairing again.",
             Self::Busy => {
                 "Too many pairing requests are waiting for the host. Answer or deny one first."
             }
@@ -118,6 +128,9 @@ impl PairingError {
             Self::ClaimNotFound => "pairing_missing",
             Self::AlreadyResolved => "pairing_resolved",
             Self::BadPin => "pairing_bad_pin",
+            Self::BadVerification => "pairing_bad_verification",
+            Self::VerificationMismatch => "pairing_verification_mismatch",
+            Self::Internal => "pairing_internal",
             Self::Busy => "pairing_busy",
         }
     }
@@ -154,6 +167,7 @@ struct PendingClaim {
     id: String,
     secret: String,
     device_name: String,
+    verification_code: String,
     pin_salt: Option<String>,
     pin_hash: Option<String>,
     ip: Option<String>,
@@ -225,17 +239,24 @@ impl PairingManager {
         state.code.as_ref().map(|code| code.expires_at)
     }
 
-    /// Consume a code and open a claim that waits for host confirmation.
+    /// Consume a code and open a claim that waits for host confirmation. The
+    /// device chooses the four-digit verification code it displays; the host
+    /// must echo it before the claim is confirmed.
     pub fn begin_claim(
         &self,
         code: &str,
         device_name: &str,
         pin: Option<&str>,
+        verification_code: &str,
         ip: Option<&str>,
     ) -> PairingResult<ClaimTicket> {
         let normalized = code.trim().to_ascii_lowercase();
         if !valid_pair_code(&normalized) {
             return Err(PairingError::Invalid);
+        }
+        let verification_code = verification_code.trim();
+        if !valid_verification_code(verification_code) {
+            return Err(PairingError::BadVerification);
         }
         let pin = pin.map(str::trim).filter(|value| !value.is_empty());
         if pin.is_some_and(|value| !valid_pin(value)) {
@@ -287,9 +308,8 @@ impl PairingManager {
         let notify = Arc::new(Notify::new());
         let (pin_salt, pin_hash) = match pin {
             Some(pin) => {
-                let salt = new_salt();
-                let hash = hash_pin(&salt, pin);
-                (Some(salt), Some(hash))
+                let hash = hash_pin(pin).ok_or(PairingError::Internal)?;
+                (None, Some(hash))
             }
             None => (None, None),
         };
@@ -300,6 +320,7 @@ impl PairingManager {
                 id: claim_id.clone(),
                 secret: claim_secret.clone(),
                 device_name,
+                verification_code: verification_code.to_string(),
                 pin_salt,
                 pin_hash,
                 ip: ip.map(str::to_string),
@@ -379,6 +400,7 @@ impl PairingManager {
                 requested_at: claim.requested_at,
                 ip: claim.ip.clone(),
                 has_pin: claim.pin_hash.is_some(),
+                verification_code: claim.verification_code.clone(),
             })
             .collect();
         pending.sort_by_key(|left| left.requested_at);
@@ -386,8 +408,13 @@ impl PairingManager {
     }
 
     /// Host confirmation. Creates the device with Status only and hands the
-    /// one-time token to the waiting claim.
-    pub fn confirm(&self, claim_id: &str) -> PairingResult<ConfirmedPairing> {
+    /// one-time token to the waiting claim. The host must send the four-digit
+    /// code the device is showing.
+    pub fn confirm(
+        &self,
+        claim_id: &str,
+        verification_code: &str,
+    ) -> PairingResult<ConfirmedPairing> {
         let mut state = self.lock();
         let claim = state
             .claims
@@ -399,6 +426,12 @@ impl PairingManager {
         if claim.expires_at <= Utc::now() {
             state.claims.remove(claim_id);
             return Err(PairingError::Expired);
+        }
+        if !constant_time_eq(
+            claim.verification_code.as_bytes(),
+            verification_code.trim().as_bytes(),
+        ) {
+            return Err(PairingError::VerificationMismatch);
         }
 
         let token = new_token();
@@ -530,6 +563,10 @@ impl PairingManager {
     }
 }
 
+fn valid_verification_code(value: &str) -> bool {
+    value.len() == 4 && value.chars().all(|character| character.is_ascii_digit())
+}
+
 fn clean_device_name(value: &str) -> String {
     let name: String = value
         .trim()
@@ -574,6 +611,8 @@ fn hash_bytes(value: &str) -> [u8; 32] {
 mod tests {
     use super::*;
 
+    const VERIFY: &str = "4821";
+
     fn manager() -> Arc<PairingManager> {
         let store = Arc::new(Store::open(":memory:").expect("in-memory store"));
         PairingManager::new(store)
@@ -586,19 +625,35 @@ mod tests {
         assert_eq!(issued.code.len(), 32);
 
         let ticket = pairing
-            .begin_claim(&issued.code, "Pixel", Some("1234"), Some("127.0.0.1"))
+            .begin_claim(
+                &issued.code,
+                "Pixel",
+                Some("123456"),
+                VERIFY,
+                Some("127.0.0.1"),
+            )
             .expect("claim starts");
         assert_eq!(pairing.pending().len(), 1);
         assert_eq!(pairing.pending()[0].device_name, "Pixel");
+        assert_eq!(pairing.pending()[0].verification_code, VERIFY);
 
         // The code is consumed even before the host answers.
         assert!(
             pairing
-                .begin_claim(&issued.code, "Other", None, None)
+                .begin_claim(&issued.code, "Other", None, VERIFY, None)
                 .is_err()
         );
 
-        let confirmed = pairing.confirm(&ticket.claim_id).expect("host confirms");
+        // A wrong verification code leaves the claim waiting.
+        assert_eq!(
+            pairing.confirm(&ticket.claim_id, "0000").unwrap_err(),
+            PairingError::VerificationMismatch
+        );
+        assert_eq!(pairing.pending().len(), 1);
+
+        let confirmed = pairing
+            .confirm(&ticket.claim_id, VERIFY)
+            .expect("host confirms");
         assert_eq!(confirmed.device_name, "Pixel");
         let outcome = pairing.wait_for_claim(ticket).await;
         match outcome {
@@ -612,7 +667,9 @@ mod tests {
         let devices = pairing.store.list_remote_devices().unwrap();
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].scopes, vec!["view:status".to_string()]);
-        assert!(devices[0].pin_hash.is_some());
+        let hash = devices[0].pin_hash.as_deref().unwrap();
+        assert!(hash.starts_with("$argon2"));
+        assert!(devices[0].pin_salt.is_none());
     }
 
     #[tokio::test]
@@ -620,7 +677,7 @@ mod tests {
         let pairing = manager();
         let issued = pairing.issue_code();
         let ticket = pairing
-            .begin_claim(&issued.code, "Laptop", None, None)
+            .begin_claim(&issued.code, "Laptop", None, VERIFY, None)
             .unwrap();
         pairing.deny(&ticket.claim_id).unwrap();
         assert!(matches!(
@@ -637,19 +694,23 @@ mod tests {
         for _ in 0..MAX_ATTEMPTS - 1 {
             assert_eq!(
                 pairing
-                    .begin_claim(&"0".repeat(32), "X", None, None)
+                    .begin_claim(&"0".repeat(32), "X", None, VERIFY, None)
                     .unwrap_err(),
                 PairingError::Invalid
             );
         }
         assert_eq!(
             pairing
-                .begin_claim(&"0".repeat(32), "X", None, None)
+                .begin_claim(&"0".repeat(32), "X", None, VERIFY, None)
                 .unwrap_err(),
             PairingError::TooManyAttempts
         );
         // Even the correct code is gone after the attempt limit.
-        assert!(pairing.begin_claim(&issued.code, "X", None, None).is_err());
+        assert!(
+            pairing
+                .begin_claim(&issued.code, "X", None, VERIFY, None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -662,28 +723,46 @@ mod tests {
         }
         assert_eq!(
             pairing
-                .begin_claim(&issued.code, "X", None, None)
+                .begin_claim(&issued.code, "X", None, VERIFY, None)
                 .unwrap_err(),
             PairingError::Expired
         );
     }
 
     #[test]
-    fn malformed_codes_and_pins_are_rejected() {
+    fn malformed_codes_pins_and_verification_codes_are_rejected() {
         let pairing = manager();
         let issued = pairing.issue_code();
         assert_eq!(
-            pairing.begin_claim("123456", "X", None, None).unwrap_err(),
+            pairing
+                .begin_claim("123456", "X", None, VERIFY, None)
+                .unwrap_err(),
             PairingError::Invalid
         );
         assert_eq!(
             pairing
-                .begin_claim(&issued.code, "X", Some("12"), None)
+                .begin_claim(&issued.code, "X", Some("12345"), VERIFY, None)
                 .unwrap_err(),
             PairingError::BadPin
         );
-        // Neither malformed attempt consumed the code.
-        assert!(pairing.begin_claim(&issued.code, "X", None, None).is_ok());
+        assert_eq!(
+            pairing
+                .begin_claim(&issued.code, "X", None, "12", None)
+                .unwrap_err(),
+            PairingError::BadVerification
+        );
+        assert_eq!(
+            pairing
+                .begin_claim(&issued.code, "X", None, "12a4", None)
+                .unwrap_err(),
+            PairingError::BadVerification
+        );
+        // None of the malformed attempts consumed the code.
+        assert!(
+            pairing
+                .begin_claim(&issued.code, "X", None, VERIFY, None)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -691,8 +770,16 @@ mod tests {
         let pairing = manager();
         let first = pairing.issue_code();
         let second = pairing.issue_code();
-        assert!(pairing.begin_claim(&first.code, "X", None, None).is_err());
-        assert!(pairing.begin_claim(&second.code, "X", None, None).is_ok());
+        assert!(
+            pairing
+                .begin_claim(&first.code, "X", None, VERIFY, None)
+                .is_err()
+        );
+        assert!(
+            pairing
+                .begin_claim(&second.code, "X", None, VERIFY, None)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -702,7 +789,7 @@ mod tests {
         for index in 0..MAX_PENDING_CLAIMS {
             let issued = pairing.issue_code();
             let ticket = pairing
-                .begin_claim(&issued.code, &format!("Device {index}"), None, None)
+                .begin_claim(&issued.code, &format!("Device {index}"), None, VERIFY, None)
                 .expect("claim starts below the cap");
             tickets.push(ticket);
         }
@@ -711,7 +798,7 @@ mod tests {
         let issued = pairing.issue_code();
         assert_eq!(
             pairing
-                .begin_claim(&issued.code, "Extra", None, None)
+                .begin_claim(&issued.code, "Extra", None, VERIFY, None)
                 .unwrap_err(),
             PairingError::Busy
         );
@@ -720,7 +807,7 @@ mod tests {
         pairing.deny(&tickets[0].claim_id).unwrap();
         assert!(
             pairing
-                .begin_claim(&issued.code, "Extra", None, None)
+                .begin_claim(&issued.code, "Extra", None, VERIFY, None)
                 .is_ok()
         );
     }

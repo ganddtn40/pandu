@@ -173,6 +173,9 @@ struct PairArgs {
     /// Pairing PIN for high-risk approvals, used with --claim.
     #[arg(long, value_name = "PIN")]
     pin: Option<String>,
+    /// Four-digit code shown to the host, used with --claim. Generated when omitted.
+    #[arg(long = "verification-code", value_name = "CODE")]
+    verification_code: Option<String>,
     /// Print JSON instead of a human-readable summary.
     #[arg(long)]
     json: bool,
@@ -813,12 +816,20 @@ async fn pair(config: Config, args: PairArgs) -> anyhow::Result<()> {
             .device_name
             .clone()
             .unwrap_or_else(|| "Cockpit CLI".to_string());
+        let verification_code = args
+            .verification_code
+            .clone()
+            .unwrap_or_else(|| format!("{:04}", rand::random::<u16>() % 10_000));
+        eprintln!(
+            "Verification code: {verification_code}\nCompare this code with the host before it confirms."
+        );
         let response = client
             .post(format!("{base}/api/remote/pair/claim"))
             .json(&json!({
                 "code": code,
                 "deviceName": device_name,
                 "pin": args.pin,
+                "verificationCode": verification_code,
             }))
             .send()
             .await

@@ -229,9 +229,10 @@ export function initRemoteApp(): () => void {
 export function claimPairing(
   code: string,
   deviceName: string,
-  pin?: string,
+  pin: string | undefined,
+  verificationCode: string,
 ): Promise<RemoteClaimTicket> {
-  return remoteDeviceApi.claim(code, deviceName, pin);
+  return remoteDeviceApi.claim(code, deviceName, pin, verificationCode);
 }
 
 export function pollPairing(ticket: RemoteClaimTicket): Promise<RemoteClaimPoll> {

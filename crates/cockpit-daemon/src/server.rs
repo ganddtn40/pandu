@@ -91,6 +91,10 @@ pub fn build_router(state: AppState, bound_port: u16) -> Router {
         .route("/remote/devices/{id}", patch(host::update_device))
         .route("/remote/devices/{id}/revoke", post(host::revoke_device))
         .route("/remote/devices/{id}/rotate", post(host::rotate_device))
+        .route(
+            "/remote/devices/{id}/reset-respond",
+            post(host::reset_device_respond),
+        )
         .route("/remote/audit", get(host::audit))
         .route("/remote/audit/export", get(host::audit_export))
         .route("/remote/prompts", get(host::pending_prompts))

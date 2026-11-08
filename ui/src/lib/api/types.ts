@@ -426,6 +426,8 @@ export interface RemoteDevice {
   scopes: RemoteScope[];
   requireHostConfirmation: boolean;
   hasPin: boolean;
+  pinFailures: number;
+  respondLocked: boolean;
   createdAt: string;
   lastSeenAt?: string | null;
   revokedAt?: string | null;
@@ -447,6 +449,7 @@ export interface RemotePendingPairing {
   requestedAt: string;
   ip?: string;
   hasPin: boolean;
+  verificationCode: string;
 }
 
 export interface RemoteAuditEntry {
@@ -494,6 +497,8 @@ export interface RemoteSessionInfo {
   scopes: RemoteScope[];
   requireHostConfirmation: boolean;
   hasPin: boolean;
+  pinFailures: number;
+  respondLocked: boolean;
   mode: RemoteMode;
   url?: string | null;
 }

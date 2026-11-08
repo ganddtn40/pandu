@@ -9,6 +9,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use argon2::Argon2;
+use argon2::password_hash::{
+    PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng as PasswordOsRng,
+};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -16,8 +20,8 @@ use sha2::{Digest, Sha256};
 
 pub const TOKEN_BYTES: usize = 32;
 pub const PAIR_CODE_BYTES: usize = 16;
-pub const PIN_MIN_DIGITS: usize = 4;
-pub const PIN_MAX_DIGITS: usize = 8;
+pub const PIN_MIN_DIGITS: usize = 6;
+pub const PIN_MAX_DIGITS: usize = 12;
 
 /// Server-enforced scopes. A new device always starts with `ViewStatus` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -125,6 +129,8 @@ pub struct RemotePrincipal {
     pub require_host_confirmation: bool,
     pub pin_salt: Option<String>,
     pub pin_hash: Option<String>,
+    pub pin_failures: u32,
+    pub respond_locked: bool,
 }
 
 impl RemotePrincipal {
@@ -165,19 +171,43 @@ pub fn hash_token(token: &str) -> String {
     hex(&Sha256::digest(token.as_bytes()))
 }
 
-pub fn hash_pin(salt: &str, pin: &str) -> String {
+/// Hash a high-risk PIN with Argon2id. The returned PHC string carries its own
+/// salt and parameters; only the host stores it.
+pub fn hash_pin(pin: &str) -> Option<String> {
+    let salt = SaltString::generate(&mut PasswordOsRng);
+    Argon2::default()
+        .hash_password(pin.as_bytes(), &salt)
+        .ok()
+        .map(|hash| hash.to_string())
+}
+
+/// Verify a PIN. New rows hold an Argon2id PHC string; rows paired before the
+/// upgrade hold a salted SHA-256 hex digest, which is still accepted so an
+/// existing device does not lose its high-risk approval ability.
+pub fn verify_pin(salt: Option<&str>, expected: Option<&str>, pin: &str) -> bool {
+    let Some(expected) = expected else {
+        return false;
+    };
+    if expected.starts_with("$argon2") {
+        let Ok(parsed) = PasswordHash::new(expected) else {
+            return false;
+        };
+        return Argon2::default()
+            .verify_password(pin.as_bytes(), &parsed)
+            .is_ok();
+    }
+    let Some(salt) = salt else {
+        return false;
+    };
+    constant_time_eq(hash_pin_legacy(salt, pin).as_bytes(), expected.as_bytes())
+}
+
+fn hash_pin_legacy(salt: &str, pin: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(salt.as_bytes());
     hasher.update(b":");
     hasher.update(pin.as_bytes());
     hex(&hasher.finalize())
-}
-
-pub fn verify_pin(salt: Option<&str>, expected: Option<&str>, pin: &str) -> bool {
-    let (Some(salt), Some(expected)) = (salt, expected) else {
-        return false;
-    };
-    constant_time_eq(hash_pin(salt, pin).as_bytes(), expected.as_bytes())
 }
 
 /// Compare two byte slices without early exit. Length is allowed to leak
@@ -340,15 +370,25 @@ mod tests {
 
     #[test]
     fn pins_are_salted_and_verified() {
+        let hash = hash_pin("123456").expect("argon2 hash");
+        assert!(hash.starts_with("$argon2"));
+        assert!(verify_pin(None, Some(&hash), "123456"));
+        assert!(!verify_pin(None, Some(&hash), "123457"));
+        assert!(!verify_pin(None, Some(&hash), "12345"));
+        assert!(valid_pin("123456"));
+        assert!(valid_pin("123456789012"));
+        assert!(!valid_pin("12345"));
+        assert!(!valid_pin("1234567890123"));
+        assert!(!valid_pin("12345a"));
+    }
+
+    #[test]
+    fn legacy_sha256_pins_still_verify() {
         let salt = new_salt();
-        let hash = hash_pin(&salt, "1234");
-        assert!(verify_pin(Some(&salt), Some(&hash), "1234"));
-        assert!(!verify_pin(Some(&salt), Some(&hash), "1235"));
-        assert!(!verify_pin(None, Some(&hash), "1234"));
-        assert!(valid_pin("1234"));
-        assert!(valid_pin("12345678"));
-        assert!(!valid_pin("123"));
-        assert!(!valid_pin("12a4"));
+        let hash = hash_pin_legacy(&salt, "123456");
+        assert!(verify_pin(Some(&salt), Some(&hash), "123456"));
+        assert!(!verify_pin(Some(&salt), Some(&hash), "123457"));
+        assert!(!verify_pin(None, Some(&hash), "123456"));
     }
 
     #[test]

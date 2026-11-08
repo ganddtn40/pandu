@@ -28,6 +28,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
+argon2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 directories = { workspace = true }

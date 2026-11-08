@@ -210,19 +210,23 @@ Pairing is always a two-step flow: the device asks, and the host confirms.
 
 3. On the phone, open the remote URL (scan the QR or type the URL).
 4. Enter the pairing code and a device name, for example `Pixel 8`.
-5. Optional: set a **high-risk PIN**. You will need this PIN to approve or deny
-   high-risk actions from this device. The host only sees that a PIN is set.
-6. Tap **Send pairing request**. The phone says *"Waiting for the host to
-   confirm…"*.
-7. On the computer, Cockpit shows **Pair Pixel 8?** with the request IP when it
-   can be trusted, and whether a PIN is set. A tunnel request without a
-   validated forwarded address says the client address is unavailable rather
-   than showing the local tunnel connector.
+5. Set a **high-risk PIN** of 6–12 digits. You will need this PIN to approve or
+   deny high-risk actions from this device, and the phone keeps only its slow
+   Argon2id hash. Without a PIN, high-risk approvals must happen at the computer.
+6. Tap **Send pairing request**. The phone shows a **four-digit verification
+   code** and says *"Waiting for the host to confirm…"*. Compare that code with
+   the one on the computer.
+7. On the computer, Cockpit shows **Pair Pixel 8?** with the same four-digit
+   code, the request IP when it can be trusted, and whether a PIN is set. Type
+   the code and click **Confirm pairing**. A tunnel request without a validated
+   forwarded address says the client address is unavailable rather than showing
+   the local tunnel connector.
 
-   ![Host confirms the device by name](screenshots/phase7/04-host-pair-confirm.png)
+   ![Host confirms the device by name and verification code](screenshots/phase7/04-host-pair-confirm.png)
 
-8. Click **Confirm pairing**. The device receives its token exactly once and
-   starts with **Status** only.
+8. The device receives its token exactly once and shows a summary: it starts
+   with **Status** only, cannot read content, and explains what the PIN does.
+   Open the dashboard from there.
 
    ![Paired device dashboard](screenshots/phase7/05-remote-paired-dashboard.png)
 
@@ -265,7 +269,9 @@ dangerous command. From a remote device:
 
 - If the device has a PIN, the phone asks for it before approve or deny.
 - If the device has no PIN, the action must be completed at the computer.
-- A wrong PIN is rate-limited and audited.
+- A wrong PIN is rate-limited and audited. Five wrong PINs lock Respond for
+  that device with **423 respond_locked**; the host must click **Reset Respond**
+  in the device list to clear the lock.
 - Replayed or expired approvals are refused.
 
 Sign-in, password, API-key, and two-factor prompts are never sent to a remote
@@ -446,12 +452,13 @@ cockpit pair
 Device side — claim the code from another machine or terminal:
 
 ```powershell
-cockpit pair --claim ABCD-EFGH --url https://your-remote-url --device-name "Phone" --pin 1234
+cockpit pair --claim ABCD-EFGH --url https://your-remote-url --device-name "Phone" --pin 123456
 ```
 
-The host still has to confirm the device in **Settings → Remote access**. The
-device prints its token once. `--pin` is optional; without it, high-risk
-approvals must happen at the computer.
+The device prints a four-digit verification code; compare it with the host
+before confirming. The host still has to confirm the device in **Settings →
+Remote access**. The device prints its token once. `--pin` is optional but must
+be 6–12 digits; without it, high-risk approvals must happen at the computer.
 
 ## Endpoints and scopes
 
@@ -494,7 +501,10 @@ version:
   application/json`, and a per-process CSRF token from `GET /api/csrf`. A
   cross-origin form or `no-cors` request cannot enable remote access, create a
   code, confirm a pairing, change scopes, decide an approval, revoke, or panic.
-- Pairing is host-confirmed; codes are single-use and short-lived.
+- Pairing is host-confirmed; the host must echo the device's four-digit
+  verification code, and codes are single-use and short-lived.
+- High-risk PINs are set on the device, must be 6–12 digits, and are stored as
+  Argon2id hashes. Five wrong PINs lock Respond until the host resets it.
 - Tokens are 256-bit, stored hashed, sent in a header, compared in constant
   time, and revoked immediately.
 - Scopes are enforced server-side on every request and every live message.

@@ -72,6 +72,7 @@ test.describe('remote access', () => {
     await expect(card).toContainText('Listening');
     await expect(card.getByRole('button', { name: 'Pair a device' })).toBeVisible();
     await card.scrollIntoViewIfNeeded();
+    await expect(page.locator('.toast')).toBeHidden({ timeout: 10_000 });
     await shot(page, '02-host-remote-on.png');
 
     await card.getByRole('button', { name: 'Pair a device' }).click();
@@ -109,15 +110,29 @@ test.describe('remote access', () => {
     await remote.getByLabel('Device name').fill('Pixel 8');
     await remote.getByRole('button', { name: 'Send pairing request' }).click();
     await expect(remote.getByText('Waiting for the host to confirm…')).toBeVisible();
+    const verification = (await remote.locator('.remote-verify__code').innerText()).trim();
+    expect(verification).toMatch(/^\d{4}$/);
 
-    // The host must see and confirm the device by name before any token exists.
+    // The host must see the same four-digit code and confirm the device by
+    // name before any token exists.
     await expect(card.getByText('Pair Pixel 8?')).toBeVisible({ timeout: 10_000 });
+    const claim = card.locator('.remote-claim').filter({ hasText: 'Pixel 8' });
+    await expect(claim).toContainText(verification);
+    await claim.getByLabel('Type the 4-digit code').fill(verification);
+    await expect(page.locator('.toast')).toBeHidden({ timeout: 10_000 });
     await shotOf(pairingSection, '04-host-pair-confirm.png');
 
-    await card.getByRole('button', { name: 'Confirm pairing' }).click();
+    await claim.getByRole('button', { name: 'Confirm pairing' }).click();
     const device = card.locator('.remote-device').filter({ hasText: 'Pixel 8' });
     await expect(device).toBeVisible();
     await expect(device).toContainText('Status');
+
+    // The new device sees what it can do before opening the dashboard.
+    await expect(remote.getByRole('heading', { name: 'This device is paired' })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(remote.locator('.remote-app__paired-list')).toContainText('No content');
+    await remote.getByRole('button', { name: 'Open dashboard' }).click();
 
     await expect(remote.locator('.remote-app__tabs')).toBeVisible({ timeout: 15_000 });
     await expect(remote.getByRole('button', { name: /Inbox/ })).toBeVisible();

@@ -233,9 +233,13 @@ token, or read the audit log.
   host must enable it again. Paired devices persist.
 - **Pairing.** A host-created code is 128 bits, single-use, and expires in two
   minutes. The QR payload contains the URL, the code, and the TLS fingerprint
-  when one exists. The device sends a name and an optional high-risk PIN. The
-  host must confirm `Pair <name>?` before a token exists. A denied or expired
-  claim never receives a token, and wrong codes are rate-limited and lock out.
+  when one exists. The device generates a four-digit verification code, sends a
+  name, that code, and an optional high-risk PIN. The host must compare the
+  four-digit code and echo it in **Confirm pairing** before a token exists; a
+  mismatched code leaves the claim pending. The PIN is set on the device during
+  pairing, must be 6–12 digits, and is stored as an Argon2id hash (legacy salted
+  SHA-256 PINs still verify). A denied or expired claim never receives a token,
+  and wrong codes are rate-limited and lock out.
 - **Tokens.** A token is 256 bits, delivered to the device once, and stored by
   the host only as a SHA-256 hash. It is accepted only in the
   `Authorization: Bearer` header, compared in constant time, and expires after
@@ -250,7 +254,8 @@ token, or read the audit log.
 - **High-risk approvals.** Severity High/Critical or a dangerous command needs
   the PIN set at pairing. Without a PIN, the decision must happen at the
   computer. Approve and deny both require the PIN. Replayed, late, and expired
-  decisions are refused.
+  decisions are refused. Five wrong PINs lock Respond for that device; only the
+  host can clear the lock with **Reset Respond** in the device list.
 - **Auth prompts.** Sign-in, password, API-key, and two-factor text is refused
   with `needs_host`; the device is told to go to the computer.
 - **Remote prompts.** The endpoint requires the Prompt scope, accepts at most
@@ -279,11 +284,11 @@ token, or read the audit log.
   request shares an `untrusted` bucket and no address is shown to the host. A
   valid bearer token bypasses an IP lockout, so unauthenticated brute force
   cannot cut off an already-paired device.
-- **Audit.** Pair, confirm, deny, revoke, rotate, scope changes, login failures,
-  every approve/deny, every remote prompt (size/hash only), remote on/off, and
-  notification changes are appended to a host-only audit log. The log is
-  exportable as JSON and never contains tokens, passwords, prompt text, or
-  terminal output.
+- **Audit.** Pair, confirm, verification failures, deny, revoke, rotate, scope
+  changes, login failures, every approve/deny, wrong PINs, Respond lock/reset,
+  every remote prompt (size/hash only), remote on/off, and notification changes
+  are appended to a host-only audit log. The log is exportable as JSON and never
+  contains tokens, passwords, PINs, prompt text, or terminal output.
 - **Panic.** Stops the listener, bumps the revocation epoch, revokes every
   device, and clears pending prompts.
 
@@ -298,6 +303,7 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `host_origin_cors_and_security_headers_are_enforced`,
 `host_mutations_reject_cross_origin_forms_and_require_csrf`,
 `remote_approvals_need_the_pin_and_cannot_be_replayed`,
+`respond_locks_after_five_wrong_pins_until_the_host_resets_it`,
 `expired_remote_approvals_are_refused`,
 `remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim`,
 `remote_prompts_require_an_explicit_awaiting_state`,
@@ -311,6 +317,7 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote_access_refuses_unauthenticated_configurations`. Unit tests:
 `remote::auth::tests::constant_time_comparison_matches_normal_equality`,
 `remote::auth::tests::pins_are_salted_and_verified`,
+`remote::auth::tests::legacy_sha256_pins_still_verify`,
 `remote::auth::tests::scopes_always_include_status_and_legacy_view_is_status`,
 `remote::auth::tests::rate_limiter_blocks_after_the_budget`,
 `remote::auth::tests::failures_lock_out_exponentially`,
@@ -318,7 +325,7 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote::pairing::tests::a_denied_claim_never_issues_a_token`,
 `remote::pairing::tests::a_wrong_code_is_limited_and_locks_the_code`,
 `remote::pairing::tests::an_expired_code_is_refused`,
-`remote::pairing::tests::malformed_codes_and_pins_are_rejected`,
+`remote::pairing::tests::malformed_codes_pins_and_verification_codes_are_rejected`,
 `remote::pairing::tests::a_new_code_replaces_the_old_one`, and
 `remote::pairing::tests::only_three_claims_wait_for_the_host_at_once`.
 
@@ -330,7 +337,9 @@ Phase 7 is not considered done unless these pass:
 - Every remote endpoint enforces its scope; the test iterates the same matrix
   the UI displays.
 - Revoking a device closes a live WebSocket immediately.
-- Pairing codes are single-use, expire, and lock out after wrong attempts.
+- Pairing codes are single-use, expire, and lock out after wrong attempts; the
+  host must echo the device's four-digit verification code.
+- Five wrong PINs lock Respond until the host resets the device.
 - `Host`, `Origin`, CORS, CSP, and security headers are enforced.
 - Remote approvals need the PIN and cannot be replayed; expired approvals are
   refused.
