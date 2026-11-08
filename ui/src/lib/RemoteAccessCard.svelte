@@ -487,6 +487,20 @@
               {t('remote.copyCommand')}
             </button>
           </div>
+          {#if tools?.tailscale.followUpCommand}
+            <div class="remote-command-row">
+              <code class="remote-command">{tools.tailscale.followUpCommand}</code>
+              <button
+                class="btn btn--small btn--ghost"
+                type="button"
+                onclick={() =>
+                  copyValue(tools?.tailscale.followUpCommand ?? '', 'remote.commandCopied')}
+              >
+                <Icon name="copy" size={14} />
+                {t('remote.copyCommand')}
+              </button>
+            </div>
+          {/if}
           {#if tools?.tailscale.installed && !tools?.tailscaleIp}
             <p class="remote-warning">
               <Icon name="alert" size={14} />

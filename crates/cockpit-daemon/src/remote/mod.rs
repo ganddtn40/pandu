@@ -108,6 +108,10 @@ pub struct ToolStatus {
     pub path: Option<String>,
     pub detail: Option<String>,
     pub command: String,
+    /// A second command the user must run after `command`, kept separate so
+    /// each one can be copied on its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_up_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1135,9 +1139,12 @@ async fn detect_tools(port: u16) -> RemoteTools {
         }
     }
 
-    let tailscale_command = match &tailscale_ip {
-        Some(ip) => format!("tailscale serve --bg http://{ip}:{port}"),
-        None => "tailscale up  # then: tailscale ip -4".to_string(),
+    let (tailscale_command, tailscale_follow_up) = match &tailscale_ip {
+        Some(ip) => (format!("tailscale serve --bg http://{ip}:{port}"), None),
+        None => (
+            "tailscale up".to_string(),
+            Some("tailscale ip -4".to_string()),
+        ),
     };
     let cloudflared_command = format!("cloudflared tunnel --url http://127.0.0.1:{port}");
 
@@ -1147,12 +1154,14 @@ async fn detect_tools(port: u16) -> RemoteTools {
             path: tailscale_path.map(|path| path.display().to_string()),
             detail: tailscale_detail,
             command: tailscale_command,
+            follow_up_command: tailscale_follow_up,
         },
         cloudflared: ToolStatus {
             installed: cloudflared_path.is_some(),
             path: cloudflared_path.map(|path| path.display().to_string()),
             detail: None,
             command: cloudflared_command,
+            follow_up_command: None,
         },
         lan_ip,
         tailscale_ip,

@@ -387,6 +387,7 @@ export interface RemoteToolStatus {
   path?: string | null;
   detail?: string | null;
   command: string;
+  followUpCommand?: string | null;
 }
 
 export interface RemoteTools {

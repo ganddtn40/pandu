@@ -262,6 +262,13 @@
     if (event.severity === 'high') return 'status-pill status-pill--warn';
     return 'status-pill';
   }
+
+  // The severity pill already says "high" or "critical". Only add the
+  // plain-language risk chip when the danger comes from something the severity
+  // does not show, such as a dangerous command at medium severity.
+  function needsRiskChip(event: GuardEvent): boolean {
+    return isHighRisk(event) && event.severity !== 'high' && event.severity !== 'critical';
+  }
 </script>
 
 {#if remoteState.phase === 'pairing'}
@@ -527,7 +534,7 @@
               <article class="remote-app__event card">
                 <div class="remote-app__event-head">
                   <span class={severityClass(event)}>{event.severity}</span>
-                  {#if isHighRisk(event)}
+                  {#if needsRiskChip(event)}
                     <span class="status-pill status-pill--danger">{t('remote.highRisk')}</span>
                   {/if}
                   <span class="remote-app__time">{timeAgo(event.requestedAt, t)}</span>
@@ -770,7 +777,7 @@
                     <span>{agent.projectName} · {timeAgo(agent.updatedAt, t)}</span>
                   </span>
                   {#if agent.needsYou}
-                    <span class="status-pill status-pill--warn">{t('remote.highRisk')}</span>
+                    <span class="status-pill status-pill--warn">{t('remote.agentNeedsYou')}</span>
                   {/if}
                   {#if agent.autoApprove}
                     <span class="status-pill status-pill--danger">{t('remote.autoApproveSession')}</span>
