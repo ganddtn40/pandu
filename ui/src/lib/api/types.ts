@@ -385,6 +385,7 @@ export interface RemoteTools {
   cloudflared: RemoteToolStatus;
   lanIp?: string | null;
   tailscaleIp?: string | null;
+  tailscaleDnsName?: string | null;
 }
 
 export interface RemoteNotificationStatus {
@@ -402,6 +403,7 @@ export interface RemoteStatus {
   port: number;
   startedAt?: string | null;
   lastError?: string | null;
+  awaitingTunnel: boolean;
   devices: number;
   pendingPairings: number;
   pendingPrompts: number;

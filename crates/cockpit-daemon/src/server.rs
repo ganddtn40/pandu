@@ -256,6 +256,10 @@ pub async fn start_remote(
             })?;
             let bound = listener.local_addr()?;
             let url = format!("http://{bound}");
+            let mut allowed_hosts = vec![ip.clone()];
+            if let Some(dns) = tools.tailscale_dns_name.clone() {
+                allowed_hosts.push(dns);
+            }
             let (shutdown, receiver) = oneshot::channel();
             let task = tokio::spawn(async move {
                 let service = router.into_make_service_with_connect_info::<SocketAddr>();
@@ -268,7 +272,9 @@ pub async fn start_remote(
                     tracing::warn!(%error, "the remote listener stopped with an error");
                 }
             });
-            state.remote.set_started(mode, url, ip, port, None);
+            state
+                .remote
+                .set_started(mode, url, ip, port, None, allowed_hosts);
             state
                 .remote
                 .set_server(RemoteServerHandle::Plain { shutdown, task });
@@ -283,6 +289,7 @@ pub async fn start_remote(
                     )
                 })?;
             let url = normalize_public_url(&url)?;
+            let public_host = url_host(&url).unwrap_or_default();
             let listener = TcpListener::bind(("127.0.0.1", port))
                 .await
                 .map_err(|error| {
@@ -302,9 +309,14 @@ pub async fn start_remote(
                     tracing::warn!(%error, "the remote listener stopped with an error");
                 }
             });
-            state
-                .remote
-                .set_started(mode, url, "127.0.0.1".to_string(), port, None);
+            state.remote.set_started(
+                mode,
+                url,
+                "127.0.0.1".to_string(),
+                port,
+                None,
+                vec![public_host],
+            );
             state
                 .remote
                 .set_server(RemoteServerHandle::Plain { shutdown, task });
@@ -336,9 +348,14 @@ pub async fn start_remote(
                 }
             });
             let url = format!("https://{addr}");
-            state
-                .remote
-                .set_started(mode, url, ip, port, Some(fingerprint));
+            state.remote.set_started(
+                mode,
+                url,
+                ip.clone(),
+                port,
+                Some(fingerprint),
+                vec![ip, "cockpit.local".to_string()],
+            );
             state
                 .remote
                 .set_server(RemoteServerHandle::Tls { handle, task });
@@ -368,20 +385,45 @@ fn normalize_public_url(value: &str) -> Result<String> {
     let value = value.trim().trim_end_matches('/');
     let Some((scheme, rest)) = value.split_once("://") else {
         return Err(DaemonError::config(
-            "The public URL must start with https:// (or http:// for a loopback test).",
+            "The public URL must be the https:// hostname your tunnel forwards to Cockpit.",
         ));
     };
     let host = rest.split('/').next().unwrap_or(rest);
-    let host_only = host.split(':').next().unwrap_or(host);
+    let host_only = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
+    if host_only.is_empty() || host_only.contains('*') || host_only.contains('@') {
+        return Err(DaemonError::config(
+            "The public URL must name one exact hostname, never a wildcard.",
+        ));
+    }
     if scheme.eq_ignore_ascii_case("https") {
+        if host_only.parse::<std::net::IpAddr>().is_ok() || host_only == "localhost" {
+            return Err(DaemonError::config(
+                "The tunnel URL must use the public hostname, not an IP address or localhost.",
+            ));
+        }
+        if !host_only.contains('.') {
+            return Err(DaemonError::config(
+                "The tunnel URL must use a public hostname such as cockpit.example.com.",
+            ));
+        }
         return Ok(value.to_string());
     }
-    if scheme.eq_ignore_ascii_case("http") && is_loopback_host(host_only) {
+    // Debug builds keep the loopback tunnel test path usable. Release builds
+    // always demand the real HTTPS hostname a phone can reach.
+    #[cfg(debug_assertions)]
+    if scheme.eq_ignore_ascii_case("http") && is_loopback_host(&host_only) {
         return Ok(value.to_string());
     }
     Err(DaemonError::config(
-        "Public tunnel URLs must use https://. Plain HTTP is only allowed on loopback.",
+        "Public tunnel URLs must use https:// with the hostname your tunnel serves.",
     ))
+}
+
+fn url_host(value: &str) -> Option<String> {
+    let (_, rest) = value.split_once("://")?;
+    let host = rest.split('/').next()?.split(':').next()?;
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() { None } else { Some(host) }
 }
 
 /// LAN mode always uses TLS. The self-signed certificate is generated once and
@@ -560,6 +602,27 @@ async fn sweep_sessions(state: AppState) {
         if !ended.is_empty() {
             tracing::info!(count = ended.len(), "closed idle ambient flights");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tunnel_urls_must_name_one_https_hostname() {
+        assert_eq!(
+            normalize_public_url("https://cockpit.example.com/").unwrap(),
+            "https://cockpit.example.com"
+        );
+        assert!(normalize_public_url("https://192.0.2.10").is_err());
+        assert!(normalize_public_url("https://localhost").is_err());
+        assert!(normalize_public_url("https://*.example.com").is_err());
+        assert!(normalize_public_url("https://user@example.com").is_err());
+        assert!(normalize_public_url("http://cockpit.example.com").is_err());
+        assert!(normalize_public_url("cockpit.example.com").is_err());
+        #[cfg(debug_assertions)]
+        assert!(normalize_public_url("http://127.0.0.1:4320").is_ok());
     }
 }
 

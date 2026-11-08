@@ -514,7 +514,12 @@
   {:else}
     <div class="remote-on">
       <dl class="summary-list summary-list--tight remote-summary">
-        <div><dt>{t('remote.status')}</dt><dd>{t('remote.statusOn')}</dd></div>
+        <div>
+          <dt>{t('remote.status')}</dt>
+          <dd>
+            {status.awaitingTunnel ? t('remote.statusWaitingTunnel') : t('remote.statusOn')}
+          </dd>
+        </div>
         <div>
           <dt>{t('remote.mode')}</dt>
           <dd>{t(remoteModeKey(status.mode))}</dd>

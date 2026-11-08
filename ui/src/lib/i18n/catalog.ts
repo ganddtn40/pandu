@@ -528,6 +528,7 @@ const en = {
   'remote.disabledToast': 'Remote access is off.',
   'remote.status': 'Status',
   'remote.statusOn': 'Listening',
+  'remote.statusWaitingTunnel': 'Listening locally, waiting for your tunnel',
   'remote.url': 'Address',
   'remote.fingerprint': 'Certificate fingerprint',
   'remote.devices': 'Devices',

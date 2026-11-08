@@ -122,6 +122,66 @@ async fn start_remote_daemon(home: &Path, upstream: SocketAddr) -> (ServerHandle
     (daemon, public_url)
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn tunnel_status_waits_for_the_public_host_and_rejects_host_or_origin_mismatch() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let port = free_port().await;
+    let mut config = config(home.path(), mock.addr);
+    config.remote_port = port;
+    let daemon = cockpit_daemon::spawn(config).await.unwrap();
+    let host = host_base(&daemon);
+    let public_url = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let enabled: Value = client
+        .post(format!("{host}/api/remote/enable"))
+        .json(&json!({ "mode": "tunnel", "publicUrl": public_url }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(enabled["awaitingTunnel"], true);
+    assert_eq!(enabled["url"], public_url);
+
+    // A loopback Host is still allowed, but the configured host is what marks
+    // the tunnel as actually reachable.
+    let mismatch = client
+        .get(format!("{public_url}/api/remote/health"))
+        .header("host", "evil.example.com")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mismatch.status(), StatusCode::FORBIDDEN);
+    let mismatch_origin = client
+        .get(format!("{public_url}/api/remote/health"))
+        .header("origin", "https://evil.example.com")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mismatch_origin.status(), StatusCode::FORBIDDEN);
+
+    let good = client
+        .get(format!("{public_url}/api/remote/health"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(good.status(), StatusCode::OK);
+    let status: Value = client
+        .get(format!("{host}/api/remote/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["awaitingTunnel"], false);
+
+    daemon.shutdown().await.unwrap();
+}
+
 struct PairedDevice {
     id: String,
     token: String,

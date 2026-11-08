@@ -900,6 +900,9 @@ async fn check_host_and_origin(
             "This Host header is not allowed for the remote listener.",
         );
     }
+    if let Some(value) = host {
+        state.remote.mark_expected_host(&host_without_port(value));
+    }
     if let Some(origin) = request
         .headers()
         .get(header::ORIGIN)
@@ -937,56 +940,49 @@ fn host_allowed(state: &AppState, value: Option<&str>) -> bool {
     let Some(value) = value else {
         return false;
     };
-    let host = host_without_port(value);
+    let host = host_without_port(value)
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
     if crate::config::is_loopback_host(&host) {
         return true;
     }
-    if let Some(bound) = state.remote.bound_host() {
-        if host.eq_ignore_ascii_case(&bound) {
-            return true;
-        }
-    }
-    match state.remote.mode() {
-        // Tunnel mode knows its public hostname from the URL used to build the
-        // pairing QR. Only that host (plus loopback) is accepted.
-        RemoteMode::Tunnel => state.remote.url().is_some_and(|url| {
-            url.split_once("://")
-                .and_then(|(_, rest)| rest.split('/').next())
-                .map(host_without_port)
-                .is_some_and(|configured| host.eq_ignore_ascii_case(&configured))
-        }),
-        RemoteMode::Tailscale => {
-            host.ends_with(".ts.net") || host.parse::<std::net::IpAddr>().is_ok()
-        }
-        RemoteMode::Lan => {
-            host.parse::<std::net::IpAddr>().is_ok()
-                || host.ends_with(".local")
-                || host.eq_ignore_ascii_case("localhost")
-        }
-        RemoteMode::Loopback => false,
-    }
+    // Every exposed mode has an exact allowlist. Tunnel mode has only the
+    // public hostname from the tunnel URL; Tailscale has the tailnet IP and
+    // MagicDNS name; LAN has its bound address and pinned local name.
+    state
+        .remote
+        .allowed_hosts()
+        .iter()
+        .any(|allowed| allowed == &host)
 }
 
 fn origin_allowed(state: &AppState, origin: &str, host: Option<&str>) -> bool {
-    let Some((_scheme, rest)) = origin.split_once("://") else {
+    let Some((scheme, rest)) = origin.split_once("://") else {
         return false;
     };
-    let origin_host = host_without_port(rest.split('/').next().unwrap_or(rest));
-    if crate::config::is_loopback_host(&origin_host) {
-        return true;
-    }
+    let origin_host = host_without_port(rest.split('/').next().unwrap_or(rest))
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
     let Some(host) = host else {
         return false;
     };
-    let request_host = host_without_port(host);
-    if origin_host.eq_ignore_ascii_case(&request_host) {
-        return true;
+    let request_host = host_without_port(host)
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    // Loopback origins only belong to the local host UI. A browser on the host
+    // must not be able to drive the public tunnel address cross-origin.
+    if crate::config::is_loopback_host(&origin_host) {
+        return crate::config::is_loopback_host(&request_host);
     }
-    // Tunnel mode sees the public hostname on both headers; if they disagree
-    // the request is cross-origin and is refused.
-    state.remote.mode() == RemoteMode::Tunnel
-        && host_allowed(state, Some(&origin_host))
-        && origin_host.eq_ignore_ascii_case(&request_host)
+    if !origin_host.eq_ignore_ascii_case(&request_host) {
+        return false;
+    }
+    match state.remote.mode() {
+        RemoteMode::Tunnel => scheme.eq_ignore_ascii_case("https"),
+        RemoteMode::Lan => scheme.eq_ignore_ascii_case("https"),
+        RemoteMode::Tailscale => scheme.eq_ignore_ascii_case("http"),
+        RemoteMode::Loopback => false,
+    }
 }
 
 fn host_without_port(value: &str) -> String {

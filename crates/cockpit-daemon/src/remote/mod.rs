@@ -111,6 +111,8 @@ pub struct RemoteTools {
     pub cloudflared: ToolStatus,
     pub lan_ip: Option<String>,
     pub tailscale_ip: Option<String>,
+    /// MagicDNS name reported by `tailscale status --json`, when available.
+    pub tailscale_dns_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,6 +134,9 @@ pub struct RemoteStatus {
     pub port: u16,
     pub started_at: Option<String>,
     pub last_error: Option<String>,
+    /// Tunnel mode is bound on loopback but nobody can reach it until the
+    /// tunnel forwards a request with the configured public Host.
+    pub awaiting_tunnel: bool,
     pub devices: u64,
     pub pending_pairings: usize,
     pub pending_prompts: usize,
@@ -211,6 +216,11 @@ struct RemoteInner {
     url: Option<String>,
     fingerprint: Option<String>,
     bound_host: Option<String>,
+    /// Host names this listener answers to, besides loopback. Tunnel mode has
+    /// exactly the public hostname from the tunnel URL; Tailscale has the
+    /// tailnet IP and MagicDNS name; LAN has its address and pinned name.
+    allowed_hosts: Vec<String>,
+    seen_expected_host: bool,
     port: u16,
     started_at: Option<String>,
     last_error: Option<String>,
@@ -295,6 +305,8 @@ impl RemoteAccess {
                 url: None,
                 fingerprint: None,
                 bound_host: None,
+                allowed_hosts: Vec::new(),
+                seen_expected_host: false,
                 port: DEFAULT_REMOTE_PORT,
                 started_at: None,
                 last_error: None,
@@ -334,6 +346,29 @@ impl RemoteAccess {
         self.lock_inner().bound_host.clone()
     }
 
+    pub fn allowed_hosts(&self) -> Vec<String> {
+        self.lock_inner().allowed_hosts.clone()
+    }
+
+    /// Record that a request arrived with the host the tunnel or tailnet is
+    /// expected to use. Loopback probes do not count: they only prove the
+    /// local listener is up, not that another device can reach it.
+    pub fn mark_expected_host(&self, host: &str) -> bool {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        let mut inner = self.lock_inner();
+        if inner.allowed_hosts.iter().any(|allowed| allowed == &host) {
+            inner.seen_expected_host = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn awaiting_tunnel(&self) -> bool {
+        let inner = self.lock_inner();
+        inner.enabled && inner.mode == RemoteMode::Tunnel && !inner.seen_expected_host
+    }
+
     pub fn epoch(&self) -> u64 {
         self.epoch.load(Ordering::SeqCst)
     }
@@ -342,6 +377,7 @@ impl RemoteAccess {
         self.epoch.fetch_add(1, Ordering::SeqCst) + 1
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_started(
         &self,
         mode: RemoteMode,
@@ -349,12 +385,15 @@ impl RemoteAccess {
         bound_host: String,
         port: u16,
         fingerprint: Option<String>,
+        allowed_hosts: Vec<String>,
     ) {
         let mut inner = self.lock_inner();
         inner.enabled = true;
         inner.mode = mode;
         inner.url = Some(url);
         inner.bound_host = Some(bound_host);
+        inner.allowed_hosts = normalize_allowed_hosts(allowed_hosts);
+        inner.seen_expected_host = false;
         inner.port = port;
         inner.fingerprint = fingerprint;
         inner.started_at = Some(now_iso());
@@ -368,6 +407,8 @@ impl RemoteAccess {
         inner.url = None;
         inner.fingerprint = None;
         inner.bound_host = None;
+        inner.allowed_hosts.clear();
+        inner.seen_expected_host = false;
         inner.started_at = None;
     }
 
@@ -403,6 +444,7 @@ impl RemoteAccess {
                 inner.port,
                 inner.started_at.clone(),
                 inner.last_error.clone(),
+                inner.seen_expected_host,
             )
         };
         let devices = self.store.count_active_remote_devices().unwrap_or(0);
@@ -416,6 +458,7 @@ impl RemoteAccess {
             port: inner.4,
             started_at: inner.5,
             last_error: inner.6,
+            awaiting_tunnel: inner.1 == RemoteMode::Tunnel && inner.0 && !inner.7,
             devices,
             pending_pairings: self.pairing.pending().len(),
             pending_prompts: self.list_prompts().len(),
@@ -917,6 +960,7 @@ async fn detect_tools(port: u16) -> RemoteTools {
     let lan_ip = detect_lan_ip();
 
     let mut tailscale_ip = None;
+    let mut tailscale_dns_name = None;
     let mut tailscale_detail = None;
     if let Some(path) = &tailscale_path {
         let output = tokio::time::timeout(
@@ -939,6 +983,23 @@ async fn detect_tools(port: u16) -> RemoteTools {
             }
             Ok(Err(error)) => tailscale_detail = Some(error.to_string()),
             Err(_) => tailscale_detail = Some("tailscale did not answer within 2 seconds".into()),
+        }
+        let status = tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio::process::Command::new(path)
+                .args(["status", "--json"])
+                .output(),
+        )
+        .await;
+        if let Ok(Ok(output)) = status {
+            if output.status.success() {
+                let value: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+                tailscale_dns_name = value
+                    .pointer("/Self/DNSName")
+                    .and_then(Value::as_str)
+                    .map(|name| name.trim_end_matches('.').to_ascii_lowercase())
+                    .filter(|name| !name.is_empty());
+            }
         }
     }
 
@@ -963,7 +1024,19 @@ async fn detect_tools(port: u16) -> RemoteTools {
         },
         lan_ip,
         tailscale_ip,
+        tailscale_dns_name,
     }
+}
+
+fn normalize_allowed_hosts(values: Vec<String>) -> Vec<String> {
+    let mut hosts: Vec<String> = values
+        .into_iter()
+        .map(|value| value.trim().trim_end_matches('.').to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
 }
 
 fn find_in_path(binary: &str) -> Option<std::path::PathBuf> {
