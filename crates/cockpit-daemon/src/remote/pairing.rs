@@ -414,6 +414,7 @@ impl PairingManager {
         &self,
         claim_id: &str,
         verification_code: &str,
+        expires_at: Option<String>,
     ) -> PairingResult<ConfirmedPairing> {
         let mut state = self.lock();
         let claim = state
@@ -446,6 +447,7 @@ impl PairingManager {
                 pin_hash: claim.pin_hash.clone(),
                 scopes: vec!["view:status".to_string()],
                 require_host_confirmation: true,
+                expires_at,
                 created_at: created_at.clone(),
             })
             .map_err(|_| PairingError::ClaimNotFound)?;
@@ -646,13 +648,13 @@ mod tests {
 
         // A wrong verification code leaves the claim waiting.
         assert_eq!(
-            pairing.confirm(&ticket.claim_id, "0000").unwrap_err(),
+            pairing.confirm(&ticket.claim_id, "0000", None).unwrap_err(),
             PairingError::VerificationMismatch
         );
         assert_eq!(pairing.pending().len(), 1);
 
         let confirmed = pairing
-            .confirm(&ticket.claim_id, VERIFY)
+            .confirm(&ticket.claim_id, VERIFY, None)
             .expect("host confirms");
         assert_eq!(confirmed.device_name, "Pixel");
         let outcome = pairing.wait_for_claim(ticket).await;

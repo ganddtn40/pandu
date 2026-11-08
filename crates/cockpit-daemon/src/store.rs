@@ -2356,7 +2356,7 @@ impl Store {
                  require_host_confirmation, pin_failures, respond_locked_at,
                  expires_at, previous_token_hash, previous_token_expires_at,
                  created_at, last_seen_at, revoked_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, NULL, NULL, NULL, NULL, ?8, NULL, NULL)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, NULL, ?8, NULL, NULL, ?9, NULL, NULL)",
             params![
                 device.id,
                 device.name,
@@ -2365,6 +2365,7 @@ impl Store {
                 device.pin_hash,
                 serde_json::to_string(&device.scopes).unwrap_or_else(|_| "[]".to_string()),
                 device.require_host_confirmation as i64,
+                device.expires_at,
                 device.created_at,
             ],
         )?;
@@ -2442,8 +2443,61 @@ impl Store {
     pub fn set_remote_device_token_hash(&self, id: &str, token_hash: &str) -> Result<bool> {
         let connection = self.lock()?;
         let changed = connection.execute(
-            "UPDATE remote_devices SET token_hash = ?1 WHERE id = ?2",
+            "UPDATE remote_devices
+             SET token_hash = ?1, previous_token_hash = NULL, previous_token_expires_at = NULL
+             WHERE id = ?2",
             params![token_hash, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Rotate a token on use. The old hash stays valid only until the overlap
+    /// deadline, and only one rotation can be in flight at a time.
+    pub fn rotate_remote_device_token_on_use(
+        &self,
+        id: &str,
+        current_hash: &str,
+        new_hash: &str,
+        overlap_until: &str,
+        now: &str,
+    ) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE remote_devices
+             SET previous_token_hash = token_hash,
+                 previous_token_expires_at = ?1,
+                 token_hash = ?2
+             WHERE id = ?3
+               AND token_hash = ?4
+               AND (previous_token_expires_at IS NULL OR previous_token_expires_at <= ?5)",
+            params![overlap_until, new_hash, id, current_hash, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn find_remote_device_by_previous_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<RemoteDeviceRow>> {
+        let connection = self.lock()?;
+        Ok(connection
+            .query_row(
+                "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
+                        require_host_confirmation, pin_failures, respond_locked_at,
+                        expires_at, previous_token_hash, previous_token_expires_at,
+                        created_at, last_seen_at, revoked_at
+                 FROM remote_devices WHERE previous_token_hash = ?1",
+                params![token_hash],
+                row_to_remote_device,
+            )
+            .optional()?)
+    }
+
+    pub fn set_remote_device_expiry(&self, id: &str, expires_at: &str) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE remote_devices SET expires_at = ?1 WHERE id = ?2",
+            params![expires_at, id],
         )?;
         Ok(changed > 0)
     }
@@ -2600,6 +2654,7 @@ pub struct NewRemoteDevice {
     pub pin_hash: Option<String>,
     pub scopes: Vec<String>,
     pub require_host_confirmation: bool,
+    pub expires_at: Option<String>,
     pub created_at: String,
 }
 

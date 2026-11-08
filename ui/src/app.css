@@ -5350,7 +5350,8 @@ html[data-glass-reason='reduced-transparency'] .panel {
   font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
 }
 
-.remote-field input {
+.remote-field input,
+.remote-field select {
   height: 42px;
   padding: 0 12px;
   border: 1px solid var(--hairline);
@@ -5360,7 +5361,8 @@ html[data-glass-reason='reduced-transparency'] .panel {
   font-size: max(var(--text-min), calc(13px * var(--font-scale)));
 }
 
-.remote-field input:focus-visible {
+.remote-field input:focus-visible,
+.remote-field select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -5559,7 +5561,8 @@ html[data-glass-reason='reduced-transparency'] .panel {
   font-size: max(var(--text-min), calc(11px * var(--font-scale)));
 }
 
-.remote-claim__field input {
+.remote-claim__field input,
+.remote-claim__field select {
   min-height: 38px;
   padding: 8px 10px;
   border: 1px solid var(--hairline);
@@ -5571,7 +5574,13 @@ html[data-glass-reason='reduced-transparency'] .panel {
   letter-spacing: 0.08em;
 }
 
-.remote-claim__field input:focus-visible {
+.remote-claim__field select {
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+.remote-claim__field input:focus-visible,
+.remote-claim__field select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -5632,6 +5641,39 @@ html[data-glass-reason='reduced-transparency'] .panel {
   flex: 0 0 auto;
   color: var(--text-faint);
   font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
+}
+
+.remote-device__meta {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+.remote-device__expiry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
+}
+
+.remote-device__expiry select {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: max(var(--text-min), calc(12px * var(--font-scale)));
+}
+
+.remote-device__expiry select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .remote-scopes {

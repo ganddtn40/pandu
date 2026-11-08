@@ -128,6 +128,11 @@ async function requestAt<T>(origin: string, path: string, init: RequestInit = {}
     throw new DaemonError(message, response.status, code);
   }
 
+  // The remote listener rotates a device token on use. The new token rides in
+  // a response header and must be stored before the overlap window closes.
+  const rotated = response.headers.get('x-cockpit-token');
+  if (rotated) setRemoteToken(rotated);
+
   return (await response.json()) as T;
 }
 
@@ -315,19 +320,31 @@ export const remoteApi = {
   pairCode: () => request<RemotePairingCode>('/remote/pair/code', { method: 'POST' }),
   pendingPairings: () =>
     request<{ pairings: RemotePendingPairing[] }>('/remote/pair/pending'),
-  confirmPairing: (id: string, verificationCode: string) =>
+  confirmPairing: (id: string, verificationCode: string, expiresInDays?: number) =>
     request<{ pairing: { deviceId: string; deviceName: string; createdAt: string } }>(
       `/remote/pair/pending/${encodeURIComponent(id)}/confirm`,
-      { method: 'POST', body: JSON.stringify({ verificationCode }) },
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          verificationCode,
+          ...(expiresInDays ? { expiresInDays } : {}),
+        }),
+      },
     ),
   denyPairing: (id: string) =>
     request<{ denied: boolean }>(`/remote/pair/pending/${encodeURIComponent(id)}/deny`, {
       method: 'POST',
     }),
   devices: () => request<{ devices: RemoteDevice[] }>('/remote/devices'),
+  settings: () => request<{ revokeOnDisable: boolean }>('/remote/settings'),
+  updateSettings: (revokeOnDisable: boolean) =>
+    request<{ revokeOnDisable: boolean }>('/remote/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ revokeOnDisable }),
+    }),
   updateDevice: (
     id: string,
-    patch: { scopes?: RemoteScope[]; requireHostConfirmation?: boolean },
+    patch: { scopes?: RemoteScope[]; requireHostConfirmation?: boolean; expiresInDays?: number },
   ) =>
     request<{ device: RemoteDevice }>(`/remote/devices/${encodeURIComponent(id)}`, {
       method: 'PATCH',

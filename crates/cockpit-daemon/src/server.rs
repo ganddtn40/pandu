@@ -77,6 +77,10 @@ pub fn build_router(state: AppState, bound_port: u16) -> Router {
         // Remote access management is host-only: these routes exist on the
         // loopback listener and never on the remote listener.
         .route("/remote/status", get(host::status))
+        .route(
+            "/remote/settings",
+            get(host::settings).put(host::update_settings),
+        )
         .route("/remote/enable", post(host::enable))
         .route("/remote/disable", post(host::disable))
         .route("/remote/panic", post(host::panic))

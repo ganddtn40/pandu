@@ -217,10 +217,12 @@ Pairing is always a two-step flow: the device asks, and the host confirms.
    code** and says *"Waiting for the host to confirm…"*. Compare that code with
    the one on the computer.
 7. On the computer, Cockpit shows **Pair Pixel 8?** with the same four-digit
-   code, the request IP when it can be trusted, and whether a PIN is set. Type
-   the code and click **Confirm pairing**. A tunnel request without a validated
-   forwarded address says the client address is unavailable rather than showing
-   the local tunnel connector.
+   code, the request IP when it can be trusted, and whether a PIN is set. Choose
+   how long the device stays paired — **7, 14, 30, or 90 days** (Tunnel defaults
+   to 14 days; Tailscale and LAN default to 30). Type the code and click
+   **Confirm pairing**. A tunnel request without a validated forwarded address
+   says the client address is unavailable rather than showing the local tunnel
+   connector.
 
    ![Host confirms the device by name and verification code](screenshots/phase7/04-host-pair-confirm.png)
 
@@ -243,8 +245,13 @@ the `Authorization: Bearer …` header, never in a URL or query string. The live
 WebSocket uses a 30-second, single-use ticket in the
 `Sec-WebSocket-Protocol: cockpit.<ticket>` header, never in the URL.
 
-Tokens expire after 30 days without use. You can rotate or revoke a token at
-any time from the host.
+Tokens have a per-device expiry chosen at pairing (7, 14, 30, or 90 days) and
+shown in the device list as **Access until …**. The token is also rotated on
+use: after the first authenticated request, the host returns a replacement in
+the `X-Cockpit-Token` response header. The old token stays valid for a short
+120-second overlap so in-flight requests cannot race the device out of its
+session; after that it stops working. The UI stores the replacement
+automatically. You can still rotate or revoke a token at any time from the host.
 
 ## Scopes
 
@@ -297,10 +304,12 @@ already running. It cannot start a new process or choose a working directory.
 ## Managing devices
 
 The **Devices** section lists each device by name, its scopes, when it was last
-seen, and whether it is active or revoked.
+seen, when its access expires, and whether it is active or revoked.
 
 - **Raise/lower scopes** — changes are saved per device. Granting Prompt shows
   the plain-language warning.
+- **Change access** — set a new 7, 14, 30, or 90-day expiry. The countdown
+  restarts from the moment you save.
 - **Rotate token** — creates a new token and stops the old one immediately. The
   new token is shown once; copy it to the device.
 - **Revoke** — the device's open tabs and WebSockets stop working immediately.
@@ -317,11 +326,12 @@ host. This is intentional.
 Every sensitive transition is appended to a local audit log:
 
 - pairing code created, requested, confirmed, denied, or failed;
-- device revoked, rotated, or scope changed;
+- device revoked, rotated, expired, or scope changed;
+- device access expiry changed;
 - login failures and expired tokens;
 - every approve and deny;
 - every remote prompt (size and hash only, never text);
-- remote access enabled/disabled and panic;
+- remote access enabled/disabled, panic, and the revoke-on-disable setting;
 - notification settings changed.
 
 The log is viewable and exportable as JSON from **Settings → Remote access**.
@@ -350,7 +360,9 @@ default**.
 ## Turning remote access off
 
 - **Turn off remote access** in Settings stops the listener. Paired devices
-  remain in the database for next time.
+  remain in the database for next time. Turn on **Revoke all devices when remote
+  is turned off** if you want turning it off to revoke every device and token;
+  it is off by default.
 - **Panic** stops the listener *and* revokes every device. Use Panic when a
   device is lost or you suspect a token leaked.
 - Quitting the daemon also stops the remote listener. The next daemon start
@@ -507,7 +519,8 @@ version:
 - High-risk PINs are set on the device, must be 6–12 digits, and are stored as
   Argon2id hashes. Five wrong PINs lock Respond until the host resets it.
 - Tokens are 256-bit, stored hashed, sent in a header, compared in constant
-  time, and revoked immediately.
+  time, rotated on use with a 120-second overlap, and expire at the per-device
+  deadline (7, 14, 30, or 90 days). Revocation is immediate.
 - Scopes are enforced server-side on every request and every live message.
 - WebSocket upgrades check `Origin`, use a one-time ticket, and re-check scope
   and revocation.

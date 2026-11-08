@@ -131,6 +131,7 @@ pub struct RemotePrincipal {
     pub pin_hash: Option<String>,
     pub pin_failures: u32,
     pub respond_locked: bool,
+    pub expires_at: Option<String>,
 }
 
 impl RemotePrincipal {

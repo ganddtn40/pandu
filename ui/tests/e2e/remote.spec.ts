@@ -102,6 +102,26 @@ test.describe('remote access', () => {
       deviceScaleFactor: 2,
     });
     const remote = await remoteContext.newPage();
+    // The pairing poll returns the one-time token. The first authenticated
+    // request after pairing rotates it, and the UI must persist the replacement
+    // from the X-Cockpit-Token response header before the overlap closes.
+    let pairingToken: string | null = null;
+    remote.on('response', (response) => {
+      if (
+        response.request().method() !== 'POST' ||
+        !response.url().includes('/api/remote/pair/claim/')
+      ) {
+        return;
+      }
+      void response
+        .json()
+        .then((body: { status?: string; token?: string }) => {
+          if (body.status === 'confirmed' && typeof body.token === 'string') {
+            pairingToken = body.token;
+          }
+        })
+        .catch(() => {});
+    });
     await remote.goto(REMOTE_URL);
     await expect(remote.getByRole('heading', { name: 'Pair this device' })).toBeVisible();
     await expect(remote.getByText('Cockpit Remote')).toBeVisible();
@@ -119,6 +139,9 @@ test.describe('remote access', () => {
     const claim = card.locator('.remote-claim').filter({ hasText: 'Pixel 8' });
     await expect(claim).toContainText(verification);
     await claim.getByLabel('Type the 4-digit code').fill(verification);
+    // Tunnel mode defaults a new device to 14 days; the host can shorten it.
+    await expect(claim.getByLabel('Device access')).toHaveValue('14');
+    await claim.getByLabel('Device access').selectOption('7');
     await expect(page.locator('.toast')).toBeHidden({ timeout: 10_000 });
     await shotOf(pairingSection, '04-host-pair-confirm.png');
 
@@ -126,12 +149,26 @@ test.describe('remote access', () => {
     const device = card.locator('.remote-device').filter({ hasText: 'Pixel 8' });
     await expect(device).toBeVisible();
     await expect(device).toContainText('Status');
+    await expect(device).toContainText('Access until');
+    await expect(device).toContainText(/Never connected|Last seen/);
+
+    // Changing the expiry is a host-only mutation and takes effect immediately.
+    await device.getByLabel('Change access…').selectOption('90');
+    await expect(page.locator('.toast')).toContainText('Access for Pixel 8 set to 90 days.');
+    await expect(page.locator('.toast')).toBeHidden({ timeout: 10_000 });
+    await expect(device).toContainText('Access until');
 
     // The new device sees what it can do before opening the dashboard.
     await expect(remote.getByRole('heading', { name: 'This device is paired' })).toBeVisible({
       timeout: 15_000,
     });
     await expect(remote.locator('.remote-app__paired-list')).toContainText('No content');
+    await expect.poll(() => pairingToken).not.toBeNull();
+    const storedToken = await remote.evaluate(() =>
+      localStorage.getItem('cockpit.remote.token'),
+    );
+    expect(storedToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(storedToken).not.toBe(pairingToken);
     await remote.getByRole('button', { name: 'Open dashboard' }).click();
 
     await expect(remote.locator('.remote-app__tabs')).toBeVisible({ timeout: 15_000 });
@@ -152,6 +189,20 @@ test.describe('remote access', () => {
     await page.setViewportSize({ width: 1440, height: 1200 });
     await shotOf(matrix.locator('.remote-matrix-wrap'), '07-endpoints-scopes.png');
     await page.setViewportSize({ width: 1440, height: 900 });
+
+    // Revoke-on-disable is opt-in. Turning it on does not stop the listener;
+    // it only changes what the next "Turn off" does.
+    const danger = card.locator('.remote-section--danger');
+    const revokeOnDisable = danger
+      .locator('.notify-row')
+      .filter({ hasText: 'Revoke all devices when remote is turned off' })
+      .getByRole('button');
+    await expect(revokeOnDisable).toHaveAttribute('aria-pressed', 'false');
+    await revokeOnDisable.click();
+    await expect(revokeOnDisable).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.toast')).toContainText('Setting saved.');
+    await revokeOnDisable.click();
+    await expect(revokeOnDisable).toHaveAttribute('aria-pressed', 'false');
 
     // The remote listener is a separate router: model proxy paths and host-only
     // management routes must not exist there.

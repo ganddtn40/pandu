@@ -259,6 +259,7 @@ async fn session_info(
         "hasPin": principal.has_pin(),
         "pinFailures": principal.pin_failures,
         "respondLocked": principal.respond_locked,
+        "expiresAt": principal.expires_at,
         "mode": state.remote.mode().as_str(),
         "url": state.remote.url(),
     }))
@@ -943,8 +944,15 @@ async fn authenticate(
                 return rate_limited(Duration::from_secs(60));
             }
             state.remote.clear_auth_failures(&identity.rate_key("auth"));
+            let rotated = state.remote.rotate_token_on_use(&principal.device_id);
             request.extensions_mut().insert(principal);
-            next.run(request).await
+            let mut response = next.run(request).await;
+            if let Some(token) = rotated {
+                if let Ok(value) = HeaderValue::from_str(&token) {
+                    response.headers_mut().insert("x-cockpit-token", value);
+                }
+            }
+            response
         }
         Err(error) => {
             if let Some(response) = auth_ip_budget(&state, &identity) {

@@ -8,12 +8,16 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::api::ApiError;
 use crate::remote::auth::{Scope, ScopeSet};
-use crate::remote::{RemoteAccess, RemoteMode};
+use crate::remote::{
+    DEFAULT_DEVICE_EXPIRY_DAYS, DEVICE_EXPIRY_CHOICES, RemoteAccess, RemoteMode,
+    TUNNEL_DEVICE_EXPIRY_DAYS,
+};
 use crate::state::AppState;
 use crate::store::{RemoteDeviceRow, now_iso};
 
@@ -27,6 +31,37 @@ pub struct EnableInput {
 
 pub async fn status(State(state): State<AppState>) -> Json<Value> {
     Json(json!(state.remote.status().await))
+}
+
+pub async fn settings(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "revokeOnDisable": state.remote.revoke_on_disable() }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSettingsInput {
+    pub revoke_on_disable: bool,
+}
+
+pub async fn update_settings(
+    State(state): State<AppState>,
+    Json(input): Json<RemoteSettingsInput>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .remote
+        .set_revoke_on_disable(input.revoke_on_disable)
+        .map_err(store_error)?;
+    state.remote.audit(
+        "remote.settings",
+        None,
+        None,
+        json!({ "revokeOnDisable": input.revoke_on_disable }),
+        None,
+        None,
+    );
+    Ok(Json(
+        json!({ "revokeOnDisable": state.remote.revoke_on_disable() }),
+    ))
 }
 
 pub async fn enable(
@@ -74,11 +109,23 @@ pub async fn enable(
 
 pub async fn disable(State(state): State<AppState>) -> Json<Value> {
     crate::server::stop_remote(&state, false).await;
+    let revoked = if state.remote.revoke_on_disable() {
+        let revoked = state
+            .store
+            .revoke_all_remote_devices(&now_iso())
+            .unwrap_or(0);
+        if revoked > 0 {
+            state.remote.bump_epoch();
+        }
+        revoked
+    } else {
+        0
+    };
     state.remote.audit(
         "remote.disabled",
         None,
         None,
-        json!({ "reason": "host_disabled" }),
+        json!({ "reason": "host_disabled", "revokedDevices": revoked }),
         None,
         None,
     );
@@ -164,6 +211,16 @@ pub async fn pending_pairings(State(state): State<AppState>) -> Json<Value> {
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmPairingInput {
     pub verification_code: String,
+    #[serde(default)]
+    pub expires_in_days: Option<u32>,
+}
+
+fn expiry_from_days(days: u32) -> String {
+    (Utc::now() + chrono::Duration::days(i64::from(days))).to_rfc3339()
+}
+
+fn valid_expiry_days(days: u32) -> bool {
+    DEVICE_EXPIRY_CHOICES.contains(&days)
 }
 
 pub async fn confirm_pairing(
@@ -171,27 +228,44 @@ pub async fn confirm_pairing(
     Path(id): Path<String>,
     Json(input): Json<ConfirmPairingInput>,
 ) -> Result<Json<Value>, ApiError> {
-    let pairing = match state.pairing.confirm(&id, &input.verification_code) {
-        Ok(pairing) => pairing,
-        Err(error) => {
-            if error == crate::remote::pairing::PairingError::VerificationMismatch {
-                state.remote.audit(
-                    "pair.verify_failed",
-                    None,
-                    None,
-                    json!({ "claimId": id }),
-                    None,
-                    None,
-                );
-            }
-            return Err(pairing_error(error));
+    let days = input.expires_in_days.unwrap_or_else(|| {
+        if state.remote.mode() == RemoteMode::Tunnel {
+            TUNNEL_DEVICE_EXPIRY_DAYS
+        } else {
+            DEFAULT_DEVICE_EXPIRY_DAYS
         }
-    };
+    });
+    if !valid_expiry_days(days) {
+        return Err(ApiError::bad_request(
+            "Device access must be 7, 14, 30, or 90 days.",
+        ));
+    }
+    let expires_at = expiry_from_days(days);
+    let pairing =
+        match state
+            .pairing
+            .confirm(&id, &input.verification_code, Some(expires_at.clone()))
+        {
+            Ok(pairing) => pairing,
+            Err(error) => {
+                if error == crate::remote::pairing::PairingError::VerificationMismatch {
+                    state.remote.audit(
+                        "pair.verify_failed",
+                        None,
+                        None,
+                        json!({ "claimId": id }),
+                        None,
+                        None,
+                    );
+                }
+                return Err(pairing_error(error));
+            }
+        };
     state.remote.audit(
         "pair.confirm",
         Some((&pairing.device_id, &pairing.device_name)),
         None,
-        json!({ "claimId": id }),
+        json!({ "claimId": id, "expiresInDays": days, "expiresAt": expires_at }),
         None,
         None,
     );
@@ -229,6 +303,8 @@ pub struct DevicePatch {
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
     pub require_host_confirmation: Option<bool>,
+    #[serde(default)]
+    pub expires_in_days: Option<u32>,
 }
 
 pub async fn update_device(
@@ -257,6 +333,31 @@ pub async fn update_device(
     let updated = state
         .store
         .update_remote_device(&id, &scopes, patch.require_host_confirmation)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That device does not exist."))?;
+    if let Some(days) = patch.expires_in_days {
+        if !valid_expiry_days(days) {
+            return Err(ApiError::bad_request(
+                "Device access must be 7, 14, 30, or 90 days.",
+            ));
+        }
+        let expires_at = expiry_from_days(days);
+        state
+            .store
+            .set_remote_device_expiry(&id, &expires_at)
+            .map_err(store_error)?;
+        state.remote.audit(
+            "device.expiry",
+            Some((&updated.id, &updated.name)),
+            None,
+            json!({ "expiresInDays": days, "expiresAt": expires_at }),
+            None,
+            None,
+        );
+    }
+    let updated = state
+        .store
+        .get_remote_device(&id)
         .map_err(store_error)?
         .ok_or_else(|| ApiError::not_found("That device does not exist."))?;
     // A scope change closes every open socket for this device, then the
@@ -355,18 +456,23 @@ pub async fn rotate_device(
         .store
         .set_remote_device_token_hash(&id, &crate::remote::auth::hash_token(&token))
         .map_err(store_error)?;
+    let updated = state
+        .store
+        .get_remote_device(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That device does not exist."))?;
     state.remote.bump_epoch();
     state.remote.audit(
         "device.rotate",
         Some((&device.id, &device.name)),
         None,
-        json!({}),
+        json!({ "reason": "host" }),
         None,
         None,
     );
     Ok(Json(json!({
         "token": token,
-        "device": RemoteDeviceView::from_row(&device),
+        "device": RemoteDeviceView::from_row(&updated),
         "note": "Copy this token now. It is shown once and replaces the old token immediately.",
     })))
 }
@@ -567,6 +673,7 @@ pub struct RemoteDeviceView {
     pub respond_locked: bool,
     pub created_at: String,
     pub last_seen_at: Option<String>,
+    pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
 }
 
@@ -582,6 +689,7 @@ impl RemoteDeviceView {
             respond_locked: row.respond_locked_at.is_some(),
             created_at: row.created_at.clone(),
             last_seen_at: row.last_seen_at.clone(),
+            expires_at: row.expires_at.clone(),
             revoked_at: row.revoked_at.clone(),
         }
     }

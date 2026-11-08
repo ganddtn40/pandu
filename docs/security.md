@@ -247,9 +247,13 @@ token, or read the audit log.
   and wrong codes are rate-limited and lock out.
 - **Tokens.** A token is 256 bits, delivered to the device once, and stored by
   the host only as a SHA-256 hash. It is accepted only in the
-  `Authorization: Bearer` header, compared in constant time, and expires after
-  30 days without use. Rotation invalidates the old token immediately.
-  Revocation closes open WebSockets immediately.
+  `Authorization: Bearer` header, compared in constant time, and expires at the
+  per-device deadline chosen at pairing (7, 14, 30, or 90 days; Tunnel defaults
+  to 14, other modes to 30). The token rotates on use: the replacement rides in
+  `X-Cockpit-Token`, and the previous hash is accepted only during a 120-second
+  overlap so concurrent requests cannot lock the device out. A host-initiated
+  rotation invalidates the old token immediately. Revocation closes open
+  WebSockets immediately.
 - **Scopes.** Status (`view:status`), Content (`view:content`), Respond, and
   Prompt are enforced by the daemon on every request and every live message. New
   devices get Status only. Content is opt-in and can read terminal output,
@@ -289,11 +293,12 @@ token, or read the audit log.
   request shares an `untrusted` bucket and no address is shown to the host. A
   valid bearer token bypasses an IP lockout, so unauthenticated brute force
   cannot cut off an already-paired device.
-- **Audit.** Pair, confirm, verification failures, deny, revoke, rotate, scope
-  changes, login failures, every approve/deny, wrong PINs, Respond lock/reset,
-  every remote prompt (size/hash only), remote on/off, and notification changes
-  are appended to a host-only audit log. The log is exportable as JSON and never
-  contains tokens, passwords, PINs, prompt text, or terminal output.
+- **Audit.** Pair, confirm, verification failures, deny, revoke, rotate, expiry
+  changes, scope changes, login failures, every approve/deny, wrong PINs, Respond
+  lock/reset, every remote prompt (size/hash only), remote on/off,
+  revoke-on-disable, and notification changes are appended to a host-only audit
+  log. The log is exportable as JSON and never contains tokens, passwords, PINs,
+  prompt text, or terminal output.
 - **Panic.** Stops the listener, bumps the revocation epoch, revokes every
   device, and clears pending prompts.
 
@@ -303,6 +308,9 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `revocation_closes_a_live_socket_immediately`,
 `pairing_is_single_use_host_confirmed_and_brute_force_limited`,
 `pairing_queue_is_capped_at_three_claims`,
+`device_expiry_is_chosen_and_tokens_rotate_with_an_overlap`,
+`pairing_expiry_must_be_an_offered_choice_and_defaults_to_fourteen_in_a_tunnel`,
+`revoking_on_disable_is_opt_in_and_revokes_every_device`,
 `tunnel_identity_trusts_only_forwarded_addresses`,
 `a_valid_token_bypasses_an_untrusted_ip_lockout`,
 `host_origin_cors_and_security_headers_are_enforced`,
@@ -345,6 +353,11 @@ Phase 7 is not considered done unless these pass:
 - Pairing codes are single-use, expire, and lock out after wrong attempts; the
   host must echo the device's four-digit verification code.
 - Five wrong PINs lock Respond until the host resets the device.
+- Device expiry is chosen from 7/14/30/90 days, defaults to 14 in Tunnel mode,
+  and is enforced server-side.
+- Tokens rotate on use with a short overlap; the previous token stops working
+  after it.
+- Turning remote off revokes every device only when the opt-in setting is on.
 - `Host`, `Origin`, CORS, CSP, and security headers are enforced.
 - `/api/remote/health` returns 404 to unauthenticated remote callers and leaks no
   version.
@@ -378,8 +391,8 @@ The full suite is `cargo test --workspace`, `cargo clippy --workspace
 ### 5.1 Stolen token impact by scope
 
 A paired-device token is a bearer credential. Anyone who copies it can act as
-that device until it is revoked or expires after 30 days without use. Scopes
-bound the damage, but they do not make a stolen token harmless.
+that device until it is revoked or reaches its per-device expiry (7, 14, 30, or
+90 days). Scopes bound the damage, but they do not make a stolen token harmless.
 
 | Token scope | What an attacker can do | What they still cannot do |
 | --- | --- | --- |
@@ -400,8 +413,10 @@ token can still read status until it is revoked.
    token stops working on the next request, and open WebSockets close
    immediately.
 2. **Rotate instead of revoke** if you want to keep the device but suspect the
-   token leaked. Rotation invalidates the old token immediately and shows the
-   replacement once.
+   token leaked. A host-initiated rotation invalidates the old token immediately
+   and shows the replacement once. Routine on-use rotation keeps a 120-second
+   overlap for the previous token; do not treat that overlap as a way to keep
+   using a leaked token.
 3. **Use Panic** if the device is lost or you are unsure which device is
    affected. Panic stops the listener, revokes every device, and clears pending
    prompts.
@@ -441,8 +456,9 @@ matrix, and the integration test iterates it.
 | POST | `/api/remote/agents/{id}/prompt` | prompt | Keystrokes only; host confirmation by default |
 | POST | `/api/remote/logout` | view:status | Revoke this device |
 
-`/api/remote/health` is an unauthenticated liveness probe that returns only
-`ok`, `remote`, and the version. It is not a data route.
+`/api/remote/health` returns 404 unless the caller is a trusted loopback peer or
+presents a valid device token; the version appears only for an authenticated
+caller. It is not a data route.
 
 Everything else returns 404 on the remote listener, including `/v1`, `/openai`,
 `/anthropic`, `/s/...`, `/api/health`, `/api/settings`, `/api/rules`,
@@ -467,14 +483,11 @@ listed so a reviewer can decide whether a later phase must close them.
    `cloudflared` for public TLS, and a quick tunnel URL is public. LAN mode uses
    a self-signed certificate. Cockpit does not pin or verify the Tailscale or
    cloudflared binaries; a compromised tool can observe the traffic it carries.
-3. **No CSRF token on bodyless host POST endpoints.** CORS blocks cross-origin
-   reads and JSON preflights from unlisted origins are denied, but a malicious
-   page can still send a simple form POST to the loopback listener. Endpoints
-   that take no JSON body can be triggered from another origin. Event ids are
-   unguessable UUIDs, and the response is unreadable, but the state change is
-   possible. The remote listener uses bearer tokens and no cookies, so browser
-   CSRF does not apply there. A CSRF token or a required custom header on the
-   host listener is future work.
+3. **Host mutations depend on a per-process CSRF token.** Every state-changing
+   host `/api` route requires a loopback `Origin`, `Content-Type:
+   application/json`, and the `X-Cockpit-CSRF` token served only by the local UI.
+   Cross-origin form posts and `text/plain` requests are refused. A same-origin
+   script that can read the token is already inside the host's trust boundary.
 4. **No sandbox around the agent.** The agent runs with the user's privileges and
    can read anything the user can read. Cockpit does not inspect the agent binary
    or its environment.
@@ -507,11 +520,13 @@ listed so a reviewer can decide whether a later phase must close them.
     device, and PIN strength is the user's choice. The 128-bit pairing code and
     short expiry are the main defenses against guessing; do not treat a weak PIN
     as a strong second factor.
-12. **Tokens persist across remote-off and daemon restarts.** Turning remote
-    access off stops the listener but does not revoke devices. After a restart,
-    remote access starts off, but a previously paired token works again as soon
-    as the host re-enables the listener, until it is revoked or expires after 30
-    days without use. Review the device list before re-enabling.
+12. **Tokens persist across remote-off and daemon restarts unless you opt in.**
+    Turning remote access off stops the listener but does not revoke devices by
+    default. After a restart, remote access starts off, but a previously paired
+    token works again as soon as the host re-enables the listener, until it is
+    revoked or reaches its per-device expiry. Turn on **Revoke all devices when
+    remote is turned off** to revoke every device on disable, and review the
+    device list before re-enabling.
 
 ## 7. Reporting a problem
 

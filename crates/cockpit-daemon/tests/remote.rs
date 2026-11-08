@@ -242,6 +242,16 @@ async fn pair_device(
     name: &str,
     pin: Option<&str>,
 ) -> PairedDevice {
+    pair_device_with_expiry(daemon, remote, name, pin, None).await
+}
+
+async fn pair_device_with_expiry(
+    daemon: &ServerHandle,
+    remote: &str,
+    name: &str,
+    pin: Option<&str>,
+    expires_in_days: Option<u32>,
+) -> PairedDevice {
     let host = host_base(daemon);
     let client = reqwest::Client::new();
     let issued: Value = client
@@ -288,10 +298,14 @@ async fn pair_device(
         "the host should see the waiting device"
     );
 
+    let mut confirmation = json!({ "verificationCode": "1234" });
+    if let Some(days) = expires_in_days {
+        confirmation["expiresInDays"] = json!(days);
+    }
     let confirmed = client
         .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
         .headers(host_headers(daemon))
-        .json(&json!({ "verificationCode": "1234" }))
+        .json(&confirmation)
         .send()
         .await
         .unwrap();
@@ -2990,4 +3004,272 @@ async fn remote_access_refuses_unauthenticated_configurations() {
     )
     .await;
     assert!(plain_http.is_err(), "public tunnel URLs must be HTTPS");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn device_expiry_is_chosen_and_tokens_rotate_with_an_overlap() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device_with_expiry(&daemon, &remote, "Phone", None, Some(7)).await;
+
+    let devices: Value = client
+        .get(format!("{host}/api/remote/devices"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let row = devices["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == device.id)
+        .expect("the paired device is listed");
+    let expires_at = row["expiresAt"].as_str().expect("devices carry an expiry");
+    let expires = chrono::DateTime::parse_from_rfc3339(expires_at).unwrap();
+    let days = (expires.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_days();
+    assert!((6..=7).contains(&days), "expected about 7 days, got {days}");
+    assert!(
+        row["lastSeenAt"].is_null() || row["lastSeenAt"].is_string(),
+        "the device list exposes last seen"
+    );
+
+    // The first authenticated use rotates the token and returns the new one.
+    let response = client
+        .get(format!("{remote}/api/remote/session"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    let rotated = response
+        .headers()
+        .get("x-cockpit-token")
+        .expect("the rotation header is present")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(rotated, device.token);
+    assert_eq!(rotated.len(), 64);
+
+    // The old token still works inside the overlap and does not rotate again.
+    let old = client
+        .get(format!("{remote}/api/remote/session"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(old.status(), StatusCode::OK);
+    assert!(
+        old.headers().get("x-cockpit-token").is_none(),
+        "a second rotation must wait for the overlap to end"
+    );
+
+    let new = client
+        .get(format!("{remote}/api/remote/session"))
+        .bearer_auth(&rotated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(new.status(), StatusCode::OK);
+
+    // Once the chosen expiry passes, the token stops working and the device is
+    // revoked rather than silently kept alive.
+    daemon
+        .state
+        .store
+        .set_remote_device_expiry(&device.id, "2000-01-01T00:00:00+00:00")
+        .unwrap();
+    let expired = client
+        .get(format!("{remote}/api/remote/session"))
+        .bearer_auth(&rotated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(expired.status(), StatusCode::FORBIDDEN);
+    let expired: Value = expired.json().await.unwrap();
+    assert_eq!(expired["error"]["code"], "remote_device_expired");
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pairing_expiry_must_be_an_offered_choice_and_defaults_to_fourteen_in_a_tunnel() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+
+    let issued: Value = client
+        .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = issued["code"].as_str().unwrap().to_string();
+    let claim: Value = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .json(&json!({ "code": code, "deviceName": "Tablet", "verificationCode": "4321" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let claim_id = claim["claimId"].as_str().unwrap().to_string();
+
+    let invalid = client
+        .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "verificationCode": "4321", "expiresInDays": 10 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let confirmed = client
+        .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "verificationCode": "4321" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(confirmed.status().is_success());
+
+    let devices: Value = client
+        .get(format!("{host}/api/remote/devices"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let expires_at = devices["devices"][0]["expiresAt"]
+        .as_str()
+        .expect("the default expiry is stored");
+    let expires = chrono::DateTime::parse_from_rfc3339(expires_at).unwrap();
+    let days = (expires.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_days();
+    assert!(
+        (13..=14).contains(&days),
+        "expected about 14 days, got {days}"
+    );
+
+    let patched = client
+        .patch(format!(
+            "{host}/api/remote/devices/{}",
+            devices["devices"][0]["id"].as_str().unwrap()
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "expiresInDays": 90 }))
+        .send()
+        .await
+        .unwrap();
+    assert!(patched.status().is_success());
+    let patched: Value = patched.json().await.unwrap();
+    let expires =
+        chrono::DateTime::parse_from_rfc3339(patched["device"]["expiresAt"].as_str().unwrap())
+            .unwrap();
+    let days = (expires.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_days();
+    assert!(
+        (89..=90).contains(&days),
+        "expected about 90 days, got {days}"
+    );
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_on_disable_is_opt_in_and_revokes_every_device() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device(&daemon, &remote, "Phone", None).await;
+
+    let settings: Value = client
+        .get(format!("{host}/api/remote/settings"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(settings["revokeOnDisable"], false, "the default is off");
+
+    let disabled = client
+        .post(format!("{host}/api/remote/disable"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(disabled.status().is_success());
+    let devices: Value = client
+        .get(format!("{host}/api/remote/devices"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let row = devices["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == device.id)
+        .expect("the device survives when the setting is off");
+    assert!(row["revokedAt"].is_null());
+
+    let enabled = client
+        .post(format!("{host}/api/remote/enable"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "mode": "tunnel", "publicUrl": remote }))
+        .send()
+        .await
+        .unwrap();
+    assert!(enabled.status().is_success());
+
+    let updated: Value = client
+        .put(format!("{host}/api/remote/settings"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "revokeOnDisable": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(updated["revokeOnDisable"], true);
+
+    let disabled = client
+        .post(format!("{host}/api/remote/disable"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(disabled.status().is_success());
+    let devices: Value = client
+        .get(format!("{host}/api/remote/devices"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    for row in devices["devices"].as_array().unwrap() {
+        assert!(
+            row["revokedAt"].is_string(),
+            "revoke-on-disable must revoke every device: {row}"
+        );
+    }
+
+    daemon.shutdown().await.unwrap();
 }

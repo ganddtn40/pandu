@@ -17,7 +17,7 @@
     RemoteScope,
   } from './api/types';
   import { copyText } from './clipboard';
-  import { timeAgo } from './format';
+  import { formatDate, timeAgo } from './format';
   import { t, type MessageKey } from './i18n/i18n.svelte';
   import { remoteAuditKindKey, remoteModeKey, remoteScopeKey } from './remote-format';
   import { toast } from './toast-store.svelte';
@@ -55,12 +55,14 @@
   ];
 
   const SCOPES: RemoteScope[] = ['view:status', 'view:content', 'respond', 'prompt'];
+  const EXPIRY_CHOICES = [7, 14, 30, 90];
 
   let selectedMode = $state<ModeChoice>('tailscale');
   let publicUrl = $state('');
   let busy = $state<string | null>(null);
   let pairing = $state<RemotePairingCode | null>(null);
   let verificationByClaim = $state<Record<string, string>>({});
+  let expiryByClaim = $state<Record<string, number>>({});
   let now = $state(Date.now());
   let confirmPrompt = $state<string | null>(null);
   let confirmContent = $state<string | null>(null);
@@ -69,12 +71,15 @@
   let notifyEnabled = $state(false);
   let notifyServer = $state('');
   let notifySaving = $state(false);
+  let revokeOnDisable = $state(false);
+  let revokeSaving = $state(false);
   let showAllAudit = $state(false);
 
   const status = $derived(remoteHostState.status);
   const enabled = $derived(status?.enabled === true);
   const tools = $derived(status?.tools);
   const notifications = $derived(status?.notifications);
+  const defaultExpiryDays = $derived(status?.mode === 'tunnel' ? 14 : 30);
   const pairingSeconds = $derived(
     pairing ? Math.max(0, Math.ceil((Date.parse(pairing.expiresAt) - now) / 1000)) : 0,
   );
@@ -115,6 +120,10 @@
     if (!notifications) return;
     notifyEnabled = notifications.enabled;
     if (!notifyServer) notifyServer = notifications.server;
+  });
+
+  $effect(() => {
+    if (status) revokeOnDisable = status.revokeOnDisable;
   });
 
   async function run(key: string, action: () => Promise<void>): Promise<void> {
@@ -181,9 +190,11 @@
       toast(t('remote.verificationRequired'));
       return;
     }
+    const days = expiryByClaim[claim.id] ?? defaultExpiryDays;
     await run(`pair-confirm-${claim.id}`, async () => {
-      await remoteApi.confirmPairing(claim.id, typed);
+      await remoteApi.confirmPairing(claim.id, typed, days);
       delete verificationByClaim[claim.id];
+      delete expiryByClaim[claim.id];
       toast(t('remote.pairConfirmed', { name: claim.deviceName }));
       await refreshRemoteHost({ audit: true });
     });
@@ -260,6 +271,34 @@
       toast(t('remote.hostConfirmSaved'));
       await refreshRemoteHost({ audit: true });
     });
+  }
+
+  async function updateExpiry(device: RemoteDevice, days: number): Promise<void> {
+    if (!days) return;
+    await run(`expiry-${device.id}`, async () => {
+      const result = await remoteApi.updateDevice(device.id, { expiresInDays: days });
+      const index = remoteHostState.devices.findIndex((item) => item.id === device.id);
+      if (index >= 0) remoteHostState.devices[index] = result.device;
+      toast(t('remote.expirySaved', { name: device.name, days }));
+      await refreshRemoteHost({ audit: true });
+    });
+  }
+
+  async function toggleRevokeOnDisable(): Promise<void> {
+    if (revokeSaving) return;
+    revokeSaving = true;
+    try {
+      const result = await remoteApi.updateSettings(!revokeOnDisable);
+      revokeOnDisable = result.revokeOnDisable;
+      if (remoteHostState.status) {
+        remoteHostState.status.revokeOnDisable = result.revokeOnDisable;
+      }
+      toast(t('remote.revokeOnDisableSaved'));
+    } catch (error) {
+      toast(remoteHostErrorMessage(error));
+    } finally {
+      revokeSaving = false;
+    }
   }
 
   async function rotate(device: RemoteDevice): Promise<void> {
@@ -668,6 +707,21 @@
                       bind:value={verificationByClaim[claim.id]}
                     />
                   </label>
+                  <label class="remote-claim__field">
+                    <span>{t('remote.deviceAccess')}</span>
+                    <select
+                      value={expiryByClaim[claim.id] ?? defaultExpiryDays}
+                      onchange={(event) =>
+                        (expiryByClaim[claim.id] = Number(
+                          (event.currentTarget as HTMLSelectElement).value,
+                        ))}
+                    >
+                      {#each EXPIRY_CHOICES as days (days)}
+                        <option value={days}>{t('remote.expiryDays', { days })}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <p class="settings-card__note">{t('remote.expiryNote')}</p>
                 </div>
                 <div class="button-row button-row--tight">
                   <button
@@ -721,11 +775,18 @@
                       <span class="status-pill status-pill--warn">{t('remote.respondLockedBadge')}</span>
                     {/if}
                   </div>
-                  <span class="remote-device__seen">
-                    {device.lastSeenAt
-                      ? t('remote.lastSeen', { time: timeAgo(device.lastSeenAt, t) })
-                      : t('remote.neverSeen')}
-                  </span>
+                  <div class="remote-device__meta">
+                    <span class="remote-device__seen">
+                      {device.lastSeenAt
+                        ? t('remote.lastSeen', { time: timeAgo(device.lastSeenAt, t) })
+                        : t('remote.neverSeen')}
+                    </span>
+                    <span class="remote-device__seen">
+                      {device.expiresAt
+                        ? t('remote.expiresOn', { date: formatDate(device.expiresAt) })
+                        : t('remote.expiresNever')}
+                    </span>
+                  </div>
                 </div>
 
                 <div class="remote-scopes">
@@ -827,6 +888,24 @@
                       <span class="toggle__track" aria-hidden="true"></span>
                       {t('remote.hostConfirmToggle')}
                     </button>
+                    <label class="remote-device__expiry">
+                      <span>{t('remote.changeExpiry')}</span>
+                      <select
+                        value=""
+                        disabled={busy !== null}
+                        onchange={(event) => {
+                          const select = event.currentTarget as HTMLSelectElement;
+                          const days = Number(select.value);
+                          select.value = '';
+                          if (days) void updateExpiry(device, days);
+                        }}
+                      >
+                        <option value="">{t('remote.changeExpiry')}</option>
+                        {#each EXPIRY_CHOICES as days (days)}
+                          <option value={days}>{t('remote.expiryDays', { days })}</option>
+                        {/each}
+                      </select>
+                    </label>
                   </div>
                   <p class="settings-card__note">{t('remote.hostConfirmNote')}</p>
 
@@ -1120,6 +1199,24 @@
           <div>
             <h3>{t('remote.dangerTitle')}</h3>
             <p>{t('remote.dangerNote')}</p>
+          </div>
+        </div>
+        <div class="remote-notify">
+          <div class="notify-row">
+            <div class="notify-row__text">
+              <strong>{t('remote.revokeOnDisable')}</strong>
+              <span>{t('remote.revokeOnDisableNote')}</span>
+            </div>
+            <button
+              class="toggle"
+              type="button"
+              aria-pressed={revokeOnDisable}
+              onclick={toggleRevokeOnDisable}
+              disabled={revokeSaving}
+            >
+              <span class="toggle__track" aria-hidden="true"></span>
+              {revokeOnDisable ? t('common.on') : t('common.off')}
+            </button>
           </div>
         </div>
         <div class="button-row">

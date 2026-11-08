@@ -413,6 +413,7 @@ export interface RemoteStatus {
   startedAt?: string | null;
   lastError?: string | null;
   awaitingTunnel: boolean;
+  revokeOnDisable: boolean;
   devices: number;
   pendingPairings: number;
   pendingPrompts: number;
@@ -430,6 +431,7 @@ export interface RemoteDevice {
   respondLocked: boolean;
   createdAt: string;
   lastSeenAt?: string | null;
+  expiresAt?: string | null;
   revokedAt?: string | null;
 }
 
@@ -499,6 +501,7 @@ export interface RemoteSessionInfo {
   hasPin: boolean;
   pinFailures: number;
   respondLocked: boolean;
+  expiresAt?: string | null;
   mode: RemoteMode;
   url?: string | null;
 }

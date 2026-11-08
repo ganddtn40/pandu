@@ -35,6 +35,12 @@ pub use pairing::{PairingError, PairingManager};
 
 pub const DEFAULT_REMOTE_PORT: u16 = 4320;
 pub const IDLE_EXPIRY_DAYS: i64 = 30;
+pub const DEFAULT_DEVICE_EXPIRY_DAYS: u32 = 30;
+pub const TUNNEL_DEVICE_EXPIRY_DAYS: u32 = 14;
+pub const DEVICE_EXPIRY_CHOICES: [u32; 4] = [7, 14, 30, 90];
+/// How long the previous token stays valid after an on-use rotation.
+pub const TOKEN_ROTATION_OVERLAP_SECONDS: i64 = 120;
+pub const REVOKE_ON_DISABLE_SETTING: &str = "remote.revoke_on_disable";
 pub const MAX_PROMPT_CHARS: usize = 2_000;
 pub const MAX_REMOTE_CONNECTIONS: usize = 32;
 pub const WS_TICKET_TTL_SECONDS: u64 = 30;
@@ -137,6 +143,7 @@ pub struct RemoteStatus {
     /// Tunnel mode is bound on loopback but nobody can reach it until the
     /// tunnel forwards a request with the configured public Host.
     pub awaiting_tunnel: bool,
+    pub revoke_on_disable: bool,
     pub devices: u64,
     pub pending_pairings: usize,
     pub pending_prompts: usize,
@@ -206,7 +213,7 @@ impl RemoteAuthError {
             Self::Missing => "This device needs to pair with Cockpit first.",
             Self::Invalid => "That Cockpit token is not valid.",
             Self::Revoked => "This device was revoked by the host.",
-            Self::Expired => "This device has not been used for 30 days. Pair it again.",
+            Self::Expired => "This device's access expired. Pair it again.",
         }
     }
 }
@@ -460,12 +467,29 @@ impl RemoteAccess {
             started_at: inner.5,
             last_error: inner.6,
             awaiting_tunnel: inner.1 == RemoteMode::Tunnel && inner.0 && !inner.7,
+            revoke_on_disable: self.revoke_on_disable(),
             devices,
             pending_pairings: self.pairing.pending().len(),
             pending_prompts: self.list_prompts().len(),
             notifications,
             tools,
         }
+    }
+
+    // ----- Settings -------------------------------------------------------
+
+    pub fn revoke_on_disable(&self) -> bool {
+        self.store
+            .get_setting(REVOKE_ON_DISABLE_SETTING)
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("1")
+    }
+
+    pub fn set_revoke_on_disable(&self, enabled: bool) -> Result<()> {
+        self.store
+            .set_setting(REVOKE_ON_DISABLE_SETTING, if enabled { "1" } else { "0" })
     }
 
     // ----- Authentication -------------------------------------------------
@@ -487,31 +511,47 @@ impl RemoteAccess {
     }
 
     /// Resolve a bearer token into a principal. Only the hash is compared, and
-    /// the comparison is constant time. Idle devices expire after 30 days.
+    /// the comparison is constant time. A device expires at its chosen
+    /// `expires_at`; legacy rows without one fall back to 30 idle days. The
+    /// previous token is accepted only inside the short rotation overlap.
     pub fn authorize(&self, token: &str) -> std::result::Result<RemotePrincipal, RemoteAuthError> {
         let token = token.trim();
         if token.is_empty() {
             return Err(RemoteAuthError::Missing);
         }
         let hash = auth::hash_token(token);
-        let Some(device) = self
+        let device = match self
             .store
             .find_remote_device_by_token_hash(&hash)
             .map_err(|_| RemoteAuthError::Invalid)?
-        else {
-            return Err(RemoteAuthError::Invalid);
+        {
+            Some(device) => device,
+            None => {
+                let previous = self
+                    .store
+                    .find_remote_device_by_previous_token_hash(&hash)
+                    .map_err(|_| RemoteAuthError::Invalid)?
+                    .filter(|device| {
+                        device
+                            .previous_token_expires_at
+                            .as_deref()
+                            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                            .is_some_and(|until| until.with_timezone(&Utc) > Utc::now())
+                    });
+                previous.ok_or(RemoteAuthError::Invalid)?
+            }
         };
         if device.revoked_at.is_some() {
             return Err(RemoteAuthError::Revoked);
         }
-        if self.device_is_idle(&device) {
+        if let Some(reason) = self.device_expired(&device) {
             let _ = self.store.revoke_remote_device(&device.id, &now_iso());
             self.bump_epoch();
             self.audit(
                 "auth.expired",
                 Some((device.id.as_str(), device.name.as_str())),
                 None,
-                json!({ "reason": "idle_30_days" }),
+                json!({ "reason": reason }),
                 None,
                 None,
             );
@@ -521,14 +561,74 @@ impl RemoteAccess {
         Ok(principal_from_row(&device))
     }
 
+    /// Rotate the current token after an authenticated use. The old token
+    /// remains valid for the overlap window; only one rotation can be in
+    /// flight, so concurrent requests cannot race the device out of its token.
+    pub fn rotate_token_on_use(&self, device_id: &str) -> Option<String> {
+        let device = self.store.get_remote_device(device_id).ok().flatten()?;
+        if device.revoked_at.is_some() || self.device_expired(&device).is_some() {
+            return None;
+        }
+        if device
+            .previous_token_expires_at
+            .as_deref()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .is_some_and(|until| until.with_timezone(&Utc) > Utc::now())
+        {
+            return None;
+        }
+        let token = auth::new_token();
+        let now = Utc::now();
+        let overlap_until =
+            (now + chrono::Duration::seconds(TOKEN_ROTATION_OVERLAP_SECONDS)).to_rfc3339();
+        let changed = self
+            .store
+            .rotate_remote_device_token_on_use(
+                &device.id,
+                &device.token_hash,
+                &auth::hash_token(&token),
+                &overlap_until,
+                &now.to_rfc3339(),
+            )
+            .ok()?;
+        if !changed {
+            return None;
+        }
+        self.audit(
+            "device.rotate",
+            Some((device.id.as_str(), device.name.as_str())),
+            None,
+            json!({ "reason": "use", "overlapSeconds": TOKEN_ROTATION_OVERLAP_SECONDS }),
+            None,
+            None,
+        );
+        Some(token)
+    }
+
     /// Re-check a device without a token, used by the live socket loop so a
     /// revocation closes an already-open connection.
     pub fn principal_by_id(&self, device_id: &str) -> Option<RemotePrincipal> {
         let device = self.store.get_remote_device(device_id).ok().flatten()?;
-        if device.revoked_at.is_some() || self.device_is_idle(&device) {
+        if device.revoked_at.is_some() || self.device_expired(&device).is_some() {
             return None;
         }
         Some(principal_from_row(&device))
+    }
+
+    fn device_expired(&self, device: &RemoteDeviceRow) -> Option<&'static str> {
+        if let Some(expires_at) = device.expires_at.as_deref() {
+            // A row with an unreadable expiry is treated as expired: failing
+            // closed is safer than granting a device indefinite access.
+            let expired = DateTime::parse_from_rfc3339(expires_at)
+                .map(|expires| expires.with_timezone(&Utc) <= Utc::now())
+                .unwrap_or(true);
+            return expired.then_some("device_expiry");
+        }
+        // Rows created before per-device expiry keep the old idle rule.
+        if self.device_is_idle(device) {
+            return Some("idle_30_days");
+        }
+        None
     }
 
     fn device_is_idle(&self, device: &RemoteDeviceRow) -> bool {
@@ -941,6 +1041,7 @@ fn principal_from_row(device: &RemoteDeviceRow) -> RemotePrincipal {
         pin_hash: device.pin_hash.clone(),
         pin_failures: device.pin_failures,
         respond_locked: device.respond_locked_at.is_some(),
+        expires_at: device.expires_at.clone(),
     }
 }
 
