@@ -151,11 +151,16 @@ async fn start_remote_daemon(home: &Path, upstream: SocketAddr) -> (ServerHandle
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(response) = reqwest::Client::new()
-            .get(format!("{public_url}/api/remote/health"))
+            .get(format!("{public_url}/"))
             .send()
             .await
         {
-            if response.status().is_success() {
+            if response
+                .headers()
+                .get("x-cockpit-remote")
+                .and_then(|value| value.to_str().ok())
+                == Some("1")
+            {
                 break;
             }
         }
@@ -196,26 +201,23 @@ async fn tunnel_status_waits_for_the_public_host_and_rejects_host_or_origin_mism
     // A loopback Host is still allowed, but the configured host is what marks
     // the tunnel as actually reachable.
     let mismatch = client
-        .get(format!("{public_url}/api/remote/health"))
+        .get(format!("{public_url}/"))
         .header("host", "evil.example.com")
         .send()
         .await
         .unwrap();
     assert_eq!(mismatch.status(), StatusCode::FORBIDDEN);
     let mismatch_origin = client
-        .get(format!("{public_url}/api/remote/health"))
+        .get(format!("{public_url}/"))
         .header("origin", "https://evil.example.com")
         .send()
         .await
         .unwrap();
     assert_eq!(mismatch_origin.status(), StatusCode::FORBIDDEN);
 
-    let good = client
-        .get(format!("{public_url}/api/remote/health"))
-        .send()
-        .await
-        .unwrap();
+    let good = client.get(format!("{public_url}/")).send().await.unwrap();
     assert_eq!(good.status(), StatusCode::OK);
+    assert_eq!(good.headers()["x-cockpit-remote"], "1");
     let status: Value = client
         .get(format!("{host}/api/remote/status"))
         .send()
@@ -2824,12 +2826,46 @@ async fn malformed_requests_are_rejected_without_a_crash() {
         "encoded traversal must be blocked, got {raw}"
     );
 
-    let health = client
+    // Health is not an unauthenticated fingerprint.
+    let anonymous_health = client
         .get(format!("{remote}/api/remote/health"))
         .send()
         .await
         .unwrap();
-    assert_eq!(health.status(), StatusCode::OK);
+    assert_eq!(anonymous_health.status(), StatusCode::NOT_FOUND);
+    assert!(anonymous_health.headers().get("x-cockpit-remote").is_some());
+
+    // A real loopback caller can still probe it, but gets no version.
+    let loopback_health = client
+        .get(format!("{remote}/api/remote/health"))
+        .header("cf-connecting-ip", "127.0.0.1")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(loopback_health.status(), StatusCode::OK);
+    let loopback_health: Value = loopback_health.json().await.unwrap();
+    assert_eq!(loopback_health["remote"], true);
+    assert!(loopback_health.get("version").is_none());
+
+    // A remote caller with a valid token may see the version.
+    let authenticated_health = client
+        .get(format!("{remote}/api/remote/health"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(authenticated_health.status(), StatusCode::OK);
+    let authenticated_health: Value = authenticated_health.json().await.unwrap();
+    assert_eq!(authenticated_health["remote"], true);
+    assert!(authenticated_health["version"].as_str().is_some());
+
+    let foreign_health = client
+        .get(format!("{remote}/api/remote/health"))
+        .header("cf-connecting-ip", "203.0.113.9")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(foreign_health.status(), StatusCode::NOT_FOUND);
 
     daemon.shutdown().await.unwrap();
 }

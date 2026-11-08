@@ -517,8 +517,3 @@ export interface RemoteClaimPoll {
   createdAt?: string;
 }
 
-export interface RemoteHealth {
-  ok: boolean;
-  remote: boolean;
-  version: string;
-}

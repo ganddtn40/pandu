@@ -467,6 +467,7 @@ The remote listener exposes only the routes below. The same matrix is shown in
 
 | Method | Endpoint | Scope | Note |
 | --- | --- | --- | --- |
+| GET | `/api/remote/health` | view:status | 404 unless loopback or a valid device token; version only when authenticated |
 | POST | `/api/remote/pair/claim` | none | Pairing code + device name |
 | POST | `/api/remote/pair/claim/{id}` | none | One-time claim secret |
 | GET | `/api/remote/session` | view:status | This device's scopes |
@@ -512,6 +513,8 @@ version:
   and revocation.
 - Security headers are set on every remote response; no CORS headers are
   emitted, and cookies are not used.
+- `/api/remote/health` is not an unauthenticated fingerprint: it returns 404
+  unless called from loopback or with a valid device token.
 - Rate limits, exponential lockout, a connection cap, and a body-size limit
   apply to the remote listener.
 - The audit log records sensitive transitions without secrets or prompt text.

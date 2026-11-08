@@ -222,6 +222,11 @@ token, or read the audit log.
   pairing, scopes, revoke, panic) stays on the loopback listener and requires the
   loopback `Origin`, a JSON content type, and the per-process CSRF token, so a
   paired device or a web page cannot drive it.
+- **Health is not a fingerprint.** `/api/remote/health` answers only a trusted
+  loopback caller or a request with a valid device token; everyone else gets the
+  same 404 as an unknown path. The version is included only for an authenticated
+  device. The remote UI is detected by the `X-Cockpit-Remote: 1` marker header
+  instead of an unauthenticated health probe.
 - **Bind rules.** `Loopback` means off. Tailscale binds only the detected
   tailnet IPv4. Tunnel binds only `127.0.0.1` and requires an explicit public
   URL. LAN binds only the detected LAN IPv4 and always uses TLS. No mode binds
@@ -341,6 +346,8 @@ Phase 7 is not considered done unless these pass:
   host must echo the device's four-digit verification code.
 - Five wrong PINs lock Respond until the host resets the device.
 - `Host`, `Origin`, CORS, CSP, and security headers are enforced.
+- `/api/remote/health` returns 404 to unauthenticated remote callers and leaks no
+  version.
 - Remote approvals need the PIN and cannot be replayed; expired approvals are
   refused.
 - Remote prompts are bounded, rate-limited, and never audited verbatim; host

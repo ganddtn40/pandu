@@ -93,12 +93,31 @@ pub fn build_remote_router(state: AppState) -> Router {
         .layer(tower_http::trace::TraceLayer::new_for_http())
 }
 
-async fn remote_health() -> Json<Value> {
-    Json(json!({
-        "ok": true,
-        "remote": true,
-        "version": cockpit_core::VERSION,
-    }))
+async fn remote_health(
+    State(state): State<AppState>,
+    Extension(identity): Extension<ClientIdentity>,
+    headers: HeaderMap,
+) -> Response {
+    // Health is not an unauthenticated fingerprint. A paired device may read
+    // it, and a real loopback caller may read it, but everyone else gets the
+    // same 404 as an unknown path.
+    let authenticated = bearer_token(&headers)
+        .and_then(|token| state.remote.authorize(token).ok())
+        .is_some();
+    let loopback = identity.trusted
+        && identity
+            .ip
+            .as_deref()
+            .and_then(|ip| ip.parse::<IpAddr>().ok())
+            .is_some_and(|ip| ip.is_loopback());
+    if !authenticated && !loopback {
+        return api_not_found().await;
+    }
+    let mut body = json!({ "ok": true, "remote": true });
+    if authenticated {
+        body["version"] = json!(cockpit_core::VERSION);
+    }
+    Json(body).into_response()
 }
 
 // ----- Pairing ------------------------------------------------------------
@@ -998,6 +1017,8 @@ async fn security_headers(
     );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    // Same-origin UI detection marker. The host listener never sets this.
+    headers.insert("x-cockpit-remote", HeaderValue::from_static("1"));
     if state.remote.mode().uses_tls() {
         headers.insert(
             header::STRICT_TRANSPORT_SECURITY,

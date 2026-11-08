@@ -14,7 +14,6 @@ import type {
   RemoteClaimTicket,
   RemoteDevice,
   RemoteEndpointScope,
-  RemoteHealth,
   RemoteMode,
   RemoteNotificationStatus,
   RemotePairingCode,
@@ -234,21 +233,20 @@ async function remoteRequest<T>(path: string, init: RequestInit = {}): Promise<T
 }
 
 /**
- * Probe the origin before the app boots. Only the remote listener answers
- * `/api/remote/health`; the host listener returns a JSON 404 there.
+ * Probe the origin before the app boots. Only the remote listener sets the
+ * `X-Cockpit-Remote` marker on its own UI; `/api/remote/health` is
+ * authenticated and no longer an unauthenticated fingerprint.
  */
 export async function detectRemoteListener(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   const origin = daemonOrigin();
   try {
-    const response = await fetch(`${origin}/api/remote/health`, {
-      headers: { accept: 'application/json' },
+    const response = await fetch(`${origin}/`, {
+      method: 'HEAD',
       cache: 'no-store',
       signal: AbortSignal.timeout(2_500),
     });
-    if (!response.ok) return false;
-    const body = (await response.json()) as Partial<RemoteHealth>;
-    return body.remote === true;
+    return response.headers.get('x-cockpit-remote') === '1';
   } catch {
     return false;
   }

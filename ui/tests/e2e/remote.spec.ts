@@ -87,13 +87,13 @@ test.describe('remote access', () => {
     await expect
       .poll(async () => {
         try {
-          const response = await fetch(`${REMOTE_URL}/api/remote/health`);
-          return response.status;
+          const response = await fetch(`${REMOTE_URL}/`);
+          return response.headers.get('x-cockpit-remote');
         } catch {
-          return 0;
+          return null;
         }
       })
-      .toBe(200);
+      .toBe('1');
 
     const remoteContext = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -162,9 +162,18 @@ test.describe('remote access', () => {
       expect(response.status(), `${blocked} must be 404 on the remote listener`).toBe(404);
     }
 
-    const health = await remote.request.get(`${REMOTE_URL}/api/remote/health`);
-    expect(health.ok()).toBeTruthy();
-    expect((await health.json()).remote).toBe(true);
+    const health = await remote.request.get(`${REMOTE_URL}/api/remote/health`, {
+      failOnStatusCode: false,
+    });
+    expect(health.status()).toBe(404);
+    const token = await remote.evaluate(() => localStorage.getItem('cockpit.remote.token'));
+    const authenticated = await remote.request.get(`${REMOTE_URL}/api/remote/health`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(authenticated.ok()).toBeTruthy();
+    const healthBody = await authenticated.json();
+    expect(healthBody.remote).toBe(true);
+    expect(typeof healthBody.version).toBe('string');
 
     // Revoking the device closes its live socket immediately; the remote app
     // falls back to the pairing gate on the next refresh.
