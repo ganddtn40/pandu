@@ -9,6 +9,21 @@ import type {
   GuardRule,
   Health,
   Overview,
+  RemoteAuditResponse,
+  RemoteClaimPoll,
+  RemoteClaimTicket,
+  RemoteDevice,
+  RemoteEndpointScope,
+  RemoteHealth,
+  RemoteMode,
+  RemoteNotificationStatus,
+  RemotePairingCode,
+  RemotePendingPairing,
+  RemotePendingPrompt,
+  RemoteScope,
+  RemoteSessionInfo,
+  RemoteStatus,
+  RemoteTools,
   ReplayResponse,
   Session,
   SessionList,
@@ -27,6 +42,7 @@ declare global {
 
 const DEV_PORTS = new Set(['5174', '4174']);
 const DEFAULT_DAEMON = 'http://127.0.0.1:4319';
+const REMOTE_TOKEN_KEY = 'cockpit.remote.token';
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
@@ -49,6 +65,11 @@ export function liveSocketUrl(replay = 100): string {
   return `${base}/api/live?replay=${replay}`;
 }
 
+/** The remote listener's live socket. The ticket travels in the subprotocol. */
+export function remoteSocketUrl(): string {
+  return `${daemonOrigin().replace(/^http/, 'ws')}/api/remote/live`;
+}
+
 export class DaemonError extends Error {
   readonly status: number;
   readonly code: string | undefined;
@@ -61,10 +82,25 @@ export class DaemonError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+interface ApiErrorBody {
+  error?: string | { code?: string; message?: string };
+  code?: string;
+  message?: string;
+}
+
+function readErrorBody(body: ApiErrorBody): { message?: string; code?: string } {
+  const { error } = body;
+  if (typeof error === 'string') return { message: error, code: body.code };
+  if (error && typeof error === 'object') {
+    return { message: error.message, code: error.code };
+  }
+  return { message: body.message, code: body.code };
+}
+
+async function requestAt<T>(origin: string, path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${daemonOrigin()}/api${path}`, {
+    response = await fetch(`${trimTrailingSlash(origin)}/api${path}`, {
       ...init,
       headers: {
         accept: 'application/json',
@@ -84,9 +120,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let message = `The daemon returned ${response.status}.`;
     let code: string | undefined;
     try {
-      const body = (await response.json()) as { error?: string; code?: string };
-      if (body.error) message = body.error;
-      code = body.code;
+      const parsed = readErrorBody((await response.json()) as ApiErrorBody);
+      if (parsed.message) message = parsed.message;
+      code = parsed.code;
     } catch {
       // Keep the status-based message.
     }
@@ -94,6 +130,62 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return requestAt<T>(daemonOrigin(), path, init);
+}
+
+/** The pairing/remote token is shown once and stored only on this device. */
+export function remoteToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(REMOTE_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setRemoteToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) window.localStorage.setItem(REMOTE_TOKEN_KEY, token);
+    else window.localStorage.removeItem(REMOTE_TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable in private windows.
+  }
+}
+
+async function remoteRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = remoteToken();
+  return requestAt<T>(daemonOrigin(), path, {
+    ...init,
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...init.headers,
+    },
+  });
+}
+
+/**
+ * Probe the origin before the app boots. Only the remote listener answers
+ * `/api/remote/health`; the host listener returns a JSON 404 there.
+ */
+export async function detectRemoteListener(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const origin = daemonOrigin();
+  try {
+    const response = await fetch(`${origin}/api/remote/health`, {
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) return false;
+    const body = (await response.json()) as Partial<RemoteHealth>;
+    return body.remote === true;
+  } catch {
+    return false;
+  }
 }
 
 export const daemonApi = {
@@ -138,4 +230,127 @@ export const daemonApi = {
     request<{ event: AgentEvent }>(`/agent-events/${encodeURIComponent(id)}/ack`, {
       method: 'POST',
     }),
+};
+
+/**
+ * Host-only remote access management. These calls only exist on the loopback
+ * listener; the remote listener returns 404 for every one of them.
+ */
+export const remoteApi = {
+  status: () => request<RemoteStatus>('/remote/status'),
+  enable: (mode: Exclude<RemoteMode, 'loopback'>, publicUrl?: string) =>
+    request<RemoteStatus>('/remote/enable', {
+      method: 'POST',
+      body: JSON.stringify({ mode, ...(publicUrl ? { publicUrl } : {}) }),
+    }),
+  disable: () => request<RemoteStatus>('/remote/disable', { method: 'POST' }),
+  panic: () =>
+    request<{ stopped: boolean; revokedDevices: number; status: RemoteStatus }>('/remote/panic', {
+      method: 'POST',
+    }),
+  pairCode: () => request<RemotePairingCode>('/remote/pair/code', { method: 'POST' }),
+  pendingPairings: () =>
+    request<{ pairings: RemotePendingPairing[] }>('/remote/pair/pending'),
+  confirmPairing: (id: string) =>
+    request<{ pairing: { deviceId: string; deviceName: string; createdAt: string } }>(
+      `/remote/pair/pending/${encodeURIComponent(id)}/confirm`,
+      { method: 'POST' },
+    ),
+  denyPairing: (id: string) =>
+    request<{ denied: boolean }>(`/remote/pair/pending/${encodeURIComponent(id)}/deny`, {
+      method: 'POST',
+    }),
+  devices: () => request<{ devices: RemoteDevice[] }>('/remote/devices'),
+  updateDevice: (
+    id: string,
+    patch: { scopes?: RemoteScope[]; requireHostConfirmation?: boolean },
+  ) =>
+    request<{ device: RemoteDevice }>(`/remote/devices/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  revokeDevice: (id: string) =>
+    request<{ revoked: boolean }>(`/remote/devices/${encodeURIComponent(id)}/revoke`, {
+      method: 'POST',
+    }),
+  rotateDevice: (id: string) =>
+    request<{ token: string; device: RemoteDevice; note: string }>(
+      `/remote/devices/${encodeURIComponent(id)}/rotate`,
+      { method: 'POST' },
+    ),
+  audit: (limit = 100, offset = 0) =>
+    request<RemoteAuditResponse>(`/remote/audit?limit=${limit}&offset=${offset}`),
+  auditExportUrl: () => `${daemonOrigin()}/api/remote/audit/export`,
+  prompts: () => request<{ prompts: RemotePendingPrompt[] }>('/remote/prompts'),
+  approvePrompt: (id: string) =>
+    request<{ sent: boolean; sequence?: number; promptId: string }>(
+      `/remote/prompts/${encodeURIComponent(id)}/approve`,
+      { method: 'POST' },
+    ),
+  denyPrompt: (id: string) =>
+    request<{ denied: boolean }>(`/remote/prompts/${encodeURIComponent(id)}/deny`, {
+      method: 'POST',
+    }),
+  tools: () => request<RemoteTools>('/remote/tools'),
+  matrix: () => request<{ endpoints: RemoteEndpointScope[] }>('/remote/matrix'),
+  notifications: () => request<RemoteNotificationStatus>('/remote/notifications'),
+  updateNotifications: (enabled: boolean, server?: string) =>
+    request<RemoteNotificationStatus>('/remote/notifications', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled, ...(server ? { server } : {}) }),
+    }),
+  testNotification: () =>
+    request<{ sent: boolean }>('/remote/notifications/test', { method: 'POST' }),
+};
+
+/**
+ * The scoped API a paired device talks to. Every call carries the bearer token
+ * in the Authorization header; no token ever appears in a URL.
+ */
+export const remoteDeviceApi = {
+  claim: (code: string, deviceName: string, pin?: string) =>
+    requestAt<RemoteClaimTicket>(daemonOrigin(), '/remote/pair/claim', {
+      method: 'POST',
+      body: JSON.stringify({ code, deviceName, ...(pin ? { pin } : {}) }),
+    }),
+  pollClaim: (id: string, secret: string) =>
+    requestAt<RemoteClaimPoll>(
+      daemonOrigin(),
+      `/remote/pair/claim/${encodeURIComponent(id)}`,
+      { method: 'POST', headers: { 'x-pairing-secret': secret } },
+    ),
+  session: () => remoteRequest<RemoteSessionInfo>('/remote/session'),
+  overview: () => remoteRequest<Overview>('/remote/overview'),
+  sessions: (limit = 50) => remoteRequest<SessionList>(`/remote/sessions?limit=${limit}`),
+  sessionDetail: (id: string) =>
+    remoteRequest<Session>(`/remote/sessions/${encodeURIComponent(id)}`),
+  steps: (id: string) =>
+    remoteRequest<{ steps: Step[] }>(`/remote/sessions/${encodeURIComponent(id)}/steps`),
+  guards: (status?: string) =>
+    remoteRequest<{ events: GuardEvent[] }>(
+      `/remote/guards/events?limit=100${status ? `&status=${encodeURIComponent(status)}` : ''}`,
+    ),
+  decide: (
+    id: string,
+    input: { decision: 'approve' | 'deny'; nonce: string; sessionId: string; pin?: string },
+  ) =>
+    remoteRequest<{ event: GuardEvent }>(
+      `/remote/guards/events/${encodeURIComponent(id)}/decision`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  agents: () => remoteRequest<{ sessions: AgentSession[] }>('/remote/agents'),
+  agent: (id: string) => remoteRequest<AgentOutput>(`/remote/agents/${encodeURIComponent(id)}`),
+  prompt: (id: string, text: string) =>
+    remoteRequest<{ status: string; promptId: string; message?: string; sequence?: number }>(
+      `/remote/agents/${encodeURIComponent(id)}/prompt`,
+      { method: 'POST', body: JSON.stringify({ text }) },
+    ),
+  agentEvents: () =>
+    remoteRequest<{ events: AgentEvent[]; openCount: number }>('/remote/agent-events?limit=200'),
+  wsTicket: () =>
+    remoteRequest<{ ticket: string; expiresInSeconds: number; protocol: string }>(
+      '/remote/ws-ticket',
+      { method: 'POST' },
+    ),
+  logout: () => remoteRequest<{ revoked: boolean }>('/remote/logout', { method: 'POST' }),
 };

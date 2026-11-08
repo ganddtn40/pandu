@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 
 use axum::Router;
 use axum::extract::Request;
@@ -7,6 +8,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -19,6 +21,7 @@ use crate::config::{Config, is_loopback_host};
 use crate::error::{DaemonError, Result};
 use crate::logwatch;
 use crate::proxy::proxy_handler;
+use crate::remote::{RemoteMode, RemoteServerHandle, host};
 use crate::state::AppState;
 use crate::ui;
 
@@ -69,9 +72,41 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agents/{id}/end", post(api::end_agent))
         .route("/agent-events", get(api::list_agent_events))
         .route("/agent-events/{id}/ack", post(api::acknowledge_agent_event))
-        .route("/pair/code", post(api::pair_code))
-        .route("/pair/claim", post(api::pair_claim))
-        .route("/pair/status", get(api::pair_status))
+        // Remote access management is host-only: these routes exist on the
+        // loopback listener and never on the remote listener.
+        .route("/remote/status", get(host::status))
+        .route("/remote/enable", post(host::enable))
+        .route("/remote/disable", post(host::disable))
+        .route("/remote/panic", post(host::panic))
+        .route("/remote/pair/code", post(host::pair_code))
+        .route("/remote/pair/pending", get(host::pending_pairings))
+        .route(
+            "/remote/pair/pending/{id}/confirm",
+            post(host::confirm_pairing),
+        )
+        .route("/remote/pair/pending/{id}/deny", post(host::deny_pairing))
+        .route("/remote/devices", get(host::devices))
+        .route("/remote/devices/{id}", patch(host::update_device))
+        .route("/remote/devices/{id}/revoke", post(host::revoke_device))
+        .route("/remote/devices/{id}/rotate", post(host::rotate_device))
+        .route("/remote/audit", get(host::audit))
+        .route("/remote/audit/export", get(host::audit_export))
+        .route("/remote/prompts", get(host::pending_prompts))
+        .route(
+            "/remote/prompts/{id}/approve",
+            post(host::approve_prompt),
+        )
+        .route("/remote/prompts/{id}/deny", post(host::deny_prompt))
+        .route("/remote/tools", get(host::tools))
+        .route("/remote/matrix", get(host::matrix))
+        .route(
+            "/remote/notifications",
+            get(host::notifications).put(host::update_notifications),
+        )
+        .route(
+            "/remote/notifications/test",
+            post(host::test_notification),
+        )
         .route("/demo/seed", post(api::seed_demo))
         .route("/live", get(api::live))
         .fallback(api::not_found)
@@ -173,6 +208,224 @@ pub async fn bind(config: Config) -> Result<(TcpListener, AppState)> {
     let state = AppState::new(config)?;
     let listener = TcpListener::bind((state.config.host.as_str(), state.config.port)).await?;
     Ok((listener, state))
+}
+
+/// Start the optional remote listener.
+///
+/// Safety rules enforced here:
+/// * `Loopback` (off) never starts a listener.
+/// * A daemon started with `COCKPIT_REMOTE_PORT=0` refuses to start one.
+/// * Tailscale binds only the detected tailnet IP, never `0.0.0.0`.
+/// * LAN binds only the detected LAN IP and always uses TLS.
+/// * Tunnel stays on loopback and needs an explicit public URL so the pairing
+///   QR points at the right address.
+pub async fn start_remote(
+    state: &AppState,
+    mode: RemoteMode,
+    public_url: Option<String>,
+) -> Result<()> {
+    if mode == RemoteMode::Loopback {
+        return Err(DaemonError::config(
+            "Remote access is off. Choose Tailscale, tunnel, or LAN to turn it on.",
+        ));
+    }
+    if state.config.remote_port == 0 {
+        return Err(DaemonError::config(
+            "COCKPIT_REMOTE_PORT=0 disables the remote listener for this daemon.",
+        ));
+    }
+    if state.remote.is_enabled() {
+        stop_remote(state, false).await;
+    }
+
+    let port = state.config.remote_port;
+    let router = crate::remote::api::build_remote_router(state.clone());
+    match mode {
+        RemoteMode::Tailscale => {
+            let tools = state.remote.tools(state.config.remote_port).await;
+            let Some(ip) = tools.tailscale_ip else {
+                return Err(DaemonError::config(
+                    "Tailscale is installed but not connected. Run `tailscale up`, then try again.",
+                ));
+            };
+            let addr = parse_bind(&ip, port)?;
+            let listener = TcpListener::bind(addr).await.map_err(|error| {
+                DaemonError::config(format!(
+                    "Could not bind the tailnet address {addr}: {error}"
+                ))
+            })?;
+            let bound = listener.local_addr()?;
+            let url = format!("http://{bound}");
+            let (shutdown, receiver) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                let service = router.into_make_service_with_connect_info::<SocketAddr>();
+                let result = axum::serve(listener, service)
+                    .with_graceful_shutdown(async move {
+                        let _ = receiver.await;
+                    })
+                    .await;
+                if let Err(error) = result {
+                    tracing::warn!(%error, "the remote listener stopped with an error");
+                }
+            });
+            state.remote.set_started(mode, url, ip, port, None);
+            state
+                .remote
+                .set_server(RemoteServerHandle::Plain { shutdown, task });
+        }
+        RemoteMode::Tunnel => {
+            let url = public_url
+                .or_else(|| state.config.remote_public_url.clone())
+                .ok_or_else(|| {
+                    DaemonError::config(
+                        "Tunnel mode needs the public URL from your tunnel \
+                         (set COCKPIT_REMOTE_PUBLIC_URL or pass publicUrl).",
+                    )
+                })?;
+            let url = normalize_public_url(&url)?;
+            let listener = TcpListener::bind(("127.0.0.1", port))
+                .await
+                .map_err(|error| {
+                    DaemonError::config(format!(
+                        "Could not bind the tunnel listener on 127.0.0.1:{port}: {error}"
+                    ))
+                })?;
+            let (shutdown, receiver) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                let service = router.into_make_service_with_connect_info::<SocketAddr>();
+                let result = axum::serve(listener, service)
+                    .with_graceful_shutdown(async move {
+                        let _ = receiver.await;
+                    })
+                    .await;
+                if let Err(error) = result {
+                    tracing::warn!(%error, "the remote listener stopped with an error");
+                }
+            });
+            state
+                .remote
+                .set_started(mode, url, "127.0.0.1".to_string(), port, None);
+            state
+                .remote
+                .set_server(RemoteServerHandle::Plain { shutdown, task });
+        }
+        RemoteMode::Lan => {
+            let tools = state.remote.tools(state.config.remote_port).await;
+            let Some(ip) = tools.lan_ip else {
+                return Err(DaemonError::config(
+                    "Could not detect a local network address. Connect to Wi-Fi or use Tailscale instead.",
+                ));
+            };
+            let (cert_path, key_path, fingerprint) =
+                ensure_lan_certificate(&state.config.home, &ip)?;
+            let addr = parse_bind(&ip, port)?;
+            let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
+                .await
+                .map_err(|error| {
+                    DaemonError::config(format!("Could not load the LAN TLS certificate: {error}"))
+                })?;
+            let handle = axum_server::Handle::new();
+            let server_handle = handle.clone();
+            let task = tokio::spawn(async move {
+                let result = axum_server::bind_rustls(addr, config)
+                    .handle(server_handle)
+                    .serve(router.into_make_service())
+                    .await;
+                if let Err(error) = result {
+                    tracing::warn!(%error, "the remote TLS listener stopped with an error");
+                }
+            });
+            let url = format!("https://{addr}");
+            state
+                .remote
+                .set_started(mode, url, ip, port, Some(fingerprint));
+            state
+                .remote
+                .set_server(RemoteServerHandle::Tls { handle, task });
+        }
+        RemoteMode::Loopback => unreachable!("handled above"),
+    }
+    Ok(())
+}
+
+/// Stop the remote listener and close every open remote connection.
+pub async fn stop_remote(state: &AppState, immediate: bool) {
+    if let Some(server) = state.remote.take_server() {
+        server.stop(immediate).await;
+    }
+    state.remote.bump_epoch();
+    state.remote.set_stopped();
+    state.remote.clear_prompts();
+}
+
+fn parse_bind(ip: &str, port: u16) -> Result<SocketAddr> {
+    format!("{ip}:{port}")
+        .parse::<SocketAddr>()
+        .map_err(|_| DaemonError::config(format!("`{ip}` is not a usable IP address.")))
+}
+
+fn normalize_public_url(value: &str) -> Result<String> {
+    let value = value.trim().trim_end_matches('/');
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return Err(DaemonError::config(
+            "The public URL must start with https:// (or http:// for a loopback test).",
+        ));
+    };
+    let host = rest.split('/').next().unwrap_or(rest);
+    let host_only = host.split(':').next().unwrap_or(host);
+    if scheme.eq_ignore_ascii_case("https") {
+        return Ok(value.to_string());
+    }
+    if scheme.eq_ignore_ascii_case("http") && is_loopback_host(host_only) {
+        return Ok(value.to_string());
+    }
+    Err(DaemonError::config(
+        "Public tunnel URLs must use https://. Plain HTTP is only allowed on loopback.",
+    ))
+}
+
+/// LAN mode always uses TLS. The self-signed certificate is generated once and
+/// pinned by the pairing QR; its SHA-256 fingerprint is stored next to it.
+fn ensure_lan_certificate(home: &Path, ip: &str) -> Result<(PathBuf, PathBuf, String)> {
+    let directory = home.join("remote-tls");
+    std::fs::create_dir_all(&directory)?;
+    let cert_path = directory.join("cert.pem");
+    let key_path = directory.join("key.pem");
+    let fingerprint_path = directory.join("fingerprint.txt");
+    if cert_path.is_file() && key_path.is_file() && fingerprint_path.is_file() {
+        let fingerprint = std::fs::read_to_string(&fingerprint_path)?
+            .trim()
+            .to_string();
+        if !fingerprint.is_empty() {
+            return Ok((cert_path, key_path, fingerprint));
+        }
+    }
+
+    let names = vec!["cockpit.local".to_string(), ip.to_string()];
+    let generated = rcgen::generate_simple_self_signed(names).map_err(|error| {
+        DaemonError::other(format!("Could not generate a TLS certificate: {error}"))
+    })?;
+    let cert_pem = generated.cert.pem();
+    let key_pem = generated.key_pair.serialize_pem();
+    let fingerprint = fingerprint_of(generated.cert.der());
+    std::fs::write(&cert_path, cert_pem)?;
+    std::fs::write(&key_path, key_pem)?;
+    std::fs::write(&fingerprint_path, format!("{fingerprint}\n"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok((cert_path, key_path, fingerprint))
+}
+
+fn fingerprint_of(der: &[u8]) -> String {
+    let digest = Sha256::digest(der);
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 /// A running daemon owned by a test or by `cockpit serve`.
@@ -285,6 +538,7 @@ async fn serve_on(
         .with_graceful_shutdown(graceful)
         .await;
 
+    stop_remote(&state, true).await;
     sweeper.abort();
     if let Some(watcher) = watcher {
         watcher.abort();

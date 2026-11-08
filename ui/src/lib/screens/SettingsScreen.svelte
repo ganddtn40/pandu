@@ -17,6 +17,7 @@
   import { LANGUAGES, RADII, SURFACE_STYLES, THEME_MODES } from '../design/types';
   import { formatUptime } from '../format';
   import { t } from '../i18n/i18n.svelte';
+  import RemoteAccessCard from '../RemoteAccessCard.svelte';
   import {
     notifyState,
     refreshWebPermission,
@@ -318,6 +319,8 @@
       {/if}
     </div>
   </section>
+
+  <RemoteAccessCard />
 
   <section class="settings-card card" data-glass data-glass-layer="card" data-glass-depth="2">
     <div class="settings-card__head">

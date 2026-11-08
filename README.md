@@ -117,6 +117,10 @@ your local database.
 ## Read more
 
 - [Design system](docs/DESIGN.md) — tokens, surfaces, appearance, theme JSON
+- [Remote access](docs/remote-access.md) — Tailscale, Cloudflare tunnel, pairing,
+  scopes, revocation, and troubleshooting
+- [Security model](docs/security.md) — what is protected, stolen-token impact,
+  and the endpoints × scopes table
 - [Rewrite decision record](docs/REWRITE.md) — what is kept, cut, and changed
 - [Roadmap](docs/ROADMAP.md) — v0.2.0 scope, phases, and deferred features
 - [Issue drafts](docs/issues/) — ready-to-paste `help wanted` work

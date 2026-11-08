@@ -34,9 +34,14 @@ directories = { workspace = true }
 rust-embed = { workspace = true }
 glob = { workspace = true }
 regex = { workspace = true }
+qrcode = { workspace = true }
+rcgen = { workspace = true }
+axum-server = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }

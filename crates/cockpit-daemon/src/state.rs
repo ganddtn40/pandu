@@ -11,8 +11,8 @@ use crate::error::Result;
 use crate::guards::GuardService;
 use crate::live::LiveBus;
 use crate::logwatch::LogWatcher;
-use crate::pairing::PairingManager;
 use crate::recorder::Recorder;
+use crate::remote::{PairingManager, RemoteAccess};
 use crate::sessions::SessionManager;
 use crate::snapshots::GitSnapshotService;
 use crate::store::Store;
@@ -31,6 +31,7 @@ pub struct AppState {
     pub agents: Arc<AgentControl>,
     pub logwatch: Arc<LogWatcher>,
     pub pairing: Arc<PairingManager>,
+    pub remote: Arc<RemoteAccess>,
     pub client: reqwest::Client,
     pub started_at: Instant,
 }
@@ -88,7 +89,8 @@ impl AppState {
             adapters.clone(),
             live.clone(),
         ));
-        let pairing = PairingManager::new();
+        let pairing = PairingManager::new(store.clone());
+        let remote = RemoteAccess::new(store.clone(), pairing.clone());
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .connect_timeout(std::time::Duration::from_secs(30))
@@ -108,6 +110,7 @@ impl AppState {
             agents,
             logwatch,
             pairing,
+            remote,
             client,
             started_at: Instant::now(),
         })

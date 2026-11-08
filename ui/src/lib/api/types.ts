@@ -366,3 +366,141 @@ export interface ApprovalDecision {
   nonce?: string;
   sessionId?: string;
 }
+
+// ----- Remote access -------------------------------------------------------
+
+export type RemoteMode = 'loopback' | 'tailscale' | 'tunnel' | 'lan';
+export type RemoteScope = 'view' | 'respond' | 'prompt';
+export type RemoteClaimStatus = 'pending' | 'confirmed' | 'denied' | 'expired';
+
+export interface RemoteToolStatus {
+  installed: boolean;
+  path?: string | null;
+  detail?: string | null;
+  command: string;
+}
+
+export interface RemoteTools {
+  tailscale: RemoteToolStatus;
+  cloudflared: RemoteToolStatus;
+  lanIp?: string | null;
+  tailscaleIp?: string | null;
+}
+
+export interface RemoteNotificationStatus {
+  enabled: boolean;
+  server: string;
+  topic?: string | null;
+  thirdParty: boolean;
+}
+
+export interface RemoteStatus {
+  enabled: boolean;
+  mode: RemoteMode;
+  url?: string | null;
+  fingerprint?: string | null;
+  port: number;
+  startedAt?: string | null;
+  lastError?: string | null;
+  devices: number;
+  pendingPairings: number;
+  pendingPrompts: number;
+  notifications: RemoteNotificationStatus;
+  tools: RemoteTools;
+}
+
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  scopes: RemoteScope[];
+  requireHostConfirmation: boolean;
+  hasPin: boolean;
+  createdAt: string;
+  lastSeenAt?: string | null;
+  revokedAt?: string | null;
+}
+
+export interface RemotePairingCode {
+  code: string;
+  expiresAt: string;
+  expiresInSeconds: number;
+  url: string;
+  fingerprint?: string | null;
+  qrSvg: string;
+  qrPayload: Record<string, unknown>;
+}
+
+export interface RemotePendingPairing {
+  id: string;
+  deviceName: string;
+  requestedAt: string;
+  ip?: string;
+  hasPin: boolean;
+}
+
+export interface RemoteAuditEntry {
+  id: string;
+  at: string;
+  event: string;
+  deviceId?: string;
+  deviceName?: string;
+  ip?: string;
+  detail: Record<string, unknown>;
+  sizeBytes?: number;
+  contentHash?: string;
+}
+
+export interface RemoteAuditResponse {
+  entries: RemoteAuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface RemoteEndpointScope {
+  method: string;
+  path: string;
+  scope: string;
+  note: string;
+}
+
+export interface RemotePendingPrompt {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  sessionId: string;
+  createdAt: string;
+  expiresAt: string;
+  sizeBytes: number;
+  contentHash: string;
+}
+
+export interface RemoteSessionInfo {
+  deviceId: string;
+  deviceName: string;
+  scopes: RemoteScope[];
+  requireHostConfirmation: boolean;
+  hasPin: boolean;
+  mode: RemoteMode;
+  url?: string | null;
+}
+
+export interface RemoteClaimTicket {
+  claimId: string;
+  claimSecret: string;
+  expiresInSeconds: number;
+}
+
+export interface RemoteClaimPoll {
+  status: RemoteClaimStatus;
+  deviceId?: string;
+  deviceName?: string;
+  token?: string;
+  createdAt?: string;
+}
+
+export interface RemoteHealth {
+  ok: boolean;
+  remote: boolean;
+  version: string;
+}

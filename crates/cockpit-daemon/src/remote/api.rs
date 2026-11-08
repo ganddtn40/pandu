@@ -1,0 +1,1130 @@
+//! The remote listener's HTTP surface.
+//!
+//! This router is deliberately separate from the loopback router. It mounts
+//! only the dashboard, the scoped remote API, and the live WebSocket. Model
+//! proxy paths are rejected with 404 before the dashboard fallback can see
+//! them.
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, State};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use cockpit_core::guard::{
+    ApprovalChoice, ApprovalDecisionInput, GuardEvent, GuardRuleKind, GuardSeverity,
+};
+use cockpit_core::ids::is_id;
+use serde::Deserialize;
+use serde_json::{Value, json};
+use tokio::sync::broadcast::error::RecvError;
+
+use crate::api as loopback;
+use crate::api::ApiError;
+use crate::remote::auth::Scope;
+use crate::remote::{
+    MAX_PROMPT_CHARS, PendingPrompt, RemoteAuthError, RemoteMode, RemotePrincipal,
+};
+use crate::state::AppState;
+
+pub const REMOTE_BODY_LIMIT: usize = 64 * 1024;
+
+pub fn build_remote_router(state: AppState) -> Router {
+    let public = Router::new()
+        .route("/remote/health", get(remote_health))
+        .route("/remote/pair/claim", post(pair_claim))
+        .route("/remote/pair/claim/{id}", post(pair_poll));
+
+    let authenticated = Router::new()
+        .route("/remote/session", get(session_info))
+        .route("/remote/overview", get(overview))
+        .route("/remote/sessions", get(list_sessions))
+        .route("/remote/sessions/{id}", get(get_session))
+        .route("/remote/sessions/{id}/steps", get(list_steps))
+        .route("/remote/guards/events", get(list_guard_events))
+        .route("/remote/guards/events/{id}/decision", post(guard_decision))
+        .route("/remote/agents", get(list_agents))
+        .route("/remote/agents/{id}", get(get_agent))
+        .route("/remote/agents/{id}/prompt", post(send_prompt))
+        .route("/remote/agent-events", get(list_agent_events))
+        .route("/remote/ws-ticket", post(ws_ticket))
+        .route("/remote/logout", post(logout))
+        .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
+
+    // The live socket authenticates with a single-use ticket carried in the
+    // WebSocket subprotocol, never with a bearer token in the URL. It therefore
+    // lives outside the bearer-auth layer and validates its own ticket.
+    let live_socket = Router::new().route("/remote/live", get(live));
+
+    let api = public
+        .merge(authenticated)
+        .merge(live_socket)
+        .fallback(api_not_found)
+        .with_state(state.clone());
+
+    Router::new()
+        .nest("/api", api)
+        .merge(super::ui::router(&state.config.ui_dir))
+        .layer(middleware::from_fn(block_proxy_paths))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            capture_client_ip,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            security_headers,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            check_host_and_origin,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            limit_connections,
+        ))
+        .layer(DefaultBodyLimit::max(REMOTE_BODY_LIMIT))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
+}
+
+async fn remote_health() -> Json<Value> {
+    Json(json!({
+        "ok": true,
+        "remote": true,
+        "version": cockpit_core::VERSION,
+    }))
+}
+
+// ----- Pairing ------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairClaimInput {
+    code: String,
+    device_name: String,
+    #[serde(default)]
+    pin: Option<String>,
+}
+
+async fn pair_claim(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<PairClaimInput>,
+) -> Response {
+    let ip = client_ip(&headers);
+    let key = format!("pair:{ip}");
+    if let Some(remaining) = state.remote.lockout_for(&key) {
+        return rate_limited(remaining);
+    }
+    if !state
+        .remote
+        .allow_attempt(&key, 12, Duration::from_secs(60))
+    {
+        state.remote.audit(
+            "pair.rate_limited",
+            None,
+            Some(&ip),
+            json!({ "reason": "per_ip_window" }),
+            None,
+            None,
+        );
+        return rate_limited(Duration::from_secs(60));
+    }
+    match state.remote.pairing().begin_claim(
+        &input.code,
+        &input.device_name,
+        input.pin.as_deref(),
+        Some(&ip),
+    ) {
+        Ok(ticket) => {
+            state.remote.audit(
+                "pair.request",
+                None,
+                Some(&ip),
+                json!({
+                    "claimId": ticket.claim_id,
+                    "deviceName": input.device_name.chars().take(80).collect::<String>(),
+                    "hasPin": input.pin.as_deref().is_some_and(|pin| !pin.trim().is_empty()),
+                }),
+                None,
+                None,
+            );
+            state.remote.send_notification("pairing").await;
+            Json(json!({
+                "claimId": ticket.claim_id,
+                "claimSecret": ticket.claim_secret,
+                "expiresInSeconds": super::PAIR_CLAIM_TTL_SECONDS,
+            }))
+            .into_response()
+        }
+        Err(error) => {
+            let lock = state.remote.record_auth_failure(&key);
+            state.remote.audit(
+                "pair.failed",
+                None,
+                Some(&ip),
+                json!({ "code": error.code() }),
+                None,
+                None,
+            );
+            if lock > Duration::ZERO {
+                return rate_limited(lock);
+            }
+            api_error(StatusCode::BAD_REQUEST, error.code(), error.message())
+        }
+    }
+}
+
+async fn pair_poll(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let ip = client_ip(&headers);
+    let key = format!("pair-poll:{ip}");
+    if !state
+        .remote
+        .allow_attempt(&key, 120, Duration::from_secs(60))
+    {
+        return rate_limited(Duration::from_secs(60));
+    }
+    let Some(secret) = headers
+        .get("x-pairing-secret")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return api_error(
+            StatusCode::UNAUTHORIZED,
+            "pairing_secret_missing",
+            "The pairing secret is missing.",
+        );
+    };
+    match state.remote.pairing().poll_claim(&id, secret) {
+        Ok(poll) => {
+            if poll.status == super::pairing::ClaimStatusView::Confirmed {
+                state.remote.audit(
+                    "pair.claimed",
+                    poll.device_id.as_deref().zip(poll.device_name.as_deref()),
+                    Some(&ip),
+                    json!({ "claimId": id }),
+                    None,
+                    None,
+                );
+            }
+            Json(json!(poll)).into_response()
+        }
+        Err(error) => api_error(StatusCode::BAD_REQUEST, error.code(), error.message()),
+    }
+}
+
+// ----- Read-only API ------------------------------------------------------
+
+async fn session_info(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+) -> Json<Value> {
+    Json(json!({
+        "deviceId": principal.device_id,
+        "deviceName": principal.device_name,
+        "scopes": principal.scopes.to_strings(),
+        "requireHostConfirmation": principal.require_host_confirmation,
+        "hasPin": principal.has_pin(),
+        "mode": state.remote.mode().as_str(),
+        "url": state.remote.url(),
+    }))
+}
+
+async fn overview(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    loopback::overview(State(state)).await
+}
+
+async fn list_sessions(
+    State(state): State<AppState>,
+    Query(query): Query<loopback::SessionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    loopback::list_sessions(State(state), Query(query)).await
+}
+
+async fn get_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    loopback::get_session(State(state), Path(id)).await
+}
+
+async fn list_steps(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    loopback::list_steps(State(state), Path(id)).await
+}
+
+async fn list_guard_events(
+    State(state): State<AppState>,
+    Query(query): Query<loopback::GuardEventQuery>,
+) -> Result<Json<Value>, ApiError> {
+    loopback::list_guard_events(State(state), Query(query)).await
+}
+
+async fn list_agents(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    loopback::list_agents(State(state)).await
+}
+
+async fn get_agent(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    loopback::get_agent(State(state), Path(id)).await
+}
+
+async fn list_agent_events(
+    State(state): State<AppState>,
+    Query(query): Query<loopback::AgentEventQuery>,
+) -> Result<Json<Value>, ApiError> {
+    loopback::list_agent_events(State(state), Query(query)).await
+}
+
+// ----- Remote decisions ---------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteDecisionInput {
+    decision: ApprovalChoice,
+    nonce: String,
+    session_id: String,
+    #[serde(default)]
+    pin: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+async fn guard_decision(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<RemoteDecisionInput>,
+) -> Response {
+    if let Some(response) = require_scope(&principal, Scope::Respond) {
+        return response;
+    }
+    if !is_id(&id) {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "The guard event id is not valid.",
+        );
+    }
+    let Some(event) = state.store.get_guard_event(&id).ok().flatten() else {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "That approval does not exist.",
+        );
+    };
+    if is_auth_prompt(&event) {
+        state.remote.audit(
+            "approval.needs_host",
+            Some((&principal.device_id, &principal.device_name)),
+            Some(&client_ip(&headers)),
+            json!({ "eventId": event.id, "reason": "authentication_prompt" }),
+            None,
+            None,
+        );
+        return api_error(
+            StatusCode::CONFLICT,
+            "needs_host",
+            "Authentication and login prompts must be completed at the computer.",
+        );
+    }
+
+    let high_risk = matches!(
+        event.severity,
+        GuardSeverity::High | GuardSeverity::Critical
+    ) || event.kind == GuardRuleKind::DangerousCommand;
+    if high_risk {
+        let pin_key = format!("pin:{}", principal.device_id);
+        if let Some(remaining) = state.remote.lockout_for(&pin_key) {
+            return rate_limited(remaining);
+        }
+        if !principal.has_pin() {
+            return api_error(
+                StatusCode::CONFLICT,
+                "pin_required",
+                "This approval needs a PIN. Revoke the device and pair it again with a PIN.",
+            );
+        }
+        let Some(pin) = input.pin.as_deref().filter(|pin| !pin.trim().is_empty()) else {
+            return api_error(
+                StatusCode::CONFLICT,
+                "pin_required",
+                "This is a high-risk approval. Enter the PIN you set when pairing.",
+            );
+        };
+        if !principal.verify_pin(pin) {
+            let lock = state.remote.record_auth_failure(&pin_key);
+            state.remote.audit(
+                "approval.pin_failed",
+                Some((&principal.device_id, &principal.device_name)),
+                Some(&client_ip(&headers)),
+                json!({ "eventId": event.id }),
+                None,
+                None,
+            );
+            if lock > Duration::ZERO {
+                return rate_limited(lock);
+            }
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "pin_invalid",
+                "That PIN is not correct.",
+            );
+        }
+        state.remote.clear_auth_failures(&pin_key);
+    }
+
+    let decision = ApprovalDecisionInput {
+        decision: input.decision,
+        note: input.note.clone(),
+        actor: Some(format!("remote:{}", principal.device_name)),
+        channel: "remote".to_string(),
+        provider: None,
+        nonce: Some(input.nonce),
+        session_id: Some(input.session_id),
+    };
+    match state.guards.resolve_event(&id, decision).await {
+        Ok(resolved) => {
+            let approved = input.decision == ApprovalChoice::Approve;
+            state.remote.audit(
+                if approved {
+                    "approval.approve"
+                } else {
+                    "approval.deny"
+                },
+                Some((&principal.device_id, &principal.device_name)),
+                Some(&client_ip(&headers)),
+                json!({
+                    "eventId": resolved.id,
+                    "severity": resolved.severity.as_str(),
+                    "kind": resolved.kind.as_str(),
+                    "highRisk": high_risk,
+                    "pinUsed": high_risk,
+                }),
+                None,
+                None,
+            );
+            state.remote.send_notification("approval").await;
+            Json(json!({ "event": resolved })).into_response()
+        }
+        Err(error) => {
+            let status = StatusCode::from_u16(error.status()).unwrap_or(StatusCode::BAD_REQUEST);
+            api_error(status, error.code(), error.to_string())
+        }
+    }
+}
+
+fn is_auth_prompt(event: &GuardEvent) -> bool {
+    let mut text = format!("{} {} {}", event.title, event.description, event.rule_id);
+    if let Some(command) = &event.command {
+        text.push(' ');
+        text.push_str(command);
+    }
+    for evidence in &event.evidence {
+        if let Some(excerpt) = &evidence.excerpt {
+            text.push(' ');
+            text.push_str(excerpt);
+        }
+    }
+    let lower = text.to_ascii_lowercase();
+    [
+        "password",
+        "passcode",
+        "2fa",
+        "two-factor",
+        "one-time code",
+        "login",
+        "log in",
+        "sign in",
+        "authenticate",
+        "authentication",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+// ----- Remote prompts -----------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemotePromptInput {
+    text: String,
+}
+
+async fn send_prompt(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<RemotePromptInput>,
+) -> Response {
+    if let Some(response) = require_scope(&principal, Scope::Prompt) {
+        return response;
+    }
+    if !is_id(&id) {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "The agent session id is not valid.",
+        );
+    }
+    if input.text.trim().is_empty() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "empty_prompt",
+            "Write something before sending.",
+        );
+    }
+    if input.text.chars().count() > MAX_PROMPT_CHARS {
+        return api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "prompt_too_large",
+            format!("Remote prompts are limited to {MAX_PROMPT_CHARS} characters."),
+        );
+    }
+    if input.text.contains('\0') {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "bad_prompt",
+            "That prompt contains a NUL byte.",
+        );
+    }
+    let Some(view) = state.agents.get(&id).ok().flatten() else {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "agent_missing",
+            "That agent session is not running.",
+        );
+    };
+    if view.status != crate::agents::AgentSessionStatus::Running {
+        return api_error(
+            StatusCode::CONFLICT,
+            "agent_ended",
+            "That agent session has already ended.",
+        );
+    }
+    if !state.remote.prompt_rate_ok(&principal.device_id) {
+        state.remote.audit(
+            "prompt.rate_limited",
+            Some((&principal.device_id, &principal.device_name)),
+            Some(&client_ip(&headers)),
+            json!({ "sessionId": id }),
+            None,
+            None,
+        );
+        return rate_limited(Duration::from_secs(60));
+    }
+
+    let prompt =
+        state
+            .remote
+            .queue_prompt(&principal, &id, &input.text, Some(&client_ip(&headers)));
+    if principal.require_host_confirmation {
+        state.remote.send_notification("prompt").await;
+        state.live.publish(
+            "remote.prompt",
+            Some(&id),
+            None,
+            json!({
+                "promptId": prompt.id,
+                "deviceName": principal.device_name,
+                "sessionId": id,
+                "sizeBytes": prompt.size_bytes,
+                "needsHostConfirmation": true,
+            }),
+        );
+        return (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                "status": "pending_host",
+                "promptId": prompt.id,
+                "message": "Sent to the host for confirmation.",
+            })),
+        )
+            .into_response();
+    }
+
+    let Some(prompt) = state.remote.approve_prompt(&prompt.id) else {
+        return api_error(
+            StatusCode::CONFLICT,
+            "prompt_expired",
+            "That prompt expired before it was sent.",
+        );
+    };
+    match push_prompt(&state, &prompt) {
+        Ok(sequence) => {
+            state.remote.audit(
+                "prompt.sent",
+                Some((&principal.device_id, &principal.device_name)),
+                Some(&client_ip(&headers)),
+                json!({
+                    "promptId": prompt.id,
+                    "sessionId": prompt.session_id,
+                    "sequence": sequence,
+                    "hostConfirmation": false,
+                }),
+                Some(prompt.size_bytes),
+                Some(&prompt.content_hash),
+            );
+            state.live.publish(
+                "remote.prompt.sent",
+                Some(&prompt.session_id),
+                None,
+                json!({
+                    "promptId": prompt.id,
+                    "deviceName": principal.device_name,
+                    "sessionId": prompt.session_id,
+                }),
+            );
+            Json(json!({
+                "status": "sent",
+                "promptId": prompt.id,
+                "sequence": sequence,
+            }))
+            .into_response()
+        }
+        Err(message) => api_error(StatusCode::CONFLICT, "prompt_failed", message),
+    }
+}
+
+pub(crate) fn push_prompt(state: &AppState, prompt: &PendingPrompt) -> Result<Option<u64>, String> {
+    let mut data = prompt.text.clone();
+    if !data.ends_with('\n') && !data.ends_with('\r') {
+        data.push('\r');
+    }
+    state
+        .agents
+        .push_input(&prompt.session_id, &data)
+        .map_err(|error| error.to_string())
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+    headers: HeaderMap,
+) -> Json<Value> {
+    let revoked = state
+        .store
+        .revoke_remote_device(&principal.device_id, &crate::store::now_iso())
+        .unwrap_or(false);
+    state.remote.bump_epoch();
+    state.remote.audit(
+        "device.self_revoke",
+        Some((&principal.device_id, &principal.device_name)),
+        Some(&client_ip(&headers)),
+        json!({ "revoked": revoked }),
+        None,
+        None,
+    );
+    Json(json!({ "revoked": true }))
+}
+
+// ----- WebSocket ----------------------------------------------------------
+
+async fn ws_ticket(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+) -> Response {
+    if let Some(response) = require_scope(&principal, Scope::View) {
+        return response;
+    }
+    let ticket = state.remote.issue_ws_ticket(&principal.device_id);
+    Json(json!({
+        "ticket": ticket,
+        "expiresInSeconds": super::WS_TICKET_TTL_SECONDS,
+        "protocol": format!("cockpit.{ticket}"),
+    }))
+    .into_response()
+}
+
+async fn live(ws: WebSocketUpgrade, State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Some(protocol) = headers
+        .get(header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .find(|item| item.starts_with("cockpit."))
+                .map(str::to_string)
+        })
+    else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "ws_ticket_missing",
+            "Open the live socket with a short-lived Cockpit ticket.",
+        );
+    };
+    let ticket = protocol.trim_start_matches("cockpit.");
+    let Some(ticket) = state.remote.consume_ws_ticket(ticket) else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "ws_ticket_invalid",
+            "That live socket ticket expired or was already used.",
+        );
+    };
+    let Some(principal) = state.remote.principal_by_id(&ticket.device_id) else {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "remote_device_revoked",
+            "This device was revoked by the host.",
+        );
+    };
+    if !principal.allows(Scope::View) {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "scope_required",
+            "This device does not have the View scope.",
+        );
+    }
+    ws.protocols([protocol])
+        .on_upgrade(move |socket| remote_live_socket(socket, state, principal))
+}
+
+async fn remote_live_socket(mut socket: WebSocket, state: AppState, principal: RemotePrincipal) {
+    let mut receiver = state.live.subscribe();
+    let mut last_sequence = 0;
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut revocation_check = tokio::time::interval(Duration::from_secs(3));
+    revocation_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    if send_json(
+        &mut socket,
+        &json!({
+            "type": "live.ready",
+            "sequence": state.live.current_sequence(),
+            "deviceId": principal.device_id,
+        }),
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+
+    for event in state.live.replay(50) {
+        last_sequence = event.sequence;
+        if send_json(&mut socket, &event).await.is_err() {
+            return;
+        }
+    }
+
+    loop {
+        tokio::select! {
+            received = receiver.recv() => {
+                match received {
+                    Ok(event) => {
+                        if event.sequence <= last_sequence {
+                            continue;
+                        }
+                        // Re-check the device on every outgoing event, not
+                        // only on a timer: revocation and scope changes must
+                        // stop the stream immediately.
+                        let Some(current) = state.remote.principal_by_id(&principal.device_id) else {
+                            let _ = close_revoked(&mut socket, "revoked").await;
+                            return;
+                        };
+                        if !current.allows(Scope::View) {
+                            let _ = close_revoked(&mut socket, "scope").await;
+                            return;
+                        }
+                        last_sequence = event.sequence;
+                        if send_json(&mut socket, &event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return,
+                }
+            }
+            _ = heartbeat.tick() => {
+                if send_json(&mut socket, &json!({ "type": "live.ping" })).await.is_err() {
+                    return;
+                }
+            }
+            _ = revocation_check.tick() => {
+                if state.remote.principal_by_id(&principal.device_id).is_none() {
+                    let _ = close_revoked(&mut socket, "revoked").await;
+                    return;
+                }
+            }
+            message = socket.recv() => {
+                match message {
+                    Some(Ok(Message::Close(_))) | None => return,
+                    Some(Err(_)) => return,
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+async fn close_revoked(socket: &mut WebSocket, reason: &str) -> Result<(), ()> {
+    socket
+        .send(Message::Close(Some(CloseFrame {
+            code: 1008,
+            reason: reason.to_string().into(),
+        })))
+        .await
+        .map_err(|_| ())
+}
+
+async fn send_json<T: serde::Serialize>(socket: &mut WebSocket, value: &T) -> Result<(), ()> {
+    let text = serde_json::to_string(value).map_err(|_| ())?;
+    socket
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_| ())
+}
+
+// ----- Middleware ---------------------------------------------------------
+
+async fn authenticate(
+    State(state): State<AppState>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let ip = client_ip(request.headers());
+    let key = format!("auth:{ip}");
+    if let Some(remaining) = state.remote.lockout_for(&key) {
+        return rate_limited(remaining);
+    }
+    if !state
+        .remote
+        .allow_attempt(&key, 120, Duration::from_secs(60))
+    {
+        state.remote.audit(
+            "auth.rate_limited",
+            None,
+            Some(&ip),
+            json!({ "reason": "per_ip_window" }),
+            None,
+            None,
+        );
+        return rate_limited(Duration::from_secs(60));
+    }
+    let Some(token) = bearer_token(request.headers()) else {
+        state
+            .remote
+            .audit("auth.missing", None, Some(&ip), json!({}), None, None);
+        return remote_auth_error(RemoteAuthError::Missing);
+    };
+    match state.remote.authorize(token) {
+        Ok(principal) => {
+            state.remote.clear_auth_failures(&key);
+            request.extensions_mut().insert(principal);
+            next.run(request).await
+        }
+        Err(error) => {
+            let lock = state.remote.record_auth_failure(&key);
+            state.remote.audit(
+                "auth.failure",
+                None,
+                Some(&ip),
+                json!({ "reason": error.code() }),
+                None,
+                None,
+            );
+            if lock > Duration::ZERO {
+                return rate_limited(lock);
+            }
+            remote_auth_error(error)
+        }
+    }
+}
+
+async fn security_headers(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; \
+             frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        ),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if state.remote.mode().uses_tls() {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        );
+    }
+    response
+}
+
+async fn check_host_and_origin(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    if !host_allowed(&state, host) {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "forbidden_host",
+            "This Host header is not allowed for the remote listener.",
+        );
+    }
+    if let Some(origin) = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    {
+        if !origin_allowed(&state, origin, host) {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "forbidden_origin",
+                "Cross-origin requests are not allowed.",
+            );
+        }
+    }
+    next.run(request).await
+}
+
+async fn limit_connections(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let Ok(permit) = state.remote.connections.clone().try_acquire_owned() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "too_many_connections",
+            "Cockpit is handling too many remote connections. Try again shortly.",
+        );
+    };
+    let response = next.run(request).await;
+    drop(permit);
+    response
+}
+
+fn host_allowed(state: &AppState, value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let host = host_without_port(value);
+    if crate::config::is_loopback_host(&host) {
+        return true;
+    }
+    if let Some(bound) = state.remote.bound_host() {
+        if host.eq_ignore_ascii_case(&bound) {
+            return true;
+        }
+    }
+    match state.remote.mode() {
+        // Tunnel mode knows its public hostname from the URL used to build the
+        // pairing QR. Only that host (plus loopback) is accepted.
+        RemoteMode::Tunnel => state.remote.url().is_some_and(|url| {
+            url.split_once("://")
+                .and_then(|(_, rest)| rest.split('/').next())
+                .map(host_without_port)
+                .is_some_and(|configured| host.eq_ignore_ascii_case(&configured))
+        }),
+        RemoteMode::Tailscale => {
+            host.ends_with(".ts.net") || host.parse::<std::net::IpAddr>().is_ok()
+        }
+        RemoteMode::Lan => {
+            host.parse::<std::net::IpAddr>().is_ok()
+                || host.ends_with(".local")
+                || host.eq_ignore_ascii_case("localhost")
+        }
+        RemoteMode::Loopback => false,
+    }
+}
+
+fn origin_allowed(state: &AppState, origin: &str, host: Option<&str>) -> bool {
+    let Some((_scheme, rest)) = origin.split_once("://") else {
+        return false;
+    };
+    let origin_host = host_without_port(rest.split('/').next().unwrap_or(rest));
+    if crate::config::is_loopback_host(&origin_host) {
+        return true;
+    }
+    let Some(host) = host else {
+        return false;
+    };
+    let request_host = host_without_port(host);
+    if origin_host.eq_ignore_ascii_case(&request_host) {
+        return true;
+    }
+    // Tunnel mode sees the public hostname on both headers; if they disagree
+    // the request is cross-origin and is refused.
+    state.remote.mode() == RemoteMode::Tunnel
+        && host_allowed(state, Some(&origin_host))
+        && origin_host.eq_ignore_ascii_case(&request_host)
+}
+
+fn host_without_port(value: &str) -> String {
+    let value = value.trim();
+    if let Some(rest) = value.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or(rest).to_string();
+    }
+    if let Some((host, port)) = value.rsplit_once(':') {
+        if !port.is_empty() && port.chars().all(|character| character.is_ascii_digit()) {
+            return host.to_string();
+        }
+    }
+    value.to_string()
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+async fn capture_client_ip(
+    State(state): State<AppState>,
+    mut request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let socket_ip = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0.ip());
+    // `cf-connecting-ip` is only meaningful when a Cloudflare tunnel connects
+    // from loopback. A Tailscale or LAN client must never be able to spoof it
+    // and escape the per-IP rate limit.
+    let forwarded_ip = if state.remote.mode() == RemoteMode::Tunnel
+        && socket_ip.is_some_and(|ip| ip.is_loopback())
+    {
+        request
+            .headers()
+            .get("cf-connecting-ip")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
+    let ip = forwarded_ip
+        .or_else(|| socket_ip.map(|ip| ip.to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+    if let Ok(value) = HeaderValue::from_str(&ip) {
+        request
+            .headers_mut()
+            .insert(HeaderName::from_static("x-cockpit-client-ip"), value);
+    }
+    next.run(request).await
+}
+
+fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-cockpit-client-ip")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn require_scope(principal: &RemotePrincipal, scope: Scope) -> Option<Response> {
+    if principal.allows(scope) {
+        None
+    } else {
+        Some(api_error(
+            StatusCode::FORBIDDEN,
+            "scope_required",
+            format!(
+                "This device needs the {} scope. The host can raise it in Settings.",
+                scope.as_str()
+            ),
+        ))
+    }
+}
+
+fn remote_auth_error(error: RemoteAuthError) -> Response {
+    let status = StatusCode::from_u16(error.status()).unwrap_or(StatusCode::UNAUTHORIZED);
+    api_error(status, error.code(), error.message())
+}
+
+fn rate_limited(remaining: Duration) -> Response {
+    let seconds = remaining.as_secs().max(1).to_string();
+    let mut response = api_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        "Too many attempts. Wait a moment and try again.",
+    );
+    if let Ok(value) = HeaderValue::from_str(&seconds) {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    response
+}
+
+fn api_error(status: StatusCode, code: &'static str, message: impl Into<String>) -> Response {
+    ApiError::new(status, code, message).into_response()
+}
+
+async fn api_not_found() -> Response {
+    api_error(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "No remote Cockpit route matches this path.",
+    )
+}
+
+/// The remote listener is not a proxy. These paths must never resolve there.
+pub fn is_proxy_path(path: &str) -> bool {
+    let path = path.trim_start_matches('/');
+    path == "v1"
+        || path.starts_with("v1/")
+        || path == "openai"
+        || path.starts_with("openai/")
+        || path == "anthropic"
+        || path.starts_with("anthropic/")
+        || path == "gemini"
+        || path.starts_with("gemini/")
+        || path == "s"
+        || path.starts_with("s/")
+}
+
+/// Exposed for tests: reject proxy paths before the dashboard fallback.
+pub async fn block_proxy_paths(request: axum::extract::Request, next: Next) -> Response {
+    if is_proxy_path(request.uri().path()) {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "The remote listener does not serve model proxy routes.",
+        );
+    }
+    next.run(request).await
+}

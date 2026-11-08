@@ -167,6 +167,12 @@ struct PairArgs {
     /// A friendly name for the device, used with --claim.
     #[arg(long = "device-name", value_name = "NAME")]
     device_name: Option<String>,
+    /// Remote listener URL from the pairing QR, used with --claim.
+    #[arg(long, value_name = "URL")]
+    url: Option<String>,
+    /// Pairing PIN for high-risk approvals, used with --claim.
+    #[arg(long, value_name = "PIN")]
+    pin: Option<String>,
     /// Print JSON instead of a human-readable summary.
     #[arg(long)]
     json: bool,
@@ -761,27 +767,34 @@ fn render_markdown_report(diagnostics: &Diagnostics, registry: &AdapterRegistry)
 // ---------------------------------------------------------------------------
 
 async fn pair(config: Config, args: PairArgs) -> anyhow::Result<()> {
-    if config.port == 0 {
-        bail!(
-            "pairing needs a running daemon on a known port; start `cockpit serve --port <port>` first"
-        );
-    }
-    let base = format!("http://{}:{}", client_host(&config.host), config.port);
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .build()
         .context("could not create the HTTP client")?;
 
     if let Some(code) = args.claim {
+        // Device side: the URL comes from the host's QR code. Fall back to the
+        // default remote port on this machine for local testing.
+        let base = args
+            .url
+            .clone()
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", config.remote_port))
+            .trim_end_matches('/')
+            .to_string();
+        let device_name = args
+            .device_name
+            .clone()
+            .unwrap_or_else(|| "Cockpit CLI".to_string());
         let response = client
-            .post(format!("{base}/api/pair/claim"))
+            .post(format!("{base}/api/remote/pair/claim"))
             .json(&json!({
                 "code": code,
-                "deviceName": args.device_name,
+                "deviceName": device_name,
+                "pin": args.pin,
             }))
             .send()
             .await
-            .context("could not reach the Cockpit daemon")?;
+            .context("could not reach the Cockpit remote listener")?;
         let status = response.status();
         let body: Value = response
             .json()
@@ -795,25 +808,79 @@ async fn pair(config: Config, args: PairArgs) -> anyhow::Result<()> {
                     .unwrap_or("pairing failed")
             );
         }
-        if args.json {
-            println!("{}", serde_json::to_string_pretty(&body)?);
-        } else {
-            println!(
-                "Paired{}. Device token (shown once):\n{}",
-                body.get("deviceName")
-                    .and_then(Value::as_str)
-                    .map(|name| format!(" with {name}"))
-                    .unwrap_or_default(),
-                body.get("token")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-            );
+        let claim_id = body
+            .get("claimId")
+            .and_then(Value::as_str)
+            .context("the daemon did not return a claim id")?
+            .to_string();
+        let claim_secret = body
+            .get("claimSecret")
+            .and_then(Value::as_str)
+            .context("the daemon did not return a claim secret")?
+            .to_string();
+        let expires = body
+            .get("expiresInSeconds")
+            .and_then(Value::as_u64)
+            .unwrap_or(90);
+        eprintln!("Waiting for the host to confirm this device (up to {expires}s)...");
+        let deadline = std::time::Instant::now() + Duration::from_secs(expires + 5);
+        loop {
+            let response = client
+                .post(format!("{base}/api/remote/pair/claim/{claim_id}"))
+                .header("x-pairing-secret", &claim_secret)
+                .send()
+                .await
+                .context("could not reach the Cockpit remote listener")?;
+            let status = response.status();
+            let poll: Value = response
+                .json()
+                .await
+                .context("the daemon returned an unreadable response")?;
+            if !status.is_success() {
+                bail!(
+                    "{}",
+                    poll.pointer("/error/message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("pairing failed")
+                );
+            }
+            match poll.get("status").and_then(Value::as_str) {
+                Some("confirmed") => {
+                    let token = poll
+                        .get("token")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if args.json {
+                        println!("{}", serde_json::to_string_pretty(&poll)?);
+                    } else {
+                        println!(
+                            "Paired with Cockpit. Device token (shown once, keep it secret):\n{token}"
+                        );
+                    }
+                    return Ok(());
+                }
+                Some("denied") => bail!("The host denied this pairing request."),
+                Some("expired") => {
+                    bail!("The pairing request expired. Ask the host for a new code.")
+                }
+                _ => {}
+            }
+            if std::time::Instant::now() > deadline {
+                bail!("The host did not confirm in time. Ask for a new pairing code.");
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
-        return Ok(());
     }
 
+    // Host side: issue a code through the loopback listener.
+    if config.port == 0 {
+        bail!(
+            "pairing needs a running daemon on a known port; start `cockpit serve --port <port>` first"
+        );
+    }
+    let base = format!("http://{}:{}", client_host(&config.host), config.port);
     let response = client
-        .post(format!("{base}/api/pair/code"))
+        .post(format!("{base}/api/remote/pair/code"))
         .send()
         .await
         .context("could not reach the Cockpit daemon")?;
@@ -834,14 +901,17 @@ async fn pair(config: Config, args: PairArgs) -> anyhow::Result<()> {
     if args.json {
         println!("{}", serde_json::to_string_pretty(&body)?);
     } else {
+        let code = body.get("code").and_then(Value::as_str).unwrap_or_default();
         println!(
-            "Pairing code: {}\nExpires in {} seconds. Claim it with `cockpit pair --claim {}`.",
-            body.get("code").and_then(Value::as_str).unwrap_or_default(),
+            "Pairing code: {code}\nExpires in {} seconds.\nRemote URL: {}\nEnter the code on the device, then confirm the device in Settings > Remote access on this computer.",
             body.get("expiresInSeconds")
                 .and_then(Value::as_u64)
-                .unwrap_or(300),
-            body.get("code").and_then(Value::as_str).unwrap_or_default()
+                .unwrap_or(120),
+            body.get("url").and_then(Value::as_str).unwrap_or_default(),
         );
+        if let Some(fingerprint) = body.get("fingerprint").and_then(Value::as_str) {
+            println!("TLS fingerprint: {fingerprint}");
+        }
     }
     Ok(())
 }

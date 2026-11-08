@@ -442,7 +442,7 @@ async fn routes_gemini_paths_and_replaces_the_google_key() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn api_lists_adapters_and_pairs_a_device() {
+async fn api_lists_adapters() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();
     let daemon = start_daemon(home.path(), mock.addr).await;
@@ -481,49 +481,18 @@ async fn api_lists_adapters_and_pairs_a_device() {
         .unwrap();
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 
-    let issued: Value = client
-        .post(format!("http://{}/api/pair/code", daemon.addr))
+    // Remote access is off by default; enabling it is a host-only action and
+    // is covered by the dedicated remote access tests.
+    let remote: Value = client
+        .get(format!("http://{}/api/remote/status", daemon.addr))
         .send()
         .await
         .unwrap()
         .json()
         .await
         .unwrap();
-    let code = issued["code"].as_str().unwrap();
-    assert_eq!(code.len(), 6);
-    assert!(code.chars().all(|character| character.is_ascii_digit()));
-    assert_eq!(issued["expiresInSeconds"], 300);
-
-    let claimed: Value = client
-        .post(format!("http://{}/api/pair/claim", daemon.addr))
-        .json(&json!({ "code": code, "deviceName": "Test phone" }))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(claimed["deviceName"], "Test phone");
-    assert_eq!(claimed["token"].as_str().unwrap().len(), 64);
-
-    let reused = client
-        .post(format!("http://{}/api/pair/claim", daemon.addr))
-        .json(&json!({ "code": code }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(reused.status(), StatusCode::BAD_REQUEST);
-
-    let status: Value = client
-        .get(format!("http://{}/api/pair/status", daemon.addr))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(status["status"]["active"], false);
-    assert_eq!(status["devices"].as_array().unwrap().len(), 1);
+    assert_eq!(remote["enabled"], false);
+    assert_eq!(remote["mode"], "loopback");
 
     daemon.shutdown().await.unwrap();
 }

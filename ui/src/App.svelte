@@ -7,10 +7,12 @@
   import HomePreview from './lib/HomePreview.svelte';
   import OnboardingPreview from './lib/OnboardingPreview.svelte';
   import QuickPrompt from './lib/QuickPrompt.svelte';
+  import RemoteBanner from './lib/RemoteBanner.svelte';
   import SideRail from './lib/SideRail.svelte';
   import Toast from './lib/Toast.svelte';
   import TopBar from './lib/TopBar.svelte';
   import { initDaemon } from './lib/api/daemon.svelte';
+  import { startRemoteHostWatch } from './lib/api/remote-host.svelte';
   import FlightsScreen from './lib/screens/FlightsScreen.svelte';
   import InboxScreen from './lib/screens/InboxScreen.svelte';
   import MarketScreen from './lib/screens/MarketScreen.svelte';
@@ -38,12 +40,14 @@
   onMount(() => {
     const cleanupRouter = initRouter();
     const cleanupDaemon = initDaemon();
+    const stopRemoteWatch = startRemoteHostWatch();
     if (canvas) {
       glass = initGlass(canvas, forcedFallback);
     }
     return () => {
       cleanupRouter();
       cleanupDaemon();
+      stopRemoteWatch();
       glass?.destroy();
     };
   });
@@ -62,6 +66,7 @@
 {:else}
   <div class="app-shell">
     <TopBar />
+    <RemoteBanner />
 
     <div class="workspace">
       <SideRail />

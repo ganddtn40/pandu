@@ -318,49 +318,6 @@ pub async fn log_watch_status(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/// Issue a short-lived pairing code for the phone companion.
-pub async fn pair_code(State(state): State<AppState>) -> Json<Value> {
-    let issued = state.pairing.issue_code();
-    Json(json!({
-        "code": issued.code,
-        "expiresAt": issued.expires_at,
-        "expiresInSeconds": issued.expires_in_seconds,
-        "attemptsRemaining": issued.attempts_remaining,
-    }))
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairClaim {
-    pub code: String,
-    #[serde(default)]
-    pub device_name: Option<String>,
-}
-
-pub async fn pair_claim(
-    State(state): State<AppState>,
-    Json(body): Json<PairClaim>,
-) -> Result<Json<Value>, ApiError> {
-    let claimed = state
-        .pairing
-        .claim(&body.code, body.device_name.as_deref())
-        .map_err(|error| {
-            ApiError::new(StatusCode::BAD_REQUEST, "pairing_failed", error.to_string())
-        })?;
-    Ok(Json(json!({
-        "token": claimed.token,
-        "deviceName": claimed.device_name,
-        "claimedAt": claimed.claimed_at,
-    })))
-}
-
-pub async fn pair_status(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({
-        "status": state.pairing.status(),
-        "devices": state.pairing.paired_devices(),
-    }))
-}
-
 // ----- Guards -------------------------------------------------------------
 
 fn guard_error(error: crate::guards::GuardError) -> ApiError {

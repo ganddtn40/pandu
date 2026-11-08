@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use crate::error::{DaemonError, Result};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -275,6 +275,38 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Phase 7 remote access. Tokens are only ever stored as SHA-256 hashes; the
+-- audit table is append-only at the API layer and never contains prompt text.
+CREATE TABLE IF NOT EXISTS remote_devices (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  pin_salt TEXT,
+  pin_hash TEXT,
+  scopes TEXT NOT NULL DEFAULT '["view"]',
+  require_host_confirmation INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT,
+  revoked_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_remote_devices_created ON remote_devices(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS remote_audit (
+  id TEXT PRIMARY KEY,
+  at TEXT NOT NULL,
+  event TEXT NOT NULL,
+  device_id TEXT,
+  device_name TEXT,
+  ip TEXT,
+  detail TEXT NOT NULL DEFAULT '{}',
+  size_bytes INTEGER,
+  content_hash TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_remote_audit_at ON remote_audit(at DESC);
+CREATE INDEX IF NOT EXISTS idx_remote_audit_event ON remote_audit(event, at DESC);
 "#;
 
 #[derive(Debug, Clone, Default)]
@@ -2288,11 +2320,295 @@ impl Store {
         Ok(changes)
     }
 
+    // ----- Remote access ---------------------------------------------------
+
+    pub fn insert_remote_device(&self, device: &NewRemoteDevice) -> Result<RemoteDeviceRow> {
+        let connection = self.lock()?;
+        connection.execute(
+            "INSERT INTO remote_devices
+                (id, name, token_hash, pin_salt, pin_hash, scopes,
+                 require_host_confirmation, created_at, last_seen_at, revoked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)",
+            params![
+                device.id,
+                device.name,
+                device.token_hash,
+                device.pin_salt,
+                device.pin_hash,
+                serde_json::to_string(&device.scopes).unwrap_or_else(|_| "[]".to_string()),
+                device.require_host_confirmation as i64,
+                device.created_at,
+            ],
+        )?;
+        self.get_remote_device_with(&connection, &device.id)?
+            .ok_or_else(|| DaemonError::other("the new remote device could not be read back"))
+    }
+
+    pub fn list_remote_devices(&self) -> Result<Vec<RemoteDeviceRow>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
+                    require_host_confirmation, created_at, last_seen_at, revoked_at
+             FROM remote_devices ORDER BY created_at DESC",
+        )?;
+        let rows = statement.query_map([], row_to_remote_device)?;
+        let mut devices = Vec::new();
+        for row in rows {
+            devices.push(row?);
+        }
+        Ok(devices)
+    }
+
+    pub fn get_remote_device(&self, id: &str) -> Result<Option<RemoteDeviceRow>> {
+        let connection = self.lock()?;
+        self.get_remote_device_with(&connection, id)
+    }
+
+    pub fn find_remote_device_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<RemoteDeviceRow>> {
+        let connection = self.lock()?;
+        Ok(connection
+            .query_row(
+                "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
+                        require_host_confirmation, created_at, last_seen_at, revoked_at
+                 FROM remote_devices WHERE token_hash = ?1",
+                params![token_hash],
+                row_to_remote_device,
+            )
+            .optional()?)
+    }
+
+    pub fn count_active_remote_devices(&self) -> Result<u64> {
+        let connection = self.lock()?;
+        Ok(connection.query_row(
+            "SELECT COUNT(*) FROM remote_devices WHERE revoked_at IS NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64)
+    }
+
+    fn get_remote_device_with(
+        &self,
+        connection: &Connection,
+        id: &str,
+    ) -> Result<Option<RemoteDeviceRow>> {
+        Ok(connection
+            .query_row(
+                "SELECT id, name, token_hash, pin_salt, pin_hash, scopes,
+                        require_host_confirmation, created_at, last_seen_at, revoked_at
+                 FROM remote_devices WHERE id = ?1",
+                params![id],
+                row_to_remote_device,
+            )
+            .optional()?)
+    }
+
+    pub fn set_remote_device_token_hash(&self, id: &str, token_hash: &str) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE remote_devices SET token_hash = ?1 WHERE id = ?2",
+            params![token_hash, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn update_remote_device(
+        &self,
+        id: &str,
+        scopes: &[String],
+        require_host_confirmation: Option<bool>,
+    ) -> Result<Option<RemoteDeviceRow>> {
+        let connection = self.lock()?;
+        if let Some(required) = require_host_confirmation {
+            connection.execute(
+                "UPDATE remote_devices
+                 SET scopes = ?1, require_host_confirmation = ?2
+                 WHERE id = ?3",
+                params![
+                    serde_json::to_string(scopes).unwrap_or_else(|_| "[]".to_string()),
+                    required as i64,
+                    id
+                ],
+            )?;
+        } else {
+            connection.execute(
+                "UPDATE remote_devices SET scopes = ?1 WHERE id = ?2",
+                params![
+                    serde_json::to_string(scopes).unwrap_or_else(|_| "[]".to_string()),
+                    id
+                ],
+            )?;
+        }
+        self.get_remote_device_with(&connection, id)
+    }
+
+    pub fn revoke_remote_device(&self, id: &str, at: &str) -> Result<bool> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE remote_devices SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL",
+            params![at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn revoke_all_remote_devices(&self, at: &str) -> Result<u64> {
+        let connection = self.lock()?;
+        let changed = connection.execute(
+            "UPDATE remote_devices SET revoked_at = ?1 WHERE revoked_at IS NULL",
+            params![at],
+        )?;
+        Ok(changed as u64)
+    }
+
+    pub fn touch_remote_device(&self, id: &str, at: &str) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE remote_devices SET last_seen_at = ?1 WHERE id = ?2",
+            params![at, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_remote_audit(&self, row: &NewRemoteAudit) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute(
+            "INSERT INTO remote_audit
+                (id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                row.id,
+                row.at,
+                row.event,
+                row.device_id,
+                row.device_name,
+                row.ip,
+                row.detail,
+                row.size_bytes,
+                row.content_hash,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_remote_audit(&self, limit: u32, offset: u32) -> Result<Vec<RemoteAuditRow>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash
+             FROM remote_audit ORDER BY at DESC, id DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = statement.query_map(params![limit, offset], row_to_remote_audit)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    pub fn count_remote_audit(&self) -> Result<u64> {
+        let connection = self.lock()?;
+        Ok(
+            connection.query_row("SELECT COUNT(*) FROM remote_audit", [], |row| {
+                row.get::<_, i64>(0)
+            })? as u64,
+        )
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
         self.connection
             .lock()
             .map_err(|_| DaemonError::other("database lock was poisoned"))
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct NewRemoteDevice {
+    pub id: String,
+    pub name: String,
+    pub token_hash: String,
+    pub pin_salt: Option<String>,
+    pub pin_hash: Option<String>,
+    pub scopes: Vec<String>,
+    pub require_host_confirmation: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteDeviceRow {
+    pub id: String,
+    pub name: String,
+    pub token_hash: String,
+    pub pin_salt: Option<String>,
+    pub pin_hash: Option<String>,
+    pub scopes: Vec<String>,
+    pub require_host_confirmation: bool,
+    pub created_at: String,
+    pub last_seen_at: Option<String>,
+    pub revoked_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewRemoteAudit {
+    pub id: String,
+    pub at: String,
+    pub event: String,
+    pub device_id: Option<String>,
+    pub device_name: Option<String>,
+    pub ip: Option<String>,
+    pub detail: String,
+    pub size_bytes: Option<u64>,
+    pub content_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteAuditRow {
+    pub id: String,
+    pub at: String,
+    pub event: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
+    pub detail: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+}
+
+fn row_to_remote_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteDeviceRow> {
+    let scopes: String = row.get(5)?;
+    Ok(RemoteDeviceRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        token_hash: row.get(2)?,
+        pin_salt: row.get(3)?,
+        pin_hash: row.get(4)?,
+        scopes: serde_json::from_str(&scopes).unwrap_or_default(),
+        require_host_confirmation: row.get::<_, i64>(6)? != 0,
+        created_at: row.get(7)?,
+        last_seen_at: row.get(8)?,
+        revoked_at: row.get(9)?,
+    })
+}
+
+fn row_to_remote_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteAuditRow> {
+    let detail: String = row.get(6)?;
+    Ok(RemoteAuditRow {
+        id: row.get(0)?,
+        at: row.get(1)?,
+        event: row.get(2)?,
+        device_id: row.get(3)?,
+        device_name: row.get(4)?,
+        ip: row.get(5)?,
+        detail: serde_json::from_str(&detail).unwrap_or(Value::Null),
+        size_bytes: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+        content_hash: row.get(8)?,
+    })
 }
 
 const SESSION_COLUMNS: &str = "id, title, source, capture_mode, source_label, status, protocol,

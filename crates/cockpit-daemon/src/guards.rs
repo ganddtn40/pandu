@@ -83,10 +83,19 @@ pub enum ApprovalOutcome {
     Expired,
 }
 
+#[derive(Default)]
+struct BrokerState {
+    pending: HashMap<String, oneshot::Sender<ApprovalOutcome>>,
+    /// Decisions that landed before the proxied request registered its waiter.
+    /// The remote UI can approve within milliseconds of the event appearing, so
+    /// the broker must remember the answer instead of losing it.
+    resolved: HashMap<String, ApprovalOutcome>,
+}
+
 /// Holds a proxied request only while a pause rule is being decided.
 #[derive(Default)]
 pub struct ApprovalBroker {
-    pending: Mutex<HashMap<String, oneshot::Sender<ApprovalOutcome>>>,
+    state: Mutex<BrokerState>,
 }
 
 impl ApprovalBroker {
@@ -95,18 +104,21 @@ impl ApprovalBroker {
     }
 
     pub async fn wait_for(&self, event_id: &str, timeout: Duration) -> ApprovalOutcome {
-        self.cancel(event_id, ApprovalOutcome::Expired).await;
-
-        let (sender, receiver) = oneshot::channel();
-        {
-            let mut pending = self.pending.lock().await;
-            pending.insert(event_id.to_string(), sender);
+        let mut state = self.state.lock().await;
+        if let Some(outcome) = state.resolved.remove(event_id) {
+            return outcome;
         }
+        if let Some(previous) = state.pending.remove(event_id) {
+            let _ = previous.send(ApprovalOutcome::Expired);
+        }
+        let (sender, receiver) = oneshot::channel();
+        state.pending.insert(event_id.to_string(), sender);
+        drop(state);
 
         match tokio::time::timeout(timeout.max(Duration::from_millis(1)), receiver).await {
             Ok(Ok(outcome)) => outcome,
             _ => {
-                self.pending.lock().await.remove(event_id);
+                self.state.lock().await.pending.remove(event_id);
                 ApprovalOutcome::Expired
             }
         }
@@ -117,30 +129,39 @@ impl ApprovalBroker {
             ApprovalChoice::Approve => ApprovalOutcome::Approved,
             ApprovalChoice::Deny => ApprovalOutcome::Denied,
         };
-        let sender = self.pending.lock().await.remove(event_id);
-        match sender {
-            Some(sender) => sender.send(outcome).is_ok(),
-            None => false,
-        }
+        self.deliver(event_id, outcome).await
     }
 
     pub async fn cancel(&self, event_id: &str, outcome: ApprovalOutcome) -> bool {
-        let sender = self.pending.lock().await.remove(event_id);
-        match sender {
-            Some(sender) => sender.send(outcome).is_ok(),
-            None => false,
+        self.deliver(event_id, outcome).await
+    }
+
+    async fn deliver(&self, event_id: &str, outcome: ApprovalOutcome) -> bool {
+        let mut state = self.state.lock().await;
+        if let Some(sender) = state.pending.remove(event_id) {
+            return sender.send(outcome).is_ok();
         }
+        // Keep only a bounded number of early decisions; an unanswered event
+        // that is never waited on must not grow this map forever.
+        if state.resolved.len() >= 256 {
+            if let Some(oldest) = state.resolved.keys().next().cloned() {
+                state.resolved.remove(&oldest);
+            }
+        }
+        state.resolved.insert(event_id.to_string(), outcome);
+        false
     }
 
     pub async fn is_pending(&self, event_id: &str) -> bool {
-        self.pending.lock().await.contains_key(event_id)
+        self.state.lock().await.pending.contains_key(event_id)
     }
 
     pub async fn clear(&self) {
-        let mut pending = self.pending.lock().await;
-        for (_, sender) in pending.drain() {
+        let mut state = self.state.lock().await;
+        for (_, sender) in state.pending.drain() {
             let _ = sender.send(ApprovalOutcome::Expired);
         }
+        state.resolved.clear();
     }
 }
 
@@ -530,6 +551,14 @@ impl GuardService {
             GuardServiceError::new(404, "not_found", "The guard event was not found.")
         })?;
         if event.status != GuardEventStatus::Pending {
+            if event.status == GuardEventStatus::Expired {
+                return Err(GuardServiceError::new(
+                    410,
+                    "approval_expired",
+                    "This approval expired. Ask the agent to request it again.",
+                )
+                .into());
+            }
             return Err(GuardServiceError::new(
                 409,
                 "conflict",

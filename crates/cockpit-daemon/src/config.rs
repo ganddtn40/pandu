@@ -5,6 +5,7 @@ use crate::error::{DaemonError, Result};
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PORT: u16 = 4319;
+pub const DEFAULT_REMOTE_PORT: u16 = 4320;
 pub const DEFAULT_SESSION_IDLE_MS: u64 = 30 * 60 * 1000;
 pub const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_LOG_WATCH_INTERVAL_MS: u64 = 2_000;
@@ -30,6 +31,12 @@ pub struct Config {
     pub home: PathBuf,
     pub host: String,
     pub port: u16,
+    /// Optional remote listener port. `0` disables the listener entirely.
+    pub remote_port: u16,
+    /// Public URL used in pairing QR codes for tunnel/HTTPS modes.
+    pub remote_public_url: Option<String>,
+    /// Built dashboard assets served by the remote listener.
+    pub ui_dir: PathBuf,
     pub database_path: PathBuf,
     pub openai: UpstreamConfig,
     pub anthropic: AnthropicConfig,
@@ -94,6 +101,22 @@ impl Config {
             })?,
             None => DEFAULT_PORT,
         };
+        let remote_port = match take(&mut env, "COCKPIT_REMOTE_PORT") {
+            Some(value) => value.parse::<u16>().map_err(|_| {
+                DaemonError::config("COCKPIT_REMOTE_PORT must be a number from 0 to 65535")
+            })?,
+            None => DEFAULT_REMOTE_PORT,
+        };
+        let ui_dir = take(&mut env, "COCKPIT_UI_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(crate::remote::default_ui_dir);
+        let remote_public_url = take(&mut env, "COCKPIT_REMOTE_PUBLIC_URL").map(|value| {
+            if value.starts_with("https://") || value.starts_with("http://") {
+                value.trim_end_matches('/').to_string()
+            } else {
+                value
+            }
+        });
 
         let openai_base = take(&mut env, "COCKPIT_OPENAI_UPSTREAM")
             .or_else(|| take(&mut env, "COCKPIT_OPENAI_BASE_URL"))
@@ -200,6 +223,9 @@ impl Config {
             home,
             host,
             port,
+            remote_port,
+            remote_public_url,
+            ui_dir,
             database_path,
             openai: UpstreamConfig {
                 base_url: strip_trailing_slashes(&openai_base),
@@ -237,6 +263,10 @@ impl Config {
             home,
             host: DEFAULT_HOST.to_string(),
             port: 0,
+            // Tests opt in to the remote listener explicitly.
+            remote_port: 0,
+            remote_public_url: None,
+            ui_dir: crate::remote::default_ui_dir(),
             openai: UpstreamConfig {
                 base_url: "https://api.openai.com".to_string(),
                 api_key: None,
