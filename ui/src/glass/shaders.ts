@@ -145,18 +145,18 @@ void main() {
     color -= smoothstep(0.35, 1.0, length(uv - vec2(0.5))) * 0.018;
     grain = 0.012;
   } else {
-    // Smoky graphite panel: a near-black base with broad blue-gray,
-    // warm-cream, and muted mauve pools. The pools stay between roughly
-    // 18% and 45% luminance so the glass has something to refract.
-    color = vec3(0.100, 0.108, 0.124);
-    color = mix(color, vec3(0.250, 0.280, 0.330), blob(q, vec2(0.20 * aspect, 0.18), 0.78, 0.68));
-    color = mix(color, vec3(0.330, 0.355, 0.390), blob(q, vec2(0.84 * aspect, 0.22), 0.70, 0.62));
-    color = mix(color, vec3(0.430, 0.390, 0.320), blob(q, vec2(0.78 * aspect, 0.84), 0.74, 0.66));
-    color = mix(color, vec3(0.185, 0.215, 0.270), blob(q, vec2(0.22 * aspect, 0.86), 0.68, 0.60));
-    color = mix(color, vec3(0.395, 0.350, 0.300), blob(q, vec2(0.56 * aspect, 0.50), 0.56, 0.52));
-    color = mix(color, uAccent, blob(q, vec2(0.30 * aspect, 0.22), 0.50, 0.55) * 0.06);
+    // Smoky graphite panel: a near-black base with broad neutral blue-gray
+    // pools. The accent appears only as a faint glow so the chrome reads as
+    // graphite rather than warm brown.
+    color = vec3(0.098, 0.104, 0.116);
+    color = mix(color, vec3(0.238, 0.256, 0.288), blob(q, vec2(0.20 * aspect, 0.18), 0.78, 0.68));
+    color = mix(color, vec3(0.300, 0.318, 0.352), blob(q, vec2(0.84 * aspect, 0.22), 0.70, 0.62));
+    color = mix(color, vec3(0.340, 0.356, 0.392), blob(q, vec2(0.78 * aspect, 0.84), 0.74, 0.66));
+    color = mix(color, vec3(0.180, 0.204, 0.248), blob(q, vec2(0.22 * aspect, 0.86), 0.68, 0.60));
+    color = mix(color, vec3(0.315, 0.330, 0.362), blob(q, vec2(0.56 * aspect, 0.50), 0.56, 0.52));
+    color = mix(color, uAccent, blob(q, vec2(0.30 * aspect, 0.22), 0.50, 0.55) * 0.035);
     float wash = smoothstep(0.0, 1.0, uv.x * 0.65 + (1.0 - uv.y) * 0.35);
-    color += wash * vec3(0.022, 0.020, 0.016);
+    color += wash * vec3(0.018, 0.020, 0.024);
     color -= smoothstep(0.30, 1.05, length(uv - vec2(0.5))) * 0.028;
     grain = 0.010;
   }

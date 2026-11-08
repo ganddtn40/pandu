@@ -1,4 +1,5 @@
 import { readGlassPattern } from '../glass-pattern';
+import { lowBattery, readDeviceProfile, shouldAutoPerformance } from '../device';
 import { accentFor } from './accents';
 import { DESIGN_STORAGE_KEY, loadDesign, saveDesign } from './theme-json';
 import {
@@ -101,10 +102,27 @@ export function currentAccent(): ReturnType<typeof accentFor> {
 export function initDesign(): () => void {
   const design = designState.value;
   applyDesign(design);
+
+  let stored = true;
   try {
-    if (window.localStorage.getItem(DESIGN_STORAGE_KEY) === null) persist(design);
+    stored = window.localStorage.getItem(DESIGN_STORAGE_KEY) !== null;
   } catch {
     // Storage is optional.
+  }
+  if (!stored) {
+    // First run only: low-end machines and data-saver mode start in
+    // Performance mode. Once stored, the user's choice wins.
+    if (shouldAutoPerformance(readDeviceProfile())) {
+      setDesign({ performance: true });
+    } else {
+      // Wait for the battery hint before writing the first stored design so
+      // a low battery can still switch Performance mode on. Afterwards the
+      // user's explicit choice always wins.
+      void lowBattery().then((low) => {
+        if (low) setDesign({ performance: true });
+        else persist(designState.value);
+      });
+    }
   }
   try {
     document.documentElement.dataset.glassPattern = readGlassPattern(window.location.search);

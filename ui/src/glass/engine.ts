@@ -1,5 +1,6 @@
 import { designState } from '../lib/design/design.svelte';
 import type { DesignPreferences, ThemeMode } from '../lib/design/types';
+import { DESKTOP_GLASS_SHAPES, glassShapeCap } from '../lib/device';
 import {
   clampDpr,
   hasGlassSize,
@@ -7,7 +8,6 @@ import {
   packGlassInstance,
   parseRadius,
   GLASS_INSTANCE_FLOATS,
-  MAX_GLASS_SHAPES,
 } from './geometry';
 import {
   BLUR_FRAG,
@@ -236,7 +236,7 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, MAX_GLASS_SHAPES * GLASS_INSTANCE_FLOATS * 4, gl.DYNAMIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, DESKTOP_GLASS_SHAPES * GLASS_INSTANCE_FLOATS * 4, gl.DYNAMIC_DRAW);
   const stride = GLASS_INSTANCE_FLOATS * 4;
   const attributes: Array<[number, number, number]> = [
     [1, 4, 0],
@@ -504,6 +504,7 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
   function rebuildShapes(): void {
     const next: ShapeMeta[] = [];
     const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const shapeCap = glassShapeCap();
     if (active) {
       for (const el of document.querySelectorAll<HTMLElement>('[data-glass]')) {
         if (!layerAllowed(el)) continue;
@@ -536,7 +537,7 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
           }
         }
         next.push({ el, depth, radius, clipEl, clipRadius, rect, clipRect });
-        if (next.length >= MAX_GLASS_SHAPES) break;
+        if (next.length >= shapeCap) break;
       }
     }
 

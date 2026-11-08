@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import AddAgent from './lib/AddAgent.svelte';
   import AppearanceSheet from './lib/AppearanceSheet.svelte';
   import BottomTabs from './lib/BottomTabs.svelte';
   import GlassPreview from './lib/GlassPreview.svelte';
@@ -9,6 +10,7 @@
   import SideRail from './lib/SideRail.svelte';
   import Toast from './lib/Toast.svelte';
   import TopBar from './lib/TopBar.svelte';
+  import { initDaemon } from './lib/api/daemon.svelte';
   import FlightsScreen from './lib/screens/FlightsScreen.svelte';
   import InboxScreen from './lib/screens/InboxScreen.svelte';
   import MarketScreen from './lib/screens/MarketScreen.svelte';
@@ -22,6 +24,7 @@
   let glass: GlassController | undefined;
 
   const isWelcome = $derived(routeState.path === '/welcome');
+  const dev = import.meta.env.DEV;
   const forcedFallback = new URLSearchParams(window.location.search).get('glass') === 'off';
 
   function onKeydown(event: KeyboardEvent): void {
@@ -33,11 +36,13 @@
 
   onMount(() => {
     const cleanupRouter = initRouter();
+    const cleanupDaemon = initDaemon();
     if (canvas) {
       glass = initGlass(canvas, forcedFallback);
     }
     return () => {
       cleanupRouter();
+      cleanupDaemon();
       glass?.destroy();
     };
   });
@@ -60,7 +65,7 @@
     <div class="workspace">
       <SideRail />
       <main class="panel" aria-label="Cockpit">
-        {#if routeState.path === '/glass-preview'}
+        {#if dev && routeState.path === '/glass-preview'}
           <GlassPreview />
         {:else if routeState.path === '/inbox'}
           <InboxScreen />
@@ -81,5 +86,6 @@
 {/if}
 
 <AppearanceSheet />
+<AddAgent />
 <QuickPrompt />
 <Toast />
