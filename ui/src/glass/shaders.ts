@@ -313,9 +313,13 @@ void main() {
   // wallpaper pools still read through the refraction without washing out text.
   // The accent tints the panel just enough to feel intentional.
   float lightMode = abs(uTheme - 1.0) > 0.5 ? 1.0 : 0.0;
+  // Chrome surfaces encode depth + 10 to opt out of the accent wash, keeping
+  // the top bar and rail a neutral smoke instead of a warm tint.
+  float neutralGlass = step(10.0, vStyle.w);
+  float accentMix = 1.0 - neutralGlass;
   vec3 tintColor = lightMode > 0.5
-    ? mix(vec3(1.0), uAccent, 0.06)
-    : mix(vec3(0.045, 0.055, 0.070), uAccent, 0.10);
+    ? mix(vec3(1.0), uAccent, 0.06 * accentMix)
+    : mix(vec3(0.045, 0.055, 0.070), uAccent, 0.10 * accentMix);
   float tintAmount = clamp(vStyle.y * (0.45 + uIntensity), 0.0, 0.94);
   vec3 color = mix(refracted, tintColor, tintAmount);
 

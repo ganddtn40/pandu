@@ -3,7 +3,7 @@
   import { pendingGuards } from './api/daemon.svelte';
   import { t, type MessageKey } from './i18n/i18n.svelte';
   import { openQuickPrompt } from './quick-prompt.svelte';
-  import { routeState } from './router.svelte';
+  import { routeParam, routeState } from './router.svelte';
 
   interface Tab {
     key: MessageKey;
@@ -20,9 +20,14 @@
   ];
 
   const pendingCount = $derived(pendingGuards().length);
+  // A phone flight detail owns the whole screen. The floating prompt would sit
+  // on top of the transcript, so it disappears with the list.
+  const phoneDetailOpen = $derived(
+    routeState.path === '/flights' && routeParam('session') !== null,
+  );
 </script>
 
-{#if routeState.path !== '/'}
+{#if routeState.path !== '/' && !phoneDetailOpen}
   <button
     class="quick-fab"
     type="button"

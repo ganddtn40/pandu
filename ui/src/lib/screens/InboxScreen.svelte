@@ -16,6 +16,8 @@
 
   let busy = $state<Record<string, boolean>>({});
   let loadingDemo = $state(false);
+  let confirmFor = $state<string | null>(null);
+  let confirmText = $state('');
 
   const pending = $derived(pendingGuards());
   const resolved = $derived(resolvedGuards().slice(0, 20));
@@ -43,12 +45,50 @@
     );
   }
 
+  function isHighRisk(event: GuardEvent): boolean {
+    return event.severity === 'high' || event.severity === 'critical';
+  }
+
+  /** The command is already shown in its own block; do not repeat it. */
+  function evidenceFor(event: GuardEvent): GuardEvent['evidence'] {
+    const command = event.command?.trim();
+    return event.evidence.filter(
+      (entry) =>
+        entry.field !== 'command' &&
+        !(command && entry.excerpt?.trim() === command),
+    );
+  }
+
+  function focusIf(node: HTMLElement, active: boolean): void {
+    if (active) queueMicrotask(() => node.focus());
+  }
+
+  function focusInput(node: HTMLElement): void {
+    queueMicrotask(() => node.focus());
+  }
+
+  function startApprove(event: GuardEvent): void {
+    confirmFor = event.id;
+    confirmText = '';
+  }
+
+  function cancelApprove(): void {
+    confirmFor = null;
+    confirmText = '';
+  }
+
+  function canConfirm(): boolean {
+    return confirmText.trim().toLowerCase() === 'approve';
+  }
+
   async function decide(event: GuardEvent, decision: 'approve' | 'deny'): Promise<void> {
     if (busy[event.id]) return;
+    if (decision === 'approve' && !canConfirm()) return;
     busy = { ...busy, [event.id]: true };
     try {
       await decideGuard(event.id, { decision });
       toast(decision === 'approve' ? t('inbox.approved') : t('inbox.denied'));
+      if (decision === 'approve') cancelApprove();
     } catch {
       toast(t('inbox.decisionFailed'));
     } finally {
@@ -108,6 +148,9 @@
           <div class="guard-card__head">
             <div class="guard-card__title">
               <span class="status-pill {severityClass(event)}">{event.severity}</span>
+              {#if event.metadata?.demo}
+                <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+              {/if}
               <h2>{event.title}</h2>
             </div>
             <span class="status-pill status-pill--warn">
@@ -132,10 +175,10 @@
           {/if}
 
           <div class="guard-evidence">
-            <span class="guard-evidence__label">{t('inbox.evidence')}</span>
-            {#if event.evidence.length > 0}
+            {#if evidenceFor(event).length > 0}
+              <span class="guard-evidence__label">{t('inbox.evidence')}</span>
               <ul>
-                {#each event.evidence as evidence}
+                {#each evidenceFor(event) as evidence}
                   <li>
                     {#if evidence.field}<code>{evidence.field}</code>{/if}
                     {#if evidence.excerpt}<span>{evidence.excerpt}</span>{/if}
@@ -143,8 +186,6 @@
                   </li>
                 {/each}
               </ul>
-            {:else}
-              <p>{t('inbox.evidenceEmpty')}</p>
             {/if}
           </div>
 
@@ -153,24 +194,64 @@
           {/if}
 
           <div class="guard-card__actions">
-            <button
-              class="btn btn--primary"
-              type="button"
-              onclick={() => decide(event, 'approve')}
-              disabled={busy[event.id]}
-            >
-              <Icon name="check" size={16} />
-              {t('inbox.approve')}
-            </button>
-            <button
-              class="btn btn--ghost"
-              type="button"
-              onclick={() => decide(event, 'deny')}
-              disabled={busy[event.id]}
-            >
-              <Icon name="x" size={16} />
-              {t('inbox.deny')}
-            </button>
+            {#if confirmFor === event.id}
+              <div class="guard-confirm">
+                <label for={`confirm-${event.id}`}>{t('inbox.confirmApprove')}</label>
+                <input
+                  id={`confirm-${event.id}`}
+                  class="guard-confirm__input"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder={t('inbox.confirmPlaceholder')}
+                  bind:value={confirmText}
+                  use:focusInput
+                  onkeydown={(keyEvent) => {
+                    if (keyEvent.key === 'Enter' && canConfirm()) void decide(event, 'approve');
+                    if (keyEvent.key === 'Escape') cancelApprove();
+                  }}
+                />
+                <p class="guard-confirm__hint">
+                  {confirmText.trim().length > 0 && !canConfirm()
+                    ? t('inbox.confirmMismatch')
+                    : t('inbox.confirmHint')}
+                </p>
+                <div class="button-row">
+                  <button
+                    class="btn btn--primary"
+                    type="button"
+                    onclick={() => decide(event, 'approve')}
+                    disabled={busy[event.id] || !canConfirm()}
+                  >
+                    <Icon name="check" size={16} />
+                    {t('inbox.confirmButton')}
+                  </button>
+                  <button class="btn btn--ghost" type="button" onclick={cancelApprove}>
+                    {t('common.cancel')}
+                  </button>
+                </div>
+              </div>
+            {:else}
+              <button
+                class="btn btn--primary"
+                type="button"
+                onclick={() => startApprove(event)}
+                disabled={busy[event.id]}
+              >
+                <Icon name="check" size={16} />
+                {t('inbox.approve')}
+              </button>
+              <button
+                class="btn btn--ghost"
+                type="button"
+                onclick={() => decide(event, 'deny')}
+                disabled={busy[event.id]}
+                use:focusIf={isHighRisk(event)}
+              >
+                <Icon name="x" size={16} />
+                {t('inbox.deny')}
+              </button>
+            {/if}
             <button
               class="text-link"
               type="button"
@@ -212,7 +293,12 @@
             <div class="resolved-row__main">
               <span class="status-pill {guardClass(event)}">{t(statusKey(event.status))}</span>
               <div>
-                <strong>{event.title}</strong>
+                <strong>
+                  {event.title}
+                  {#if event.metadata?.demo}
+                    <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+                  {/if}
+                </strong>
                 <small>{sessionTitle(event)} · {timeAgo(event.resolvedAt ?? event.requestedAt, t)}</small>
               </div>
             </div>

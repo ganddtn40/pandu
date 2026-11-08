@@ -121,7 +121,7 @@ verified counts; the API returns the same status per adapter.
 | Codex CLI | `codex.toml` | Proxy, log-watch | No |
 | Cursor CLI | `cursor-cli.toml` | Log-watch | No |
 | GitHub Copilot CLI | `copilot-cli.toml` | Log-watch | No |
-| Antigravity / Gemini CLI | `antigravity.toml` | Proxy, log-watch | No |
+| Gemini CLI | `gemini-cli.toml` | Proxy, log-watch | No |
 | Cline | `cline.toml` | Proxy | No |
 | Roo / Kilo Code | `roo-kilo.toml` | Proxy | No |
 | Aider | `aider.toml` | Proxy | No |

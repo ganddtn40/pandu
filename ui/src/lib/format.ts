@@ -5,9 +5,13 @@ export type Translator = (
   vars?: Record<string, string | number>,
 ) => string;
 
-export function formatUsd(value: number, unknownCalls = 0): string {
-  if (!Number.isFinite(value)) return '—';
-  if (value === 0 && unknownCalls > 0) return '—';
+export function formatUsd(
+  value: number,
+  unknownCalls = 0,
+  unknownLabel = 'Price unknown',
+): string {
+  if (!Number.isFinite(value)) return unknownLabel;
+  if (value === 0 && unknownCalls > 0) return unknownLabel;
   if (value > 0 && value < 0.01) return '<$0.01';
   return `$${value.toFixed(2)}`;
 }

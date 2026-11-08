@@ -29,6 +29,8 @@ interface GlassStats {
 interface ShapeMeta {
   el: HTMLElement;
   depth: number;
+  /** Chrome surfaces (top bar, rail) keep the accent out of their glass. */
+  neutral: boolean;
   radius: number;
   clipEl: HTMLElement | null;
   clipRadius: number;
@@ -515,6 +517,7 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
           continue;
         }
         const depth = Math.min(Math.max(Number(el.dataset.glassDepth) || 2, 1), 3);
+        const neutral = el.dataset.glassNeutral !== undefined;
         const radius = parseRadius(
           style.borderTopLeftRadius || style.borderRadius,
           rect.width,
@@ -536,7 +539,7 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
             );
           }
         }
-        next.push({ el, depth, radius, clipEl, clipRadius, rect, clipRect });
+        next.push({ el, depth, neutral, radius, clipEl, clipRadius, rect, clipRect });
         if (next.length >= shapeCap) break;
       }
     }
@@ -692,7 +695,8 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
           radius: shape.radius,
           tint: style.tint,
           opacity: style.opacity,
-          depth: shape.depth,
+          // The fragment shader reads depth + 10 as "neutral glass".
+          depth: shape.neutral ? shape.depth + 10 : shape.depth,
           clip: shape.clipRect
             ? {
                 x: shape.clipRect.left,

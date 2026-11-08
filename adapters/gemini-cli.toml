@@ -1,6 +1,6 @@
 schema_version = 1
-id = "antigravity"
-name = "Antigravity / Gemini CLI"
+id = "gemini-cli"
+name = "Gemini CLI"
 verified = false
 docs_url = "https://github.com/google-gemini/gemini-cli"
 capture = ["proxy", "log_watch"]

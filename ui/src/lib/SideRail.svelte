@@ -22,7 +22,7 @@
   const pendingCount = $derived(pendingGuards().length);
 </script>
 
-<aside class="rail float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none">
+<aside class="rail float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none" data-glass-neutral>
   <nav class="rail__nav" aria-label="Primary">
     {#each items as item}
       <a

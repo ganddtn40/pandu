@@ -6,6 +6,7 @@
 //! `cockpit doctor` and the Settings screen can explain.
 
 use std::env;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -133,11 +134,17 @@ pub fn statuses(registry: &AdapterRegistry) -> Vec<AdapterStatus> {
 
 /// Find an executable on `PATH` without running a shell.
 pub fn find_executable(command: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    find_executable_in(command, &path)
+}
+
+/// Search an explicit `PATH` value. Tests use this instead of mutating the
+/// process environment, which would race other tests.
+pub fn find_executable_in(command: &str, path: &OsStr) -> Option<PathBuf> {
     if command.trim().is_empty() {
         return None;
     }
-    let path = env::var_os("PATH")?;
-    for directory in env::split_paths(&path) {
+    for directory in env::split_paths(path) {
         for name in candidate_names(command) {
             let candidate = directory.join(name);
             if is_executable_file(&candidate) {
@@ -335,6 +342,52 @@ mod tests {
         assert_eq!(registry.all().len(), 15);
         assert_eq!(registry.issues().len(), 1);
         assert!(registry.issues()[0].source.ends_with("broken.toml"));
+    }
+
+    fn write_executable(path: &Path) {
+        std::fs::write(path, b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
+    }
+
+    #[test]
+    fn detection_only_finds_binaries_that_exist_on_the_given_path() {
+        let directory = tempfile::tempdir().unwrap();
+        write_executable(&directory.path().join("gemini"));
+        let path = directory.path().as_os_str();
+
+        assert_eq!(
+            find_executable_in("gemini", path),
+            Some(directory.path().join("gemini"))
+        );
+        // VS Code ships a `code` binary, but it is not an agent CLI. The
+        // adapter must not claim it as Roo/Kilo.
+        assert_eq!(find_executable_in("code", path), None);
+        assert_eq!(find_executable_in("  ", path), None);
+    }
+
+    #[test]
+    fn adapter_detection_uses_the_real_binary_names() {
+        let home = std::env::temp_dir().join("cockpit-adapter-test-detect-home");
+        let registry = load_registry(&home);
+
+        let gemini = registry.get("gemini-cli").expect("gemini-cli adapter");
+        assert_eq!(gemini.detect.command, "gemini");
+        let roo = registry.get("roo-kilo").expect("roo-kilo adapter");
+        assert_eq!(roo.detect.command, "kilocode");
+        assert!(registry.get("antigravity").is_none());
+        assert!(
+            registry
+                .all()
+                .iter()
+                .all(|adapter| adapter.detect.command != "code"),
+            "no adapter should detect VS Code's `code` binary"
+        );
     }
 
     #[test]

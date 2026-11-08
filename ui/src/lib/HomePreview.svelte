@@ -192,6 +192,10 @@
     return '';
   }
 
+  function isDemoSession(session: Session): boolean {
+    return session.source === 'demo' || session.metadata?.demo === true;
+  }
+
   async function loadDemo(): Promise<void> {
     loadingDemo = true;
     try {
@@ -223,12 +227,12 @@
   <div class="screen-actions">
     <span
       class="status-pill"
-      class:status-pill--live={daemonState.status === 'online'}
+      class:status-pill--ok={daemonState.status === 'online'}
       class:status-pill--danger={daemonState.status === 'offline'}
     >
       <span
         class="dot"
-        class:dot--live={daemonState.status === 'online'}
+        class:dot--ok={daemonState.status === 'online'}
         class:dot--danger={daemonState.status === 'offline'}
       ></span>
       {daemonState.status === 'online'
@@ -352,6 +356,9 @@
                 <span class="eyebrow">
                   <span class="dot dot--live"></span>
                   {t('common.active')} · {sessionAgent(live)}
+                  {#if isDemoSession(live)}
+                    <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+                  {/if}
                 </span>
                 <h2>{live.title}</h2>
                 <p class="tile__body">
@@ -384,7 +391,7 @@
               </div>
               <div class="live-side">
                 <div class="mini-stat"><span>{t('home.elapsed')}</span><strong>{formatElapsed(live.startedAt, now)}</strong></div>
-                <div class="mini-stat"><span>{t('common.cost')}</span><strong>{formatUsd(live.totals.totalCostUsd, live.totals.unknownCostCalls)}</strong></div>
+                <div class="mini-stat"><span>{t('common.cost')}</span><strong>{formatUsd(live.totals.totalCostUsd, live.totals.unknownCostCalls, t('common.priceUnknown'))}</strong></div>
                 <div class="mini-stat"><span>{t('common.tokens')}</span><strong>{formatTokens(sessionTokens(live))}</strong></div>
                 <div class="mini-stat">
                   <span>{t('widgets.guards')}</span>
@@ -416,7 +423,7 @@
             </div>
           {/if}
         {:else if id === 'spend'}
-          <span class="tile__value">{formatUsd(stats?.totalCostUsd ?? 0, stats?.unknownCostCalls ?? 0)}</span>
+          <span class="tile__value">{formatUsd(stats?.totalCostUsd ?? 0, stats?.unknownCostCalls ?? 0, t('common.priceUnknown'))}</span>
           <span class="tile__sub">
             {t('home.acrossFlights', { count: stats?.sessionCount ?? 0 })}
           </span>
@@ -477,12 +484,17 @@
                 <button class="list-row" type="button" onclick={() => openSession(session)}>
                   <span class="list-row__icon"><Icon name="plane" size={16} /></span>
                   <span class="list-row__text">
-                    <strong>{session.title}</strong>
+                    <strong>
+                      {session.title}
+                      {#if isDemoSession(session)}
+                        <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+                      {/if}
+                    </strong>
                     <small>{sessionAgent(session)} · {timeAgo(session.startedAt, t, now)}</small>
                   </span>
                   <span class="list-row__meta">
                     <span class="status-pill {statusClass(session.status)}">{t(statusKey(session.status))}</span>
-                    <span class="list-row__cost">{formatUsd(session.totals.totalCostUsd, session.totals.unknownCostCalls)}</span>
+                    <span class="list-row__cost">{formatUsd(session.totals.totalCostUsd, session.totals.unknownCostCalls, t('common.priceUnknown'))}</span>
                   </span>
                 </button>
               {/each}
@@ -497,29 +509,29 @@
             </div>
           {/if}
         {:else if id === 'agents'}
-          {#if adapters.length > 0}
+          {#if installed.length > 0}
             <div class="agent-list">
-              {#each adapters.slice(0, 3) as adapter (adapter.id)}
+              {#each installed.slice(0, 3) as adapter (adapter.id)}
                 <div class="agent-row">
-                  <span class="agent-row__avatar" class:agent-row__avatar--quiet={!adapter.installed}>
+                  <span class="agent-row__avatar">
                     {adapter.name.slice(0, 1).toUpperCase()}
                   </span>
                   <span class="agent-row__text">
                     <strong>{adapter.name}</strong>
                     <small>
-                      {adapter.installed ? t('home.agentInstalled') : t('home.agentMissing')}
+                      {t('home.agentInstalled')}
                       {#if adapter.verified} · {t('addAgent.verified')}{/if}
                     </small>
                   </span>
-                  <span class="dot" class:dot--live={adapter.installed}></span>
+                  <span class="dot dot--ok"></span>
                 </div>
               {/each}
             </div>
           {:else}
-            <p class="tile__body">{t('addAgent.empty')}</p>
+            <p class="tile__body">{t('onboarding.noAdapters')}</p>
           {/if}
           <button class="text-link" type="button" onclick={openAddAgent}>
-            {t('home.manageAgents')}
+            {t('home.addAgent')}
             <Icon name="arrow-right" size={14} />
           </button>
         {/if}

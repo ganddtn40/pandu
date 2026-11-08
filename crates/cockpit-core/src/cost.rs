@@ -25,6 +25,9 @@ pub struct ModelPricing {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reviewed_at: Option<String>,
+    /// Date the row was last checked against the provider's public price list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<String>,
 }
 
 fn usd() -> String {
@@ -33,195 +36,13 @@ fn usd() -> String {
 
 /// Bundled rates are estimates, not a billing authority.
 ///
-/// They were reviewed against public list prices in June 2025. Providers change
-/// prices and custom endpoints add markups, so unknown models deliberately
-/// resolve to "unknown" instead of silently costing $0. A user override always
-/// wins.
+/// They live in `models.json` at the repository root so prices can be updated
+/// without touching Rust code. Each row carries a `verified` date; unknown
+/// models deliberately resolve to "unknown" instead of silently costing $0. A
+/// user override always wins.
 pub static BUILT_IN_PRICING: LazyLock<Vec<ModelPricing>> = LazyLock::new(|| {
-    vec![
-        ModelPricing {
-            provider: "openai".into(),
-            model: "gpt-4.1".into(),
-            display_name: Some("GPT-4.1".into()),
-            aliases: vec![],
-            input_per_mtok: 2.0,
-            output_per_mtok: 8.0,
-            cache_read_per_mtok: Some(0.5),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "openai".into(),
-            model: "gpt-4.1-mini".into(),
-            display_name: Some("GPT-4.1 mini".into()),
-            aliases: vec![],
-            input_per_mtok: 0.4,
-            output_per_mtok: 1.6,
-            cache_read_per_mtok: Some(0.1),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "openai".into(),
-            model: "gpt-4.1-nano".into(),
-            display_name: Some("GPT-4.1 nano".into()),
-            aliases: vec![],
-            input_per_mtok: 0.1,
-            output_per_mtok: 0.4,
-            cache_read_per_mtok: Some(0.025),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "openai".into(),
-            model: "gpt-4o".into(),
-            display_name: Some("GPT-4o".into()),
-            aliases: vec![],
-            input_per_mtok: 2.5,
-            output_per_mtok: 10.0,
-            cache_read_per_mtok: Some(1.25),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "openai".into(),
-            model: "gpt-4o-mini".into(),
-            display_name: Some("GPT-4o mini".into()),
-            aliases: vec![],
-            input_per_mtok: 0.15,
-            output_per_mtok: 0.6,
-            cache_read_per_mtok: Some(0.075),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "openai".into(),
-            model: "o3".into(),
-            display_name: Some("o3".into()),
-            aliases: vec![],
-            input_per_mtok: 2.0,
-            output_per_mtok: 8.0,
-            cache_read_per_mtok: Some(0.5),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "openai".into(),
-            model: "o4-mini".into(),
-            display_name: Some("o4-mini".into()),
-            aliases: vec![],
-            input_per_mtok: 1.1,
-            output_per_mtok: 4.4,
-            cache_read_per_mtok: Some(0.275),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://openai.com/api/pricing/".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "anthropic".into(),
-            model: "claude-opus-4".into(),
-            display_name: Some("Claude Opus 4".into()),
-            aliases: vec![],
-            input_per_mtok: 15.0,
-            output_per_mtok: 75.0,
-            cache_read_per_mtok: Some(1.5),
-            cache_write_per_mtok: Some(18.75),
-            currency: usd(),
-            source: "https://www.anthropic.com/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "anthropic".into(),
-            model: "claude-sonnet-4".into(),
-            display_name: Some("Claude Sonnet 4".into()),
-            aliases: vec![],
-            input_per_mtok: 3.0,
-            output_per_mtok: 15.0,
-            cache_read_per_mtok: Some(0.3),
-            cache_write_per_mtok: Some(3.75),
-            currency: usd(),
-            source: "https://www.anthropic.com/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "anthropic".into(),
-            model: "claude-3-7-sonnet".into(),
-            display_name: Some("Claude 3.7 Sonnet".into()),
-            aliases: vec![],
-            input_per_mtok: 3.0,
-            output_per_mtok: 15.0,
-            cache_read_per_mtok: Some(0.3),
-            cache_write_per_mtok: Some(3.75),
-            currency: usd(),
-            source: "https://www.anthropic.com/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "anthropic".into(),
-            model: "claude-3-5-sonnet".into(),
-            display_name: Some("Claude 3.5 Sonnet".into()),
-            aliases: vec![],
-            input_per_mtok: 3.0,
-            output_per_mtok: 15.0,
-            cache_read_per_mtok: Some(0.3),
-            cache_write_per_mtok: Some(3.75),
-            currency: usd(),
-            source: "https://www.anthropic.com/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "anthropic".into(),
-            model: "claude-3-5-haiku".into(),
-            display_name: Some("Claude 3.5 Haiku".into()),
-            aliases: vec![],
-            input_per_mtok: 0.8,
-            output_per_mtok: 4.0,
-            cache_read_per_mtok: Some(0.08),
-            cache_write_per_mtok: Some(1.0),
-            currency: usd(),
-            source: "https://www.anthropic.com/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "deepseek".into(),
-            model: "deepseek-chat".into(),
-            display_name: Some("DeepSeek Chat".into()),
-            aliases: vec!["deepseek-v3".into()],
-            input_per_mtok: 0.27,
-            output_per_mtok: 1.1,
-            cache_read_per_mtok: Some(0.07),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://api-docs.deepseek.com/quick_start/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-        ModelPricing {
-            provider: "deepseek".into(),
-            model: "deepseek-reasoner".into(),
-            display_name: Some("DeepSeek Reasoner".into()),
-            aliases: vec!["deepseek-r1".into()],
-            input_per_mtok: 0.55,
-            output_per_mtok: 2.19,
-            cache_read_per_mtok: Some(0.14),
-            cache_write_per_mtok: None,
-            currency: usd(),
-            source: "https://api-docs.deepseek.com/quick_start/pricing".into(),
-            reviewed_at: Some("2025-06-01".into()),
-        },
-    ]
+    let raw = include_str!("../../../models.json");
+    serde_json::from_str(raw).expect("bundled models.json must be valid pricing data")
 });
 
 /// Normalize a model identifier so dated and provider-prefixed variants match.
@@ -546,6 +367,7 @@ mod tests {
             currency: usd(),
             source: "test".into(),
             reviewed_at: None,
+            verified: None,
         };
         let cost = estimate_usage_cost(usage(), "gpt-4.1", Some("openai"), &[override_price]);
         assert!(cost.known);

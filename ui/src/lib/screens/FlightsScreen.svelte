@@ -22,6 +22,7 @@
     statusKey,
     timeAgo,
   } from '../format';
+  import { copyText } from '../clipboard';
   import { t } from '../i18n/i18n.svelte';
   import { openQuickPrompt } from '../quick-prompt.svelte';
   import { navigate, routeParam } from '../router.svelte';
@@ -384,8 +385,14 @@
     await refreshDaemon();
     if (selectedId) await loadFlight(selectedId);
   }
+
+  async function copyBranch(branch: string): Promise<void> {
+    if (await copyText(branch)) toast(t('common.copied'));
+    else toast(t('common.copyFailed'));
+  }
 </script>
 
+<div class="flights-screen" class:is-detail={selectedId !== null}>
 <div class="screen-head">
   <div>
     <p class="kicker">{t('flights.kicker')}</p>
@@ -465,7 +472,7 @@
             </span>
             <span class="flight-row__side">
               <span class="status-pill {statusClass(session.status)}">{t(statusKey(session.status))}</span>
-              <span class="flight-row__cost">{formatUsd(session.totals.totalCostUsd, session.totals.unknownCostCalls)}</span>
+              <span class="flight-row__cost">{formatUsd(session.totals.totalCostUsd, session.totals.unknownCostCalls, t('common.priceUnknown'))}</span>
             </span>
           </button>
         {/each}
@@ -555,13 +562,26 @@
 
           <dl class="flight-meta">
             <div><dt>{t('flights.started')}</dt><dd>{formatDate(selectedSession.startedAt)}</dd></div>
-            <div><dt>{t('flights.duration')}</dt><dd>{formatDuration(selectedSession.durationMs)}</dd></div>
-            <div><dt>{t('flights.steps')}</dt><dd>{selectedSession.totals.stepCount}</dd></div>
-            <div><dt>{t('flights.toolCalls')}</dt><dd>{selectedSession.totals.toolCallCount}</dd></div>
-            <div><dt>{t('flights.totalTokens')}</dt><dd>{formatTokens(sessionTokens(selectedSession))}</dd></div>
-            <div><dt>{t('flights.totalCost')}</dt><dd>{formatUsd(selectedSession.totals.totalCostUsd, selectedSession.totals.unknownCostCalls)}</dd></div>
+            <div><dt>{t('flights.elapsed')}</dt><dd>{formatDuration(selectedSession.durationMs)}</dd></div>
+            <div><dt>{t('flights.stepsLabel')}</dt><dd>{selectedSession.totals.stepCount}</dd></div>
+            <div><dt>{t('flights.toolCallsLabel')}</dt><dd>{selectedSession.totals.toolCallCount}</dd></div>
+            <div><dt>{t('flights.tokensLabel')}</dt><dd>{formatTokens(sessionTokens(selectedSession))}</dd></div>
+            <div><dt>{t('common.cost')}</dt><dd>{formatUsd(selectedSession.totals.totalCostUsd, selectedSession.totals.unknownCostCalls, t('common.priceUnknown'))}</dd></div>
             {#if selectedSession.gitBranch}
-              <div><dt>{t('flights.branch')}</dt><dd><code>{selectedSession.gitBranch}</code></dd></div>
+              <div class="flight-meta__wide">
+                <dt>{t('flights.branch')}</dt>
+                <dd class="flight-meta__branch">
+                  <code title={selectedSession.gitBranch}>{selectedSession.gitBranch}</code>
+                  <button
+                    class="icon-button icon-button--small"
+                    type="button"
+                    aria-label={t('common.copy')}
+                    onclick={() => copyBranch(selectedSession.gitBranch ?? '')}
+                  >
+                    <Icon name="copy" size={14} />
+                  </button>
+                </dd>
+              </div>
             {/if}
           </dl>
 
@@ -688,7 +708,7 @@
                     >
                       <span class="step-row__seq">{step.seq}</span>
                       <span class="step-row__main">
-                        <strong>{step.kind}{#if step.model} · {step.model}{:else if step.provider} · {step.provider}{/if}</strong>
+                        <strong>{step.kind}{#if step.model}{` · ${step.model}`}{:else if step.provider}{` · ${step.provider}`}{/if}</strong>
                         <small>
                           {formatDuration(step.durationMs)}
                           · {formatTokens(step.usage.inputTokens + step.usage.outputTokens)} {t('common.tokens')}
@@ -707,7 +727,7 @@
                 <header class="step-detail__head">
                   <div>
                     <p class="kicker">{t('flights.stepDetail')}</p>
-                    <h3>{t('flights.step', { seq: selectedStep.seq })} · {selectedStep.kind}</h3>
+                    <h3>{selectedStep.kind}{#if selectedStep.model}{` · ${selectedStep.model}`}{/if}</h3>
                   </div>
                   <span class="status-pill {stepClass(selectedStep)}">{t(statusKey(selectedStep.status))}</span>
                 </header>
@@ -715,9 +735,9 @@
                 <dl class="summary-list summary-list--tight">
                   {#if selectedStep.model}<div><dt>{t('flights.model')}</dt><dd>{selectedStep.model}</dd></div>{/if}
                   {#if selectedStep.provider}<div><dt>{t('flights.agent')}</dt><dd>{selectedStep.provider}</dd></div>{/if}
-                  <div><dt>{t('flights.duration')}</dt><dd>{formatDuration(selectedStep.durationMs)}</dd></div>
-                  <div><dt>{t('flights.stepUsage')}</dt><dd>{formatTokens(selectedStep.usage.inputTokens + selectedStep.usage.outputTokens + selectedStep.usage.reasoningTokens)}</dd></div>
-                  <div><dt>{t('flights.stepCost')}</dt><dd>{selectedStep.costKnown ? formatUsd(selectedStep.costUsd ?? 0) : t('common.unknownCost')}</dd></div>
+                  <div><dt>{t('flights.elapsed')}</dt><dd>{formatDuration(selectedStep.durationMs)}</dd></div>
+                  <div><dt>{t('flights.tokensLabel')}</dt><dd>{formatTokens(selectedStep.usage.inputTokens + selectedStep.usage.outputTokens + selectedStep.usage.reasoningTokens)}</dd></div>
+                  <div><dt>{t('common.cost')}</dt><dd>{selectedStep.costKnown ? formatUsd(selectedStep.costUsd ?? 0) : t('common.priceUnknown')}</dd></div>
                 </dl>
 
                 {#if selectedStep.error}
@@ -874,3 +894,4 @@
     {/if}
   </div>
 {/if}
+</div>

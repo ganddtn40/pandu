@@ -3111,13 +3111,37 @@ pre {
 
 .flight-meta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   margin: 0;
   overflow: hidden;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
   background: var(--hairline);
+}
+
+.flight-meta__wide {
+  grid-column: 1 / -1;
+}
+
+.flight-meta__branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.flight-meta__branch code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button--small {
+  width: 28px;
+  height: 28px;
 }
 
 .flight-meta > div {
@@ -3231,8 +3255,16 @@ pre {
   overflow-wrap: anywhere;
 }
 
+/* Assistant prose reads like prose. Code, commands, and diffs stay monospace
+   through the global `pre` rule and the tool-call block. */
+.output-block--text pre {
+  font-family: var(--font-sans);
+  font-size: max(var(--text-min), calc(13px * var(--font-scale)));
+}
+
 .output-block--thinking pre {
   color: var(--text-faint);
+  font-family: var(--font-sans);
   font-style: italic;
 }
 
@@ -3790,6 +3822,45 @@ pre {
   margin-top: 18px;
 }
 
+.guard-confirm {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--danger-soft);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+}
+
+.guard-confirm label {
+  color: var(--text);
+  font-size: max(var(--text-min), calc(12px * var(--font-scale)));
+  font-weight: 600;
+}
+
+.guard-confirm__input {
+  width: min(280px, 100%);
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg, var(--card-bg));
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: max(var(--text-min), calc(13px * var(--font-scale)));
+}
+
+.guard-confirm__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.guard-confirm__hint {
+  color: var(--text-soft);
+  font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
+}
+
 .resolved-section {
   margin-top: var(--gap-section);
 }
@@ -4278,6 +4349,13 @@ pre {
     scroll-padding-bottom: calc(76px + 16px + env(safe-area-inset-bottom));
   }
 
+  /* Reserve room for the floating prompt instead of letting it sit on top of
+     the last row of content. The rule disappears with the button. */
+  body:has(.quick-fab) .panel {
+    padding-bottom: calc(128px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(128px + env(safe-area-inset-bottom));
+  }
+
   .screen-head,
   .panel-head {
     flex-direction: column;
@@ -4311,6 +4389,33 @@ pre {
 
   .flights-layout.has-detail .flight-list {
     display: none;
+  }
+
+  /* A selected flight owns the phone screen: the page head, filters, list, and
+     hint stay behind, and the detail scrolls as its own layer. */
+  .flights-screen.is-detail .screen-head,
+  .flights-screen.is-detail .flights-toolbar,
+  .flights-screen.is-detail .flight-list,
+  .flights-screen.is-detail .flight-hint {
+    display: none;
+  }
+
+  .flights-screen.is-detail .flights-layout {
+    display: block;
+  }
+
+  .flights-screen.is-detail .flight-detail {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: calc(18px + env(safe-area-inset-top)) 16px
+      calc(92px + env(safe-area-inset-bottom));
+    border-radius: 0 0 0 0;
+    background: var(--panel-surface);
+    -webkit-backdrop-filter: var(--panel-blur);
+    backdrop-filter: var(--panel-blur);
   }
 
   .flight-list {
@@ -4612,13 +4717,13 @@ pre {
 
   .quick-fab {
     position: fixed;
-    right: 18px;
-    bottom: calc(88px + env(safe-area-inset-bottom));
+    right: 14px;
+    bottom: calc(84px + env(safe-area-inset-bottom));
     z-index: 11;
     display: grid;
     place-items: center;
-    width: 52px;
-    height: 52px;
+    width: 44px;
+    height: 44px;
     border: 1px solid var(--float-border);
     border-radius: 50%;
     background: var(--sheet-bg);

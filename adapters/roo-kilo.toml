@@ -6,7 +6,7 @@ docs_url = "https://docs.roocode.com/"
 capture = ["proxy"]
 
 [detect]
-command = "code"
+command = "kilocode"
 version_args = ["--version"]
 
 [proxy]

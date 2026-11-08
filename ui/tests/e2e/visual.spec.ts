@@ -114,6 +114,10 @@ async function expectNoDevelopmentCopy(page: Page): Promise<void> {
   );
 }
 
+async function expectNoRawPlaceholders(page: Page): Promise<void> {
+  await expect(page.locator('body')).not.toContainText(/\{[a-zA-Z_][a-zA-Z0-9_]*\}/);
+}
+
 async function openAppearance(page: Page) {
   await page.locator('.topbar').getByRole('button', { name: 'Appearance' }).click();
   const dialog = page.getByRole('dialog', { name: 'Appearance' });
@@ -344,7 +348,7 @@ test.describe('desktop shell', () => {
     });
     expect(geometry.offset).toBeLessThan(40);
 
-    const plus = page.getByRole('button', { name: 'Add agent' });
+    const plus = page.locator('.rail').getByRole('button', { name: 'Add agent' });
     await expect(plus).toHaveAttribute('data-tooltip', 'Add agent');
     await plus.click();
     const dialog = page.getByRole('dialog', { name: 'Add an agent' });
@@ -660,6 +664,16 @@ test.describe('desktop shell', () => {
     }
   });
 
+  test('never renders an unsubstituted placeholder', async ({ page }) => {
+    await prepare(page);
+    for (const route of ['/', '/inbox', '/flights', '/settings', '/market']) {
+      await page.goto(route);
+      await ready(page);
+      if (route === '/') await waitForHomeData(page);
+      await expectNoRawPlaceholders(page);
+    }
+  });
+
   test('filters, opens, replays, and deep-links a recorded flight', async ({ page }) => {
     await open(page, '/flights');
     await expect(page.locator('.flight-row')).toHaveCount(3);
@@ -688,7 +702,7 @@ test.describe('desktop shell', () => {
     const progress = detail.locator('.timeline-controls__label span').first();
     await expect(progress).toHaveText('Step 1 of 1');
     await expect(detail.locator('.step-row')).toHaveCount(1);
-    await expect(detail.locator('.step-detail')).toContainText('Step 1 · model');
+    await expect(detail.locator('.step-detail')).toContainText('model · claude-sonnet-4');
     await screenshot(page, 'desktop-flight-timeline.png');
 
     const range = detail.locator('input[type="range"]');
@@ -739,7 +753,7 @@ test.describe('desktop shell', () => {
     await expect(page.getByText('0.2.0').first()).toBeVisible();
     await expect(page.getByText('http://127.0.0.1:4321')).toBeVisible();
     await expect(page.getByText('Connected', { exact: true })).toBeVisible();
-    await expect(page.getByText(/6 of 15 installed/)).toBeVisible();
+    await expect(page.getByText(/5 of 15 installed/)).toBeVisible();
     await expect(page.locator('.adapter-row')).toHaveCount(15);
     await expect(page.getByText('Web / PWA')).toBeVisible();
     await expect(page.getByText('Android', { exact: true })).toBeVisible();
@@ -782,7 +796,13 @@ test.describe('desktop shell', () => {
     await expect(card).toContainText('Demo mode is on');
     await screenshot(page, 'desktop-inbox-pending.png');
 
+    // High risk parks focus on the safe choice.
+    await expect(card.getByRole('button', { name: 'Deny' })).toBeFocused();
     await card.getByRole('button', { name: 'Approve' }).click();
+    const confirm = card.locator('.guard-confirm__input');
+    await expect(confirm).toBeFocused();
+    await confirm.fill('approve');
+    await card.getByRole('button', { name: 'Confirm approve' }).click();
     await expect(page.locator('.toast')).toContainText('Approved. The agent can continue.');
     await expect(page.locator('.guard-card')).toHaveCount(0);
     await expect(page.locator('.resolved-section')).toContainText('Resolved');
@@ -900,6 +920,17 @@ test.describe('phone shell', () => {
     await screenshot(page, 'phone-360-bottom.png');
   });
 
+  test('never renders an unsubstituted placeholder on the phone', async ({ page }) => {
+    await open(page, '/');
+    await waitForHomeData(page);
+    await expectNoRawPlaceholders(page);
+    for (const route of ['/inbox', '/flights', '/settings', '/market']) {
+      await page.goto(route);
+      await ready(page);
+      await expectNoRawPlaceholders(page);
+    }
+  });
+
   test('opens the phone flight list and detail', async ({ page }) => {
     await open(page, '/flights');
     await expect(page.locator('.flight-row')).toHaveCount(3);
@@ -909,8 +940,22 @@ test.describe('phone shell', () => {
     await page.locator('.flight-row').first().click();
     const detail = page.locator('.flight-detail');
     await expect(detail.getByRole('heading', { level: 2, name: 'Review landing page copy' })).toBeVisible();
+
+    // The detail owns the screen: no page head, filters, list, or floating
+    // prompt above or over it.
+    await expect(page.locator('.flights-screen')).toHaveClass(/is-detail/);
+    await expect(page.locator('.screen-head')).toBeHidden();
+    await expect(page.locator('.flights-toolbar')).toBeHidden();
+    await expect(page.locator('.flight-list')).toBeHidden();
+    await expect(page.locator('.quick-fab')).toBeHidden();
+    expect(await detail.evaluate((element) => getComputedStyle(element).position)).toBe('fixed');
     await expectNoHorizontalOverflow(page);
     await screenshot(page, 'phone-flight-detail.png');
+
+    await detail.getByRole('button', { name: 'All flights' }).click();
+    await expect(page).not.toHaveURL(/session=/);
+    await expect(page.locator('.flight-list')).toBeVisible();
+    await expect(page.locator('.flights-screen')).not.toHaveClass(/is-detail/);
   });
 
   test('opens the phone inbox', async ({ page }) => {

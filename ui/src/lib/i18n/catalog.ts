@@ -1,5 +1,15 @@
 import type { LanguageId } from '../design/types';
 
+/** ICU plural categories selected by `Intl.PluralRules`. */
+export type PluralCategory = Intl.LDMLPluralRule;
+
+/**
+ * A message is either a plain string or a set of plural forms. Catalogs that
+ * only need one form can provide `other`; English provides `one` and `other`
+ * for every counted noun.
+ */
+export type Message = string | Partial<Record<PluralCategory, string>>;
+
 const en = {
   'nav.home': 'Home',
   'nav.inbox': 'Inbox',
@@ -11,7 +21,7 @@ const en = {
   'topbar.appearance': 'Appearance',
   'topbar.notifications': 'Inbox',
   'topbar.account': 'Settings',
-  'topbar.activeFlights': '{count} active',
+  'topbar.activeFlights': { one: '{count} active', other: '{count} active' },
   'topbar.idle': 'No active flights',
   'topbar.demo': 'Demo',
   'common.online': 'Online',
@@ -32,10 +42,11 @@ const en = {
   'common.minutesAgo': '{count} min ago',
   'common.hoursAgo': '{count} h ago',
   'common.daysAgo': '{count} d ago',
-  'common.flights': 'flights',
-  'common.steps': 'steps',
+  'common.flights': { one: 'flight', other: 'flights' },
+  'common.steps': { one: 'step', other: 'steps' },
   'common.tokens': 'tokens',
   'common.cost': 'Cost',
+  'common.priceUnknown': 'Price unknown',
   'common.unknownCost': 'Unpriced',
   'common.all': 'All',
   'common.active': 'Active',
@@ -77,27 +88,35 @@ const en = {
   'home.guardArmed': 'Armed',
   'home.guardWaiting': 'Waiting',
   'home.recordedSpend': 'Recorded spend',
-  'home.acrossFlights': 'Across {count} flights',
-  'home.unpricedCalls': '{count} unpriced calls',
+  'home.acrossFlights': { one: 'Across {count} flight', other: 'Across {count} flights' },
+  'home.unpricedCalls': {
+    one: '{count} unpriced call',
+    other: '{count} unpriced calls',
+  },
   'home.recentSpendEmpty': 'No recorded spend yet.',
   'home.noRecent': 'No flights recorded yet.',
   'home.manageAgents': 'Manage agents',
   'home.addAgent': 'Add agent',
   'home.installed': 'Installed',
   'home.notInstalled': 'Not found',
-  'home.rules': '{count} rules',
-  'home.waiting': '{count} waiting',
+  'home.rules': { one: '{count} rule', other: '{count} rules' },
+  'home.waiting': { one: '{count} waiting', other: '{count} waiting' },
   'home.approvalsNone': 'Nothing waiting',
   'home.spendLabel': 'Recorded spend',
   'inbox.kicker': 'Inbox',
   'inbox.title': 'Needs you',
   'inbox.lede': 'Approvals and guard events land here with the exact command and flight.',
   'inbox.allClear': 'All clear',
-  'inbox.waiting': '{count} waiting',
+  'inbox.waiting': { one: '{count} waiting', other: '{count} waiting' },
   'inbox.emptyTitle': 'You are all caught up',
   'inbox.emptyBody': 'When an agent pauses on a risky action, it appears here with one clear decision.',
   'inbox.approve': 'Approve',
   'inbox.deny': 'Deny',
+  'inbox.confirmApprove': 'Type “approve” to confirm',
+  'inbox.confirmPlaceholder': 'approve',
+  'inbox.confirmHint': 'High-risk actions need an explicit confirmation.',
+  'inbox.confirmButton': 'Confirm approve',
+  'inbox.confirmMismatch': 'Type approve exactly to continue.',
   'inbox.approved': 'Approved. The agent can continue.',
   'inbox.denied': 'Denied. The action was stopped.',
   'inbox.decisionFailed': 'The decision could not be saved.',
@@ -123,7 +142,8 @@ const en = {
   'flights.back': 'All flights',
   'flights.notFound': 'That flight is not here',
   'flights.notFoundBody': 'It may have been removed, or the link is from another database.',
-  'flights.steps': '{count} steps',
+  'flights.steps': { one: '{count} step', other: '{count} steps' },
+  'flights.stepsLabel': 'Steps',
   'flights.output': 'Live output',
   'flights.timeline': 'Timeline',
   'flights.snapshots': 'Snapshots',
@@ -137,6 +157,8 @@ const en = {
   'flights.response': 'Response',
   'flights.usage': 'Usage',
   'flights.duration': 'Duration',
+  'flights.elapsed': 'Elapsed',
+  'flights.tokensLabel': 'Tokens',
   'flights.started': 'Started',
   'flights.ended': 'Ended',
   'flights.source': 'Source',
@@ -146,8 +168,9 @@ const en = {
   'flights.model': 'Model',
   'flights.replayHint': 'Replay reveals the recorded steps in order. It does not re-run the agent.',
   'flights.liveHint': 'New chunks arrive over the local live socket.',
-  'flights.redactions': '{count} redactions',
-  'flights.toolCalls': '{count} tool calls',
+  'flights.redactions': { one: '{count} redaction', other: '{count} redactions' },
+  'flights.toolCalls': { one: '{count} tool call', other: '{count} tool calls' },
+  'flights.toolCallsLabel': 'Tool calls',
   'flights.noStep': 'Select a step to inspect its request and response.',
   'flights.recorded': 'Recorded',
   'flights.open': 'Open',
@@ -227,7 +250,10 @@ const en = {
   'onboarding.local': 'Local by default',
   'onboarding.daemonOnline': 'Daemon online · v{version}',
   'onboarding.daemonOffline': 'Daemon offline · start it with `cockpit serve`',
-  'onboarding.adaptersFound': '{count} agents detected',
+  'onboarding.adaptersFound': {
+    one: '{count} agent detected',
+    other: '{count} agents detected',
+  },
   'onboarding.noAdapters': 'No agents detected yet',
   'onboarding.startAgent': 'Add your first agent',
   'onboarding.demo': 'Want to look around first?',
@@ -286,7 +312,7 @@ const en = {
   'common.copyFailed': 'Could not copy.',
   'common.today': 'Today',
   'common.yesterday': 'Yesterday',
-  'common.days': '{count} days',
+  'common.days': { one: '{count} day', other: '{count} days' },
   'common.seconds': '{count}s',
   'common.minutes': '{count}m',
   'common.hours': '{count}h',
@@ -323,20 +349,23 @@ const en = {
   'quick.commandPreview': 'Command preview',
   'home.lastSynced': 'Synced {time}',
   'home.neverSynced': 'Not synced yet',
-  'home.sessionCount': '{count} flights recorded',
+  'home.sessionCount': {
+    one: '{count} flight recorded',
+    other: '{count} flights recorded',
+  },
   'home.activeCount': '{count} active',
   'home.tokensAcross': 'Across all recorded flights',
   'home.spendEmpty': 'No spend recorded yet.',
   'home.recentSpendNote': 'Recorded cost by day, from local flights.',
   'home.agentInstalled': 'Installed',
   'home.agentMissing': 'Not found',
-  'home.guardRules': '{count} rules',
-  'home.guardPending': '{count} waiting',
+  'home.guardRules': { one: '{count} rule', other: '{count} rules' },
+  'home.guardPending': { one: '{count} waiting', other: '{count} waiting' },
   'home.guardIdle': 'No approvals waiting',
   'home.demoHint': 'This daemon is in demo mode. Demo flights are labelled everywhere.',
   'home.offlineDemo': 'Start the daemon in demo mode to try demo flights.',
-  'home.flightsCount': '{count} flights',
-  'home.tokensCount': '{count} tokens',
+  'home.flightsCount': { one: '{count} flight', other: '{count} flights' },
+  'home.tokensCount': { one: '{count} token', other: '{count} tokens' },
   'home.liveStep': 'Step {seq}',
   'home.openAgent': 'Add agent',
   'home.startAgent': 'Start agent',
@@ -347,7 +376,7 @@ const en = {
   'home.hide': 'Hide {name}',
   'home.drag': 'Drag {name}',
   'flights.searchPlaceholder': 'Search flights',
-  'flights.count': '{count} flights',
+  'flights.count': { one: '{count} flight', other: '{count} flights' },
   'flights.noSelection': 'Select a flight',
   'flights.noSelectionBody': 'Pick a flight to see its output, timeline, and snapshots.',
   'flights.selectHint': 'Or start an agent to record a new flight.',
@@ -357,7 +386,7 @@ const en = {
   'flights.noResponse': 'No response recorded.',
   'flights.toolCallsTitle': 'Tool calls',
   'flights.redactionsTitle': 'Redactions',
-  'flights.filesChanged': '{count} files',
+  'flights.filesChanged': { one: '{count} file', other: '{count} files' },
   'flights.insertions': '+{count}',
   'flights.deletions': '−{count}',
   'flights.commit': 'Commit',
@@ -373,14 +402,14 @@ const en = {
   'flights.openList': 'All flights',
   'flights.refresh': 'Refresh',
   'flights.snapshotAt': 'Recorded {time}',
-  'flights.stepCount': '{count} steps',
+  'flights.stepCount': { one: '{count} step', other: '{count} steps' },
   'flights.totalCost': 'Total cost',
   'flights.totalTokens': 'Total tokens',
-} as const;
+} as const satisfies Record<string, Message>;
 
 export type MessageKey = keyof typeof en;
 
-type Catalog = Partial<Record<MessageKey, string>>;
+type Catalog = Partial<Record<MessageKey, Message>>;
 
 const id: Catalog = {
   'nav.home': 'Beranda',
@@ -406,6 +435,8 @@ const id: Catalog = {
   'onboarding.back': 'Kembali',
   'common.copy': 'Salin',
   'common.copied': 'Tersalin',
+  'common.days': { other: '{count} hari' },
+  'flights.steps': { other: '{count} langkah' },
 };
 
 const es: Catalog = {
@@ -431,6 +462,8 @@ const es: Catalog = {
   'onboarding.back': 'Atrás',
   'common.copy': 'Copiar',
   'common.copied': 'Copiado',
+  'common.days': { one: '{count} día', other: '{count} días' },
+  'flights.steps': { one: '{count} paso', other: '{count} pasos' },
 };
 
 const fr: Catalog = {
@@ -456,6 +489,8 @@ const fr: Catalog = {
   'onboarding.back': 'Retour',
   'common.copy': 'Copier',
   'common.copied': 'Copié',
+  'common.days': { one: '{count} jour', other: '{count} jours' },
+  'flights.steps': { one: '{count} étape', other: '{count} étapes' },
 };
 
 const de: Catalog = {
@@ -481,6 +516,8 @@ const de: Catalog = {
   'onboarding.back': 'Zurück',
   'common.copy': 'Kopieren',
   'common.copied': 'Kopiert',
+  'common.days': { one: '{count} Tag', other: '{count} Tage' },
+  'flights.steps': { one: '{count} Schritt', other: '{count} Schritte' },
 };
 
 const ja: Catalog = {
@@ -506,6 +543,8 @@ const ja: Catalog = {
   'onboarding.back': '戻る',
   'common.copy': 'コピー',
   'common.copied': 'コピーしました',
+  'common.days': { other: '{count} 日' },
+  'flights.steps': { other: '{count} ステップ' },
 };
 
 const zh: Catalog = {
@@ -531,6 +570,8 @@ const zh: Catalog = {
   'onboarding.back': '返回',
   'common.copy': '复制',
   'common.copied': '已复制',
+  'common.days': { other: '{count} 天' },
+  'flights.steps': { other: '{count} 步' },
 };
 
 export const catalogs: Record<LanguageId, Catalog> = { en, id, es, fr, de, ja, zh };
@@ -541,9 +582,29 @@ export function translate(
   key: MessageKey,
   vars?: Record<string, string | number>,
 ): string {
-  const text = catalogs[language][key] ?? catalogs.en[key] ?? key;
+  const entry = catalogs[language][key] ?? catalogs.en[key] ?? key;
+  const text = selectMessage(language, entry, vars);
   if (!vars) return text;
   return text.replace(/\{(\w+)\}/g, (match, name: string) =>
     Object.hasOwn(vars, name) ? String(vars[name]) : match,
   );
+}
+
+/**
+ * Pick the plural form for `vars.count`. Catalogs may provide only `other`
+ * (languages such as Japanese), or `one`/`other` (English, Spanish). The
+ * selected category comes from `Intl.PluralRules`, never from a hand-written
+ * `count === 1` check.
+ */
+function selectMessage(
+  language: LanguageId,
+  entry: Message,
+  vars?: Record<string, string | number>,
+): string {
+  if (typeof entry === 'string') return entry;
+  const raw = vars?.count;
+  const count = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(count)) return entry.other ?? entry.one ?? '';
+  const category = new Intl.PluralRules(language).select(count);
+  return entry[category] ?? entry.other ?? entry.one ?? '';
 }

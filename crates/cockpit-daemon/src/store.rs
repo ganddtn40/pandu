@@ -687,6 +687,44 @@ impl Store {
         self.get_session(id)
     }
 
+    /// Move a session's recorded window into the past.
+    ///
+    /// Demo seeding creates rows through the normal write path (so every
+    /// invariant holds), then rewrites the timestamps so the demo does not
+    /// pretend three flights all started in the same second.
+    pub fn backdate_session(
+        &self,
+        id: &str,
+        started_at: &str,
+        ended_at: Option<&str>,
+    ) -> Result<()> {
+        let duration = ended_at.and_then(|end| duration_between(started_at, end));
+        self.lock()?.execute(
+            "UPDATE sessions SET started_at = ?1, ended_at = ?2, duration_ms = ?3 WHERE id = ?4",
+            params![started_at, ended_at, duration, id],
+        )?;
+        Ok(())
+    }
+
+    /// Move a step's recorded window into the past and keep its duration honest.
+    pub fn backdate_step(&self, id: &str, started_at: &str, ended_at: Option<&str>) -> Result<()> {
+        let duration = ended_at.and_then(|end| duration_between(started_at, end));
+        self.lock()?.execute(
+            "UPDATE steps SET started_at = ?1, ended_at = ?2, duration_ms = ?3 WHERE id = ?4",
+            params![started_at, ended_at, duration, id],
+        )?;
+        Ok(())
+    }
+
+    /// Move a guard event's request time into the past.
+    pub fn backdate_guard_event(&self, id: &str, requested_at: &str) -> Result<()> {
+        self.lock()?.execute(
+            "UPDATE guard_events SET requested_at = ?1 WHERE id = ?2",
+            params![requested_at, id],
+        )?;
+        Ok(())
+    }
+
     pub fn touch_session(
         &self,
         id: &str,

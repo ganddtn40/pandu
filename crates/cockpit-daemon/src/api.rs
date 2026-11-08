@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
+
 use axum::Json;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -699,10 +701,22 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         return Ok(Vec::new());
     }
 
-    let agent = AgentInfo {
+    let codex_agent = AgentInfo {
+        name: Some("Codex CLI".to_string()),
+        version: Some("0.46.0".to_string()),
+        user_agent: Some("codex-cli/0.46.0".to_string()),
+        detected_from: DetectedFrom::Demo,
+    };
+    let claude_agent = AgentInfo {
         name: Some("Claude Code".to_string()),
         version: Some("2.1.0".to_string()),
         user_agent: Some("claude-cli/2.1.0".to_string()),
+        detected_from: DetectedFrom::Demo,
+    };
+    let gemini_agent = AgentInfo {
+        name: Some("Gemini CLI".to_string()),
+        version: Some("0.29.0".to_string()),
+        user_agent: Some("gemini-cli/0.29.0".to_string()),
         detected_from: DetectedFrom::Demo,
     };
 
@@ -718,9 +732,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             protocol: Some(ProviderProtocol::Openai),
             provider: Some("openai".to_string()),
             model: Some("gpt-4.1".to_string()),
-            agent: Some(agent.clone()),
+            agent: Some(codex_agent.clone()),
             workspace_path: Some("~/projects/checkout-service".to_string()),
             git_branch: Some("feature/auth-cleanup".to_string()),
+            started_at: Some(demo_time(1560)),
             tags: vec!["demo".to_string(), "refactor".to_string()],
             metadata: Some(json!({ "demo": true })),
             ..NewSession::default()
@@ -778,6 +793,14 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         .map_err(store_error)?;
     state
         .store
+        .backdate_step(
+            &first_step.id,
+            &demo_time(1560),
+            Some(demo_time(1558).as_str()),
+        )
+        .map_err(store_error)?;
+    state
+        .store
         .insert_tool_calls(&[ToolCall {
             id: create_id(),
             session_id: first.id.clone(),
@@ -789,8 +812,8 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             output: None,
             error: None,
             file_paths: vec!["src/auth/middleware.rs".to_string()],
-            started_at: now_iso(),
-            ended_at: Some(now_iso()),
+            started_at: demo_time(1559),
+            ended_at: Some(demo_time(1558)),
         }])
         .map_err(store_error)?;
 
@@ -845,7 +868,19 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         .map_err(store_error)?;
     state
         .store
+        .backdate_step(
+            &second_step.id,
+            &demo_time(1558),
+            Some(demo_time(1555).as_str()),
+        )
+        .map_err(store_error)?;
+    state
+        .store
         .end_session(&first.id, SessionStatus::Completed)
+        .map_err(store_error)?;
+    state
+        .store
+        .backdate_session(&first.id, &demo_time(1560), Some(demo_time(1555).as_str()))
         .map_err(store_error)?;
 
     // A recorded git snapshot so the replay screen has real file changes to
@@ -867,7 +902,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             files_changed: 3,
             insertions: 128,
             deletions: 42,
-            created_at: None,
+            created_at: Some(demo_time(1555)),
             file_changes: vec![
                 NewFileChange {
                     path: "src/auth/session.rs".to_string(),
@@ -915,9 +950,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             protocol: Some(ProviderProtocol::Anthropic),
             provider: Some("anthropic".to_string()),
             model: Some("claude-sonnet-4".to_string()),
-            agent: Some(agent.clone()),
+            agent: Some(claude_agent.clone()),
             workspace_path: Some("~/projects/checkout-service".to_string()),
             git_branch: Some("fix/flaky-cart-test".to_string()),
+            started_at: Some(demo_time(180)),
             tags: vec!["demo".to_string(), "tests".to_string()],
             metadata: Some(json!({ "demo": true })),
             ..NewSession::default()
@@ -985,6 +1021,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         .map_err(store_error)?;
     state
         .store
+        .backdate_step(&step.id, &demo_time(180), Some(demo_time(178).as_str()))
+        .map_err(store_error)?;
+    state
+        .store
         .insert_redactions(
             &step.id,
             &[RedactionRow {
@@ -1009,7 +1049,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                     "The 50 ms sleep is the smell. The assertion races the recalculation task."
                         .to_string(),
                 ),
-                received_at: now_iso(),
+                received_at: demo_time_seconds(10_800),
             },
             StreamChunk {
                 id: create_id(),
@@ -1019,7 +1059,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"The test reads `cart.total` before the async \"}}"
                     .to_string(),
                 delta_text: Some("The test reads `cart.total` before the async ".to_string()),
-                received_at: now_iso(),
+                received_at: demo_time_seconds(10_770),
             },
             StreamChunk {
                 id: create_id(),
@@ -1031,7 +1071,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 delta_text: Some(
                     "recalculation finishes. Await `recalculate()` ".to_string(),
                 ),
-                received_at: now_iso(),
+                received_at: demo_time_seconds(10_740),
             },
             StreamChunk {
                 id: create_id(),
@@ -1041,7 +1081,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"in the fixture instead of sleeping.\"}}"
                     .to_string(),
                 delta_text: Some("in the fixture instead of sleeping.".to_string()),
-                received_at: now_iso(),
+                received_at: demo_time_seconds(10_710),
             },
             StreamChunk {
                 id: create_id(),
@@ -1050,13 +1090,17 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 kind: StreamChunkKind::Done,
                 data: "event: message_stop\ndata: {\"type\":\"message_stop\"}".to_string(),
                 delta_text: None,
-                received_at: now_iso(),
+                received_at: demo_time_seconds(10_680),
             },
         ])
         .map_err(store_error)?;
     state
         .store
         .end_session(&second.id, SessionStatus::Completed)
+        .map_err(store_error)?;
+    state
+        .store
+        .backdate_session(&second.id, &demo_time(180), Some(demo_time(178).as_str()))
         .map_err(store_error)?;
 
     if let Some(session) = state.store.get_session(&second.id).map_err(store_error)? {
@@ -1074,9 +1118,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             protocol: Some(ProviderProtocol::Gemini),
             provider: Some("gemini".to_string()),
             model: Some("gemini-2.5-pro".to_string()),
-            agent: Some(agent),
+            agent: Some(gemini_agent),
             workspace_path: Some("~/projects/cockpit-site".to_string()),
             git_branch: Some("copy/hero".to_string()),
+            started_at: Some(demo_time(22)),
             tags: vec!["demo".to_string(), "writing".to_string()],
             metadata: Some(json!({ "demo": true })),
             ..NewSession::default()
@@ -1128,6 +1173,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             0,
         )
         .map_err(store_error)?;
+    state
+        .store
+        .backdate_step(&step.id, &demo_time(22), Some(demo_time(21).as_str()))
+        .map_err(store_error)?;
 
     if let Some(session) = state.store.get_session(&third.id).map_err(store_error)? {
         publish_demo_started(state, &session);
@@ -1136,7 +1185,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
 
     // A pending approval so the Inbox has something real to act on in demo
     // mode. This is a stored guard event, not UI-only sample data.
-    state
+    let guard = state
         .guards
         .record_event(crate::store::NewGuardEvent {
             session_id: third.id.clone(),
@@ -1163,6 +1212,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 error.to_string(),
             )
         })?;
+    state
+        .store
+        .backdate_guard_event(&guard.id, &demo_time(19))
+        .map_err(store_error)?;
 
     state
         .store
@@ -1200,6 +1253,15 @@ fn demo_headers() -> BTreeMap<String, String> {
     BTreeMap::from([("content-type".to_string(), "application/json".to_string())])
 }
 
+/// Timestamp used by the demo seed, relative to the moment it is seeded.
+fn demo_time(minutes_ago: i64) -> String {
+    (Utc::now() - ChronoDuration::minutes(minutes_ago)).to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+fn demo_time_seconds(seconds_ago: i64) -> String {
+    (Utc::now() - ChronoDuration::seconds(seconds_ago)).to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 fn demo_request(
     protocol: ProviderProtocol,
     path: &str,
@@ -1207,6 +1269,11 @@ fn demo_request(
     system: &str,
     prompt: &str,
 ) -> CapturedRequest {
+    let user_agent = match protocol {
+        ProviderProtocol::Openai => "codex-cli/0.46.0",
+        ProviderProtocol::Anthropic => "claude-cli/2.1.0",
+        ProviderProtocol::Gemini => "gemini-cli/0.29.0",
+    };
     CapturedRequest {
         protocol,
         method: "POST".to_string(),
@@ -1215,7 +1282,7 @@ fn demo_request(
         stream: false,
         headers: BTreeMap::from([
             ("content-type".to_string(), "application/json".to_string()),
-            ("user-agent".to_string(), "claude-cli/2.1.0".to_string()),
+            ("user-agent".to_string(), user_agent.to_string()),
         ]),
         body: Some(json!({
             "model": model,
