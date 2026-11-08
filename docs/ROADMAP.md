@@ -10,21 +10,50 @@ come back without reopening old decisions.
 
 ## v0.2.0 — the rewrite (in progress)
 
-**Theme:** one binary, four screens, three capture modes, real glass.
+**Theme:** one binary, five tabs, three capture modes, design v2.
 
 ### Product
 
-- [ ] Home: live flight, today's spend, token ring, guard toggle with pending
-      count, recent flights
+- [x] Five-tab IA: Home, Inbox, Flights, Market, Settings
+- [x] Global quick prompt (`Ctrl/Cmd+K`, Home action, phone action button)
+- [ ] Home wired to the daemon: live flight, today's spend, token ring, guard
+      state with pending count
+- [ ] Inbox: approvals and alerts with large Approve/Deny cards and countdown
 - [ ] Flights: list and detail, timeline scrubber, step inspector, per-step git
       diff, cost, one trust badge, `Fork from here`
-- [ ] Approvals: large Approve/Deny cards with countdown ring
-- [ ] Settings: Add an agent wizard, language, theme, wallpaper, privacy,
-      `Report a bug`, about/updates
+- [ ] Market: adapter and theme discovery, then the registry
+- [ ] Settings: Add an agent wizard, language, privacy, `Report a bug`,
+      about/updates
 - [ ] First-run wizard: pick agent → copy one command → watch the flight appear
 - [ ] `Try demo` on every empty state
 - [ ] Honest per-flight capture label: `Recorded via proxy`, `Observed from
       logs`, or `Observed via hook`
+
+The Phase 4B shell previews all five tabs with sample data. Wiring them to the
+daemon is Phase 5.
+
+### Design v2
+
+- [x] Dark (default), Light, and Frost themes
+- [x] Three surface styles: Bento Matte, Liquid Glass, Hybrid (default)
+- [x] Seven accent presets with a single accent per theme
+- [x] Corner radius: Sharp, Soft (default), Round
+- [x] Density: Compact, Comfortable (default), Spacious
+- [x] Font: System, Inter, Mono for code; font size slider
+- [x] Glass intensity, blur, and refraction sliders
+- [x] Wallpaper: procedural, your image, or none
+- [x] Card borders, motion (Full/Reduced/Off), and Performance mode
+- [x] Live appearance sheet with instant preview and per-device persistence
+- [x] Legacy settings migration
+- [x] Versioned theme JSON export/import/share with validation, never executed
+- [x] Bento widgets: drag on desktop, long-press on phone, hide and reset
+- [x] New logo suite, wordmark, mono mark, and favicon
+- [x] Contrast, style-ban, theme, wallpaper, widget, and visual gates
+- [ ] Per-screen empty/loading/error states wired to real data (Phase 5)
+- [ ] Final visual approval by the user (hard stop before Phase 5)
+
+The full token, surface, theme, and accessibility contract is in
+[`DESIGN.md`](DESIGN.md).
 
 ### Capture
 
@@ -51,30 +80,55 @@ come back without reopening old decisions.
 
 ### App and UI
 
-- [ ] Tauri 2 desktop embedding the daemon (single exe)
+- [ ] Tauri 2 Windows app embedding the daemon (single exe)
 - [ ] Tauri 2 Android companion with QR/short-code pairing
+- [ ] Web/PWA build served by the daemon
 - [x] Svelte 5 + TypeScript + Vite
-- [x] Custom WebGL2 glass engine with CSS fallback, reduced transparency,
-      reduced motion, and Performance mode
-- [x] Light/dark/system themes and a procedural abstract wallpaper
+- [x] Design v2 shell, appearance engine, bento components, and quick prompt
+- [x] Custom WebGL2 glass engine with CSS fallback, matte fallback, reduced
+      transparency, reduced motion, Performance mode, and a 16-shape cap
+- [x] Playwright gates for the shell and design system
+- [ ] Playwright e2e for the five tabs against a live daemon
 - [ ] 14 language catalogs, RTL, missing-key CI gate
-- [ ] Playwright e2e for the four screens
 
 ### Install and release
 
-- [ ] cargo-dist CLI installers: PowerShell, shell, Homebrew
+- [ ] cargo-dist CLI installers: PowerShell and shell
 - [ ] npm wrapper (`npx cockpit`)
 - [ ] winget and scoop manifests
-- [ ] Tauri bundles: MSI/NSIS, dmg, AppImage/deb
+- [ ] Windows Tauri bundle (MSI/NSIS)
 - [ ] Signed Android APK with documented keystore steps
+- [ ] Web/PWA bundle
+- [ ] macOS, iOS, and Linux bundles (planned after v0.2.0)
 - [ ] Manual `Check for updates` only; no background pings
 - [ ] README and beginner docs in all 14 languages
+
+### Platform support
+
+| Platform | Status |
+| --- | --- |
+| Web (PWA) | Today |
+| Android | Today |
+| Windows | Today |
+| macOS | Planned |
+| iOS | Planned |
+| Linux | Planned |
+
+Android is a companion viewer/approver, not a recorder. Nothing outside the
+"Today" rows is advertised as working.
 
 ### Quality gates
 
 - [x] `cargo fmt --all -- --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo test --workspace`
+- [x] `pnpm check`
+- [x] `pnpm test` (10 files / 95 tests)
+- [x] Playwright design and visual suite (23 tests)
+- [x] Text contrast ≥ 4.5:1 across every theme, surface, and accent pair
+- [x] 44 px minimum touch targets on phone
+- [x] Zero idle canvas redraws and visible focus rings
+- [x] UI JavaScript < 150 KB gzip (currently ~49.6 KB gzip)
 - [ ] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction
@@ -82,8 +136,22 @@ come back without reopening old decisions.
 - [x] Adapter parser tests on fixtures
 - [ ] Crash-safe SQLite tests
 - [ ] CI matrix on Windows, macOS, Linux
-- [ ] Performance: binary < 12 MB, idle RAM < 40 MB, startup < 300 ms, UI JS
-      < 150 KB gzip, Android APK < 15 MB, proxy overhead < 2 ms p99
+- [ ] Performance: binary < 12 MB, idle RAM < 40 MB, startup < 300 ms, Android
+      APK < 15 MB, proxy overhead < 2 ms p99
+
+### Release plan
+
+| Phase | Focus |
+| --- | --- |
+| 4B | Design v2 complete; user visual approval (hard stop) |
+| 5 | Five tabs wired to the daemon, onboarding, i18n catalogs |
+| 6 | Agent control and notifications |
+| 7 | Remote access security |
+| 8 | Market registry |
+| 9 | Model, effort, and context controls |
+| 10 | Updates and backups |
+| 11 | Packaging: Windows, Android, Web/PWA |
+| 12 | Docs, benchmarks, 14 languages, v0.3.0 |
 
 ## Not in v0.2.0
 
@@ -119,29 +187,34 @@ or picking up a `help wanted` draft.
 
 1. **Stability window.** Fix real-world adapter drift, proxy edge cases, and
    install problems before adding surface area.
-2. **Database import.** Read-only importer for 0.1.0 databases with a preview
+2. **macOS, iOS, and Linux.** Finish the planned platform matrix with signed
+   bundles and the same honesty about what works.
+3. **Database import.** Read-only importer for 0.1.0 databases with a preview
    and explicit confirmation.
-3. **Handoff + Provenance.** They reinforce replay and are useful to individual
+4. **Handoff + Provenance.** They reinforce replay and are useful to individual
    developers before teams.
-4. **Context Doctor.** High value once enough real provider fixtures exist.
-5. **Arena.** Only after multi-agent capture is boringly reliable.
-6. **Journal + Understanding Debt.** Writing and learning features need their
+5. **Context Doctor.** High value once enough real provider fixtures exist.
+6. **Arena.** Only after multi-agent capture is boringly reliable.
+7. **Journal + Understanding Debt.** Writing and learning features need their
    own design pass.
-7. **Project Brain + Plugins.** Both are platforms; ship them when the core API
+8. **Project Brain + Plugins.** Both are platforms; ship them when the core API
    is stable enough to support third parties.
 
 ## How to pick up work
 
-1. Read `CONTRIBUTING.md` (added in Phase 7).
+1. Read `CONTRIBUTING.md` (added in Phase 12).
 2. Pick an issue labeled `help wanted`.
 3. Comment with your plan before large changes.
-4. Keep the four-screen promise: new surface area needs a strong reason.
-5. Every PR must pass fmt, clippy, tests, and the relevant adapter/e2e checks.
+4. Keep the five-tab promise: new surface area needs a strong reason.
+5. Every PR must pass fmt, clippy, tests, `pnpm check`, Vitest, Playwright, and
+   the relevant adapter/e2e checks.
 
 ## Release criteria for v0.2.0
 
 - All v0.2.0 checkboxes above are complete.
-- A clean-machine install works on Windows, macOS, and Linux.
+- A clean-machine install works on Windows, Android, and Web/PWA.
+- macOS, iOS, and Linux remain clearly labeled as planned until their bundles
+  ship.
 - The Android companion pairs and views flights over the LAN.
 - The performance budgets are measured and recorded in the release notes.
 - No known data-loss, credential-leak, or agent-breaking bug is open.

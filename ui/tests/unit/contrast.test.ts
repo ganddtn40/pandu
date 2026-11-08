@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { ACCENTS } from '../../src/lib/design/accents';
+import { DENSITIES, RADII } from '../../src/lib/design/types';
 
 interface Rgba {
   r: number;
@@ -24,13 +26,10 @@ function tokenBlock(pattern: RegExp): Record<string, string> {
   return declarations(match[1]);
 }
 
-const light = tokenBlock(/:root\s*\{([^}]*)\}/);
-const dark = tokenBlock(/:root\[data-theme='dark'\]\s*\{([^}]*)\}/);
-
 function parseColor(value: string): Rgba {
-  const hex = value.trim();
-  if (hex.startsWith('#')) {
-    const digits = hex.slice(1);
+  const text = value.trim();
+  if (text.startsWith('#')) {
+    const digits = text.slice(1);
     const full =
       digits.length === 3
         ? digits
@@ -38,6 +37,7 @@ function parseColor(value: string): Rgba {
             .map((digit) => digit + digit)
             .join('')
         : digits;
+    if (full.length !== 6) throw new Error(`unsupported color: ${value}`);
     return {
       r: Number.parseInt(full.slice(0, 2), 16),
       g: Number.parseInt(full.slice(2, 4), 16),
@@ -45,9 +45,8 @@ function parseColor(value: string): Rgba {
       a: 1,
     };
   }
-
   const match = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/.exec(
-    hex,
+    text,
   );
   if (!match) throw new Error(`unsupported color: ${value}`);
   return {
@@ -59,89 +58,155 @@ function parseColor(value: string): Rgba {
 }
 
 function composite(foreground: Rgba, background: Rgba): Rgba {
-  const a = foreground.a + background.a * (1 - foreground.a);
-  if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
   return {
-    r: (foreground.r * foreground.a + background.r * background.a * (1 - foreground.a)) / a,
-    g: (foreground.g * foreground.a + background.g * background.a * (1 - foreground.a)) / a,
-    b: (foreground.b * foreground.a + background.b * background.a * (1 - foreground.a)) / a,
-    a,
+    r: foreground.r * foreground.a + background.r * (1 - foreground.a),
+    g: foreground.g * foreground.a + background.g * (1 - foreground.a),
+    b: foreground.b * foreground.a + background.b * (1 - foreground.a),
+    a: 1,
   };
 }
 
 function luminance(color: Rgba): number {
   const channel = (value: number): number => {
-    const c = value / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    const normalized = value / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
 }
 
 function contrast(foreground: Rgba, background: Rgba): number {
-  const fg = luminance(foreground);
-  const bg = luminance(background);
-  const lighter = Math.max(fg, bg);
-  const darker = Math.min(fg, bg);
-  return (lighter + 0.05) / (darker + 0.05);
+  const front = luminance(composite(foreground, background));
+  const back = luminance(background);
+  return (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
 }
 
-/**
- * The shader's brightest dark-mode pool is a warm cream around 43% sRGB. The
- * light-mode worst case is the cool blue pool at roughly 76% sRGB. The test
- * composites every translucent token over those surfaces so the gate covers
- * the brightest place text can land, not just a flat token swatch.
- */
-const wallpaper = {
-  light: parseColor('#c2d0e8'),
-  dark: parseColor('#6e6352'),
-};
+const themes = {
+  dark: tokenBlock(/:root\s*\{([^}]*)\}/),
+  light: tokenBlock(/:root\[data-theme='light'\]\s*\{([^}]*)\}/),
+  frost: tokenBlock(/:root\[data-theme='frost'\]\s*\{([^}]*)\}/),
+} as const;
 
-function surfaces(tokens: Record<string, string>, theme: 'light' | 'dark'): Record<string, Rgba> {
-  const page = wallpaper[theme];
-  const color = (name: string): Rgba => parseColor(tokens[name]!);
-  const panel = composite(color('--glass-bg'), page);
-  return {
-    panel,
-    tile: composite(color('--tile-bg'), panel),
-    field: composite(color('--field-bg'), panel),
-    inset: composite(color('--inset-bg'), panel),
-    chip: composite(color('--chip-bg'), panel),
-    accentSoft: composite(color('--accent-soft'), panel),
-  };
+type ThemeName = keyof typeof themes;
+
+const accentBlocks = new Map<string, Record<string, string>>();
+for (const match of css.matchAll(
+  /:root\[data-theme='(dark|light|frost)'\]\[data-accent='([a-z]+)'\]\s*\{([^}]*)\}/g,
+)) {
+  accentBlocks.set(`${match[1]}:${match[2]}`, declarations(match[3]!));
 }
 
-const textTokens = ['--text', '--text-soft', '--text-faint', '--accent-ink', '--success', '--danger'];
+function accentBlock(theme: ThemeName, accent: string): Record<string, string> {
+  const block = accentBlocks.get(`${theme}:${accent}`);
+  if (!block) throw new Error(`missing accent block ${theme}/${accent}`);
+  return block;
+}
 
-for (const [theme, tokens] of [
-  ['light', light],
-  ['dark', dark],
-] as const) {
-  describe(`${theme} theme contrast`, () => {
-    const palette = surfaces(tokens, theme);
+describe('theme token contrast', () => {
+  for (const [name, tokens] of Object.entries(themes)) {
+    it(`${name} keeps body and supporting text readable on cards and the page`, () => {
+      const card = parseColor(tokens['--card-bg']!);
+      const page = parseColor(tokens['--bg']!);
+      for (const token of ['--text', '--text-soft', '--text-faint']) {
+        const color = parseColor(tokens[token]!);
+        expect(contrast(color, card), `${token} on --card-bg`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(color, page), `${token} on --bg`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
 
-    for (const textToken of textTokens) {
-      for (const [surfaceName, surface] of Object.entries(palette)) {
-        it(`${textToken} on ${surfaceName} is at least 4.5:1`, () => {
-          const ratio = contrast(parseColor(tokens[textToken]!), surface);
-          expect(ratio, `${theme} ${textToken} on ${surfaceName}`).toBeGreaterThanOrEqual(4.5);
-        });
+    it(`${name} keeps status text and selected/toast pairs readable`, () => {
+      const card = parseColor(tokens['--card-bg']!);
+      for (const token of ['--success', '--danger', '--warn']) {
+        expect(contrast(parseColor(tokens[token]!), card), `${token} on --card-bg`).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      }
+      expect(contrast(parseColor(tokens['--selected-text']!), parseColor(tokens['--selected']!))).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(parseColor(tokens['--toast-text']!), parseColor(tokens['--toast-bg']!))).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+describe('accent presets', () => {
+  it('declares every theme/accent pair exactly once', () => {
+    expect(accentBlocks.size).toBe(ACCENTS.length * 3);
+    for (const theme of Object.keys(themes)) {
+      for (const preset of ACCENTS) {
+        expect(accentBlocks.has(`${theme}:${preset.id}`)).toBe(true);
       }
     }
-
-    it('selected text is at least 4.5:1 on the selected surface', () => {
-      const ratio = contrast(
-        parseColor(tokens['--selected-text']!),
-        parseColor(tokens['--selected']!),
-      );
-      expect(ratio).toBeGreaterThanOrEqual(4.5);
-    });
-
-    it('toast text is at least 4.5:1 on the toast surface', () => {
-      const ratio = contrast(
-        parseColor(tokens['--toast-text']!),
-        composite(parseColor(tokens['--toast-bg']!), wallpaper[theme]),
-      );
-      expect(ratio).toBeGreaterThanOrEqual(4.5);
-    });
   });
-}
+
+  it('keeps CSS and the TypeScript palette in lockstep', () => {
+    for (const theme of Object.keys(themes) as ThemeName[]) {
+      for (const preset of ACCENTS) {
+        const block = accentBlock(theme, preset.id);
+        const palette = preset[theme];
+        expect(block['--accent']!.toLowerCase(), `${theme}/${preset.id} base`).toBe(
+          palette.base.toLowerCase(),
+        );
+        expect(block['--accent-strong']!.toLowerCase(), `${theme}/${preset.id} strong`).toBe(
+          palette.strong.toLowerCase(),
+        );
+        expect(block['--accent-ink']!.toLowerCase(), `${theme}/${preset.id} ink`).toBe(
+          palette.ink.toLowerCase(),
+        );
+        expect(block['--accent-contrast']!.toLowerCase(), `${theme}/${preset.id} contrast`).toBe(
+          palette.contrast.toLowerCase(),
+        );
+        const soft = parseColor(block['--accent-soft']!);
+        const expectedSoft = parseColor(palette.soft);
+        expect(soft.r, `${theme}/${preset.id} soft r`).toBeCloseTo(expectedSoft.r, 0);
+        expect(soft.g, `${theme}/${preset.id} soft g`).toBeCloseTo(expectedSoft.g, 0);
+        expect(soft.b, `${theme}/${preset.id} soft b`).toBeCloseTo(expectedSoft.b, 0);
+        expect(soft.a, `${theme}/${preset.id} soft a`).toBeCloseTo(expectedSoft.a, 2);
+      }
+    }
+  });
+
+  it('keeps accent ink readable on cards and accent fills readable', () => {
+    for (const theme of Object.keys(themes) as ThemeName[]) {
+      const card = parseColor(themes[theme]['--card-bg']!);
+      for (const preset of ACCENTS) {
+        const block = accentBlock(theme, preset.id);
+        const ink = parseColor(block['--accent-ink']!);
+        const accent = parseColor(block['--accent']!);
+        const onAccent = parseColor(block['--accent-contrast']!);
+        expect(contrast(ink, card), `${theme}/${preset.id} ink on card`).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrast(onAccent, accent),
+          `${theme}/${preset.id} contrast on accent`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+});
+
+describe('shape tokens', () => {
+  it('keeps CSS radii and density in lockstep with the TypeScript presets', () => {
+    for (const [id, preset] of Object.entries(RADII)) {
+      const block = tokenBlock(new RegExp(`:root\\[data-radius='${id}'\\]\\s*\\{([^}]*)\\}`));
+      expect(block['--radius-sm']).toBe(`${preset.sm}px`);
+      expect(block['--radius-md']).toBe(`${preset.md}px`);
+      expect(block['--radius-lg']).toBe(`${preset.lg}px`);
+      expect(block['--radius-xl']).toBe(`${preset.xl}px`);
+    }
+
+    for (const [id, preset] of Object.entries(DENSITIES)) {
+      const block = tokenBlock(new RegExp(`:root\\[data-density='${id}'\\]\\s*\\{([^}]*)\\}`));
+      expect(block['--pad-card']).toBe(`${preset.padCard}px`);
+      expect(block['--gap-card']).toBe(`${preset.gapCard}px`);
+      expect(block['--gap-section']).toBe(`${preset.gapSection}px`);
+      expect(block['--pad-panel']).toBe(`${preset.padPanel}px`);
+    }
+  });
+
+  it('keeps card radii inside the bento range', () => {
+    for (const preset of Object.values(RADII)) {
+      expect(preset.lg).toBeGreaterThanOrEqual(20);
+      expect(preset.lg).toBeLessThanOrEqual(28);
+      expect(preset.xl).toBeGreaterThanOrEqual(24);
+    }
+  });
+});

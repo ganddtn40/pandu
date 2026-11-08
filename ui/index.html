@@ -1,33 +1,72 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-glass-mode="pending">
+<html
+  lang="en"
+  data-theme="dark"
+  data-surface="hybrid"
+  data-accent="orange"
+  data-radius="soft"
+  data-density="comfortable"
+  data-font="system"
+  data-motion="full"
+  data-borders="on"
+  data-wallpaper="procedural"
+  data-performance="off"
+  data-glass-mode="pending"
+>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#0b0f15" />
+    <meta name="theme-color" content="#0b0d10" />
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <title>Cockpit</title>
     <script>
-      // Apply the theme before the first paint so there is no flash.
+      // Apply the saved design before the first paint so there is no flash.
       (function () {
+        var root = document.documentElement;
+        var themes = ['dark', 'light', 'frost'];
+        var surfaces = ['matte', 'glass', 'hybrid'];
+        var accents = ['orange', 'cream', 'blue', 'green', 'violet', 'silver', 'mono'];
+        var radii = ['sharp', 'soft', 'round'];
+        var densities = ['compact', 'comfortable', 'spacious'];
+        var fonts = ['system', 'inter', 'mono'];
+        var motions = ['full', 'reduced', 'off'];
+        var wallpapers = ['procedural', 'image', 'none'];
+        function pick(value, allowed, fallback) {
+          return allowed.indexOf(value) >= 0 ? value : fallback;
+        }
         try {
-          var saved = localStorage.getItem('cockpit.theme');
-          var theme =
-            saved === 'light' || saved === 'dark'
-              ? saved
-              : window.matchMedia('(prefers-color-scheme: light)').matches
-                ? 'light'
-                : 'dark';
+          var saved = null;
+          try {
+            saved = JSON.parse(localStorage.getItem('cockpit.design') || 'null');
+          } catch (error) {
+            saved = null;
+          }
+          if (saved && typeof saved === 'object') {
+            root.dataset.theme = pick(saved.theme, themes, 'dark');
+            root.dataset.surface = pick(saved.surface, surfaces, 'hybrid');
+            root.dataset.accent = pick(saved.accent, accents, 'orange');
+            root.dataset.radius = pick(saved.radius, radii, 'soft');
+            root.dataset.density = pick(saved.density, densities, 'comfortable');
+            root.dataset.font = pick(saved.font, fonts, 'system');
+            root.dataset.motion = pick(saved.motion, motions, 'full');
+            root.dataset.wallpaper = pick(saved.wallpaper, wallpapers, 'procedural');
+            root.dataset.borders = saved.borders === false ? 'off' : 'on';
+            root.dataset.performance = saved.performance === true ? 'on' : 'off';
+          } else {
+            var legacy = localStorage.getItem('cockpit.theme');
+            root.dataset.theme = legacy === 'light' ? 'light' : 'dark';
+          }
           var forced = new URLSearchParams(location.search).get('theme');
-          if (forced === 'light' || forced === 'dark') theme = forced;
-          document.documentElement.dataset.theme = theme;
-          document.documentElement.style.colorScheme = theme;
+          if (themes.indexOf(forced) >= 0) root.dataset.theme = forced;
+          root.style.colorScheme = root.dataset.theme === 'dark' ? 'dark' : 'light';
           var pattern = new URLSearchParams(location.search).get('pattern');
           if (pattern !== 'checker' && pattern !== 'smoky') {
             pattern = localStorage.getItem('cockpit.glassPattern') === 'checker' ? 'checker' : 'smoky';
           }
-          document.documentElement.dataset.glassPattern = pattern;
+          root.dataset.glassPattern = pattern;
         } catch (error) {
-          document.documentElement.dataset.theme = 'dark';
+          root.dataset.theme = 'dark';
         }
       })();
     </script>

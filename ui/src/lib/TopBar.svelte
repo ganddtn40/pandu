@@ -1,66 +1,48 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
-  import { themeState, setTheme } from './theme.svelte';
+  import { openAppearance } from './design/appearance.svelte';
+  import { openQuickPrompt } from './quick-prompt.svelte';
   import { toast } from './toast-store.svelte';
-
-  let searchInput = $state<HTMLInputElement | null>(null);
-
-  function onKeydown(event: KeyboardEvent): void {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-      event.preventDefault();
-      searchInput?.focus();
-    }
-  }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
-
-<header class="topbar glass" data-glass data-glass-depth="1" data-glass-clip="none">
+<header class="topbar float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none">
   <a class="brand" href="/" data-route aria-label="Cockpit home">
-    <Logo />
+    <Logo size={36} />
     <span class="brand__name">Cockpit</span>
   </a>
 
-  <label class="search">
-    <Icon name="search" size={18} />
-    <input
-      bind:this={searchInput}
-      type="search"
-      placeholder="Search flights"
-      aria-label="Search flights"
-      autocomplete="off"
-      spellcheck="false"
-    />
+  <button class="search" type="button" onclick={openQuickPrompt} aria-label="Open quick prompt">
+    <Icon name="sparkles" size={17} />
+    <span class="search__text">Ask your agent anything</span>
     <kbd>Ctrl K</kbd>
-  </label>
+  </button>
 
-  <div class="segmented" role="group" aria-label="Appearance">
-    <button
-      type="button"
-      aria-pressed={themeState.value === 'light'}
-      onclick={() => setTheme('light')}
-    >
-      <Icon name="sun" size={16} />
-      <span>Light</span>
+  <span class="status-pill status-pill--live topbar__status">
+    <span class="dot dot--live"></span>
+    3 agents
+  </span>
+
+  <div class="topbar__actions">
+    <button class="icon-button" type="button" aria-label="Appearance" onclick={openAppearance}>
+      <Icon name="palette" size={19} />
     </button>
     <button
+      class="icon-button"
       type="button"
-      aria-pressed={themeState.value === 'dark'}
-      onclick={() => setTheme('dark')}
+      aria-label="Notifications"
+      onclick={() => toast('Inbox notifications arrive in Phase 5.')}
     >
-      <Icon name="moon" size={16} />
-      <span>Dark</span>
+      <Icon name="bell" size={19} />
+      <span class="icon-button__dot" aria-hidden="true"></span>
+    </button>
+    <button
+      class="avatar"
+      type="button"
+      aria-label="Account"
+      onclick={() => toast('Accounts stay local. Remote access arrives in Phase 7.')}
+    >
+      G
     </button>
   </div>
-
-  <button
-    class="icon-button"
-    type="button"
-    aria-label="Approvals"
-    onclick={() => toast('Approvals arrive with the next screen.')}
-  >
-    <Icon name="bell" size={19} />
-    <span class="icon-button__dot" aria-hidden="true"></span>
-  </button>
 </header>

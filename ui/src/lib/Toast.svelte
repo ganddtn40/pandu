@@ -4,6 +4,11 @@
 
 {#if toastState.message}
   {#key toastState.id}
-    <div class="toast" role="status">{toastState.message}</div>
+    <div
+      class="toast"
+      role="status"
+    >
+      {toastState.message}
+    </div>
   {/key}
 {/if}

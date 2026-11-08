@@ -1,4 +1,4 @@
-export const MAX_GLASS_SHAPES = 12;
+export const MAX_GLASS_SHAPES = 16;
 export const MAX_DPR = 2;
 export const MIN_GLASS_SIZE = 8;
 

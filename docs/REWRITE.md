@@ -1,6 +1,6 @@
 # Cockpit 0.2.0 — Rewrite decision record
 
-Status: Phase 4 complete — awaiting visual approval
+Status: Phase 4B complete — awaiting visual approval
 Branch: `rewrite`
 Baseline: `main` at `1d65df2` (`feat: release Cockpit 0.1.0`)
 
@@ -20,8 +20,9 @@ The rewrite has three goals:
 
 1. **One small binary.** `cockpit` starts the daemon and serves an embedded UI.
    No Node runtime, no package manager, no background service to babysit.
-2. **Four screens a beginner can understand.** Home, Flights, Approvals,
-   Settings. Everything else is deferred, not deleted from the roadmap.
+2. **Five tabs a beginner can understand.** Home, Inbox, Flights, Market,
+   Settings, plus one global quick prompt. Everything else is deferred, not
+   deleted from the roadmap.
 3. **Real glass, real speed.** A custom WebGL2 glass renderer and Svelte 5 UI,
    with strict size, memory, startup, and proxy-overhead budgets.
 
@@ -66,7 +67,7 @@ never rewritten.
 
 ### 2.2 Storage model worth keeping
 
-The new schema starts from the old one and keeps only what the four screens and
+The new schema starts from the old one and keeps only what the five tabs and
 three capture modes need:
 
 - `projects`, `settings`
@@ -170,13 +171,13 @@ surfaces that warning in the UI.
 | Context Doctor | Token-composition analysis is advanced and provider-specific | [`issues/context-doctor.md`](issues/context-doctor.md) |
 | Provenance | Code-to-prompt attribution needs a trustworthy diff model first | [`issues/provenance.md`](issues/provenance.md) |
 
-Old screens also fold into the four new ones:
+Old screens also fold into the five new tabs:
 
 | Old screen | New home |
 | --- | --- |
 | Overview, Analytics | Home |
 | Sessions, Replay, Session detail | Flights |
-| Guards, Trust | Home toggle + Approvals + Flights badge |
+| Guards, Trust | Home toggle + Inbox + Flights badge |
 | Pair, Settings, Doctor | Settings + first-run wizard |
 | Arena, Journal, Plugins, Brain, Handoff, Debt, Context, Understanding | Deferred; see issues |
 
@@ -187,7 +188,7 @@ Old screens also fold into the four new ones:
 | Backend | TypeScript/Node | Rust 2024, tokio, axum, rusqlite |
 | Desktop | Tauri 2 + Node daemon | Tauri 2 embedding the Rust daemon |
 | Mobile | Capacitor app | Tauri 2 Android companion |
-| UI | React + Vite, amber terminal style | Svelte 5 + Vite, WebGL2 glass, visionOS-inspired |
+| UI | React + Vite, amber terminal style | Svelte 5 + Vite, WebGL2 glass, design v2 bento |
 | CLI | Node CLI | Single static `cockpit` binary |
 | Capture | Proxy only | Proxy, log-watch, hook/OTel, labeled per flight |
 | Agents | Hand-written integrations | Data-driven TOML adapters |
@@ -200,17 +201,22 @@ Old screens also fold into the four new ones:
 
 ### Screens
 
-1. **Home** — live flight, today's spend, token ring, guard on/off with pending
-   count, recent flights. Every empty state has `Try demo`.
-2. **Flights** — list and detail, timeline scrubber, step inspector (prompt,
+1. **Home** — live flight, today's spend, token ring, guard state with pending
+   count, and rearrangeable/hideable bento widgets (drag on desktop, long-press
+   on phone). Every empty state has `Try demo`.
+2. **Inbox** — approvals and alerts that need a decision, with large
+   Approve/Deny cards and a countdown ring.
+3. **Flights** — list and detail, timeline scrubber, step inspector (prompt,
    response, tool calls), per-step git diff, cost, one trust badge, `Fork from
    here`.
-3. **Approvals** — large Approve/Deny cards with a countdown ring.
-4. **Settings** — Add an agent wizard, language, theme, wallpaper, privacy,
+4. **Market** — agent adapters, shared themes, and the future registry of
+   capture integrations. The registry itself ships in a later phase.
+5. **Settings** — Add an agent wizard, appearance, language, privacy,
    `Report a bug`, about/updates.
 
-First run is a 3-step wizard: pick an agent → copy one command → watch the
-flight appear.
+A global quick prompt (`Ctrl/Cmd+K`, or the Home/phone action button) is
+available from every tab. First run is a 3-step wizard: pick an agent → copy one
+command → watch the flight appear.
 
 ### Capture modes
 
@@ -276,27 +282,40 @@ not break because Cockpit broke.
 | Android APK | < 15 MB |
 | Proxy overhead | < 2 ms p99 |
 
-These are release gates, not aspirations. Phase 8 measures them on a clean
+These are release gates, not aspirations. Phase 12 measures them on a clean
 machine and records the numbers.
 
 ### Visual direction
 
-One large frosted panel (radius 32–40) over a softly blurred wallpaper, nested
-matte translucent tiles (24–28), floating top pill, floating left icon pill, and
-a floating bottom tab pill. Neutral monochrome glass with one accent:
-`#4DA3FF` for live/active. Green and red only for status. Dark theme uses smoky
-glass with cream `#F4EFD8` selected pills. System UI font stack, sentence case,
-tabular numbers. No amber-on-black, no monospace uppercase labels, no serif
-display type, no hero marketing headlines, no radar/grid decoration, no sharp
-corners.
+Design v2: dark graphite bento dashboards, matte cards with 1 px hairlines and
+20–28 px radii, large light numerals, thin charts, one accent, and a subtle
+status glow. A left icon rail and floating glass top bar frame the workspace;
+sheets, modals, toasts, and phone navigation are the only floating glass layers.
+The default accent is warm orange `#FF7A2F`. Dark is the default theme, with
+Light and Frost variants. No amber-on-black, no monospace uppercase labels, no
+serif display type, no hero marketing headlines, no radar/grid decoration, no
+sharp corners.
+
+Three surface styles: Bento Matte (solid cards, no blur), Liquid Glass
+(everything refracts), and Hybrid (default: matte cards, glass floating layers).
+Full appearance customization lives in Settings → Appearance: accent presets,
+corner radius, density, font and size, glass intensity/blur/refraction,
+procedural or user wallpaper, card borders, motion, Performance mode, and
+language. Preferences persist per device and are applied before first paint.
 
 The glass engine is custom WebGL2 in `ui/src/glass`: one canvas renders the
-wallpaper and up to 12 SDF squircle glass shapes with edge refraction,
+wallpaper and up to 16 SDF squircle glass shapes with edge refraction,
 chromatic aberration, specular rim light, tint, and saturation. Blur is
 precomputed at quarter resolution and only recomputed when the wallpaper
 changes. DOM content stays above the canvas with transparent backgrounds.
-Fallbacks: CSS `backdrop-filter`, reduced transparency, reduced motion, and a
-Performance mode setting.
+Fallbacks: CSS `backdrop-filter`, matte surfaces, reduced transparency, reduced
+motion, Performance mode, and `?glass=off`. Overlay sheets use CSS glass over an
+opaque `--sheet-bg` because the canvas sits below the scrims.
+
+Themes are versioned JSON (`cockpit.theme`, version 1), validated on import and
+never executed. Wallpaper images and Performance mode are device-local and are
+never exported. The full token and component contract is in
+[`DESIGN.md`](DESIGN.md).
 
 ## 6. Non-goals for v1
 
@@ -314,13 +333,13 @@ Performance mode setting.
 | Risk | Mitigation |
 | --- | --- |
 | Agent log formats change | Adapters are versioned TOML; fixtures and parser tests; `verified` flag; `doctor` reports drift |
-| WebGL2 unavailable or slow | CSS fallback, reduced-transparency mode, Performance mode, 12-shape cap, on-demand rendering |
-| Binary exceeds 12 MB | `opt-level = "z"`, LTO, strip, `panic = "abort"`, rustls, embedded AVIF/WebP assets, Phase 8 size check |
+| WebGL2 unavailable or slow | CSS fallback, matte surface, reduced-transparency mode, Performance mode, 16-shape cap, on-demand rendering |
+| Binary exceeds 12 MB | `opt-level = "z"`, LTO, strip, `panic = "abort"`, rustls, embedded AVIF/WebP assets, Phase 12 size check |
 | SSE edge cases break clients | Byte-for-byte passthrough; parser only observes a copy; integration tests with mock upstreams; property tests |
 | Fail-open hides real failures | Every degraded path emits a typed warning and a visible UI badge; `doctor` reports recent warnings |
 | Cross-platform paths and file watching | Platform dirs via `directories`, path tests on Windows/macOS/Linux, no shell assumptions |
 | Android pairing exposure | Single-use short codes, hashed tokens, TTL, rate limits, loopback trust, explicit pairing screen |
-| Rewrite stalls before parity | Phases with hard gates; legacy code remains runnable until Phase 8; cut features are issue drafts, not silent removals |
+| Rewrite stalls before parity | Phases with hard gates; legacy code remains runnable until Phase 12; cut features are issue drafts, not silent removals |
 | Rust toolchain absent on this machine | Phase 0 writes configs and CI; Phase 1 starts by installing stable Rust or documenting the blocker before code changes |
 
 ## 8. Phase plan
@@ -332,10 +351,15 @@ Performance mode setting.
 | 2 | Adapters A/B/C, TOML loader, CLI (`run`, `demo`, `doctor`, `report`, `pair`) | Adapter fixture tests; CLI smoke tests |
 | 3 | Git snapshots, replay data, guards, budgets, approvals API | Snapshot safety tests; guard/budget tests |
 | 4 | Svelte shell, glass engine, `/glass-preview`, screenshots | Automated visual checks + user visual approval (hard stop) |
-| 5 | Four screens, onboarding wizard, i18n catalogs | Playwright e2e; missing-key CI passes |
-| 6 | Tauri desktop + Android, pairing, packaging, CI/CD | Bundle builds; Android pairing test |
-| 7 | Beginner docs, READMEs in 14 languages, community files | Link check; translation key check |
-| 8 | Final verification, CHANGELOG, v0.2.0 notes, publish commands | All budgets measured; release checklist signed off |
+| 4B | Design v2: tokens, surfaces, appearance engine, bento components, logo, screenshots | Contrast/style/visual checks + user visual approval (hard stop) |
+| 5 | Five screens wired to the daemon, onboarding wizard, i18n catalogs | Playwright e2e; missing-key CI passes |
+| 6 | Agent control and notifications | Live flight, approval, and notification tests |
+| 7 | Remote access security | Pairing, token, and non-loopback access tests |
+| 8 | Market registry | Registry install/remove and theme-sharing tests |
+| 9 | Model, effort, and context controls | Provider capability tests; no silent defaults |
+| 10 | Updates and backups | Manual update check; backup/restore test |
+| 11 | Packaging: Windows, Android, Web/PWA | Signed bundles; clean-machine install |
+| 12 | Docs, benchmarks, 14 languages, v0.3.0 | All budgets measured; release checklist signed off |
 
 ### Phase 2 implementation notes
 
@@ -359,7 +383,7 @@ Performance mode setting.
   never pass through a fake running state.
 - `cockpit pair` issues a six-digit, hashed, single-use code with a five-minute
   TTL and five attempts. A claim returns a 64-hex device token; only its hash is
-  stored. Requiring the token on non-loopback requests lands in Phase 6.
+  stored. Requiring the token on non-loopback requests lands in Phase 7.
 - CLI commands `run`, `demo`, `doctor`, `report`, and `pair` are in place.
   `cockpit run` starts an owned daemon if needed, sets proxy environment
   variables from the matched adapter, and passes a local sentinel instead of the
@@ -407,14 +431,14 @@ Performance mode setting.
 
 - `ui/` is a standalone Svelte 5 + TypeScript + Vite app with two gate routes:
   `/` (shell preview) and `/glass-preview` (visual test page). The daemon keeps
-  its placeholder until Phase 5/6, so a clean `cargo build` does not depend on
-  `ui/dist`.
+  its placeholder until the UI is embedded during packaging, so a clean
+  `cargo build` does not depend on `ui/dist`.
 - The glass engine is one custom WebGL2 canvas in `ui/src/glass`. A procedural
   wallpaper is rendered once to a full-resolution texture; a quarter-resolution
-  two-pass blur feeds instanced SDF squircle shapes (max 12) with edge
-  refraction, chromatic aberration, specular rim light, tint, depth, and pointer
-  parallax. Rendering is on demand, capped at 60 fps desktop / 30 fps mobile,
-  and paused while the page is hidden.
+  two-pass blur feeds instanced SDF squircle shapes (max 12 at Phase 4, raised
+  to 16 in Phase 4B) with edge refraction, chromatic aberration, specular rim
+  light, tint, depth, and pointer parallax. Rendering is on demand, capped at
+  60 fps desktop / 30 fps mobile, and paused while the page is hidden.
 - Inner tiles are clipped to their nearest `[data-glass]` ancestor in the
   fragment shader, so scrolling content cannot paint outside the main panel.
 - Fallbacks: `?glass=off`, `?perf=1` or the stored Performance preference,
@@ -441,7 +465,7 @@ Performance mode setting.
 - The built UI is 27.2 KB JavaScript + 4.1 KB CSS gzip, well under the 150 KB
   budget.
 - Screenshots are committed in `docs/screenshots/phase4/`. Phase 4 stops here
-  for user visual approval before the four screens are built.
+  for user visual approval before the five screens are wired to the daemon.
 
 ### Phase 4 visual review fixes
 
@@ -466,7 +490,61 @@ Performance mode setting.
   redraws. The debug readout is excluded from the mutation observer, and a
   Playwright test asserts zero canvas redraws after three idle seconds.
 
-## 9. Toolchain status
+### Phase 4B implementation notes (Design v2)
+
+- Design v2 replaces the pure-glass shell with graphite bento dashboards: matte
+  cards, 1 px hairlines, 20–28 px card radii, large light numerals, thin charts,
+  one accent, and a left icon rail under a floating glass top bar. Floating
+  sheets, toasts, modals, and the phone tab bar are the only glass chrome.
+- Three surface styles: Bento Matte, Liquid Glass, and Hybrid (default: matte
+  cards, glass floating layers). Themes: Dark (default), Light, Frost. Accent
+  presets: Orange (default `#FF7A2F`), Cream, Blue, Green, Violet, Silver, Mono.
+- Design tokens are data attributes on `<html>` (`data-theme`, `data-surface`,
+  `data-accent`, `data-radius`, `data-density`, `data-font`, `data-motion`,
+  `data-borders`, `data-wallpaper`, `data-performance`). `ui/index.html` applies
+  the stored design before first paint, so reloads do not flash the defaults.
+- The IA is now five tabs: Home, Inbox, Flights, Market, Settings. Approvals
+  live in Inbox. A global quick prompt opens from `Ctrl/Cmd+K`, the Home action,
+  or the phone action button. `/welcome` previews onboarding; `/glass-preview`
+  remains the internal rendering lab.
+- Settings → Appearance is a full customization sheet with instant live preview:
+  theme, surface, accent, radius, density, font and size, glass
+  intensity/blur/refraction, procedural/user/none wallpaper, card borders,
+  motion, Performance mode, and language. Preferences persist per device under
+  `cockpit.design`; the wallpaper image uses `cockpit.wallpaperImage`. Legacy
+  theme/performance/pattern keys migrate automatically.
+- Themes are versioned JSON (`cockpit.theme`, version 1). Export writes
+  `cockpit-theme.json`; import validates every field, clamps numbers, rejects
+  unknown enum values, limits files to 32 KB, and never executes code. Share
+  links encode the same object in `?share=`. Wallpaper images and Performance
+  mode are device-local and are never exported.
+- Home is a bento grid of rearrangeable and hideable widgets. Desktop uses drag
+  and drop; phone uses long-press edit mode. Order and visibility persist under
+  `cockpit.widgets`; a reset action restores the default layout.
+- The glass engine now supports theme-aware tint and wallpaper scrims (light and
+  frost are light surfaces; only dark is smoked), accent tinting, surface layer
+  filtering (`card` vs `float`), intensity/blur/refraction uniforms, image
+  wallpapers, and dynamic matte/Performance switching without a reload. The
+  shape cap is 16.
+- Overlay surfaces (appearance sheet, quick prompt, toast, phone tab bar) use CSS
+  glass over an opaque `--sheet-bg` instead of WebGL shapes, because the canvas
+  sits below their scrims. Playwright asserts their background alpha stays at or
+  above 0.9.
+- Accent contrast inks were corrected for light/frost orange, blue, and green so
+  text on accent fills reaches 4.5:1. The CSS and TypeScript palettes are gated
+  by a parity test.
+- A new inline squircle logo, wordmark, mono mark, favicon, and a Playwright
+  export script live in `design/logo/`. Generated PNGs are gitignored.
+- `pnpm check` is clean (0 errors, 0 warnings). Vitest runs 10 files / 95 tests.
+  The build is ~150.0 KB JavaScript (49.6 KB gzip) and ~50.1 KB CSS (9.7 KB
+  gzip). Playwright runs 23 tests: desktop and phone, three themes, three surface
+  styles, fallback, live appearance, Performance mode, quick prompt, widget
+  editing, theme import/export/share, wallpaper storage, focus rings, and touch
+  targets. Screenshots are in `docs/screenshots/phase4b/`.
+- Phase 4B stops here for user visual approval before Phase 5 wires the screens
+  to the daemon.
+
+
 
 At Phase 0, this machine had Node `v24.21.0` and pnpm `12.9.1`, but no `cargo`,
 `rustc`, or `rustup`. Phase 1 installed a repo-local stable toolchain under the
@@ -498,14 +576,20 @@ committed and updated by the workspace build.
 ## 10. Definition of done for the rewrite
 
 - One `cockpit` binary starts the daemon and UI with no Node runtime.
-- Four screens work on desktop and phone widths, light and dark.
+- Five tabs — Home, Inbox, Flights, Market, Settings — work on desktop and phone
+  widths in Dark, Light, and Frost, with all three surface styles.
+- The appearance sheet, theme JSON import/export/share, bento widgets, and quick
+  prompt work without a reload and persist per device.
+- Platform support is stated honestly: Web (PWA), Android, and Windows today;
+  macOS, iOS, and Linux planned. Nothing unsupported is advertised as working.
 - Proxy, log-watch, and hook/OTel capture produce the same flight model with an
   honest per-flight label.
 - SSE passthrough is byte-identical and unbuffered.
 - A failed recorder never fails an agent request.
 - Git snapshots never touch the user's index, HEAD, branches, or reflog.
 - All 14 language catalogs load, with RTL for Arabic and a missing-key CI gate.
-- Installers exist for Windows, macOS, Linux, npm, winget, scoop, and Android.
+- Installers exist for Windows, Android, Web/PWA, npm, winget, and scoop.
+  macOS, iOS, and Linux installers are planned, not promised for v0.2.0.
 - `cargo fmt`, clippy with `-D warnings`, `cargo test`, cargo-deny, Playwright,
   and the size/RAM/startup/proxy budgets all pass.
 - `legacy/` is deleted in its own commit only after parity is demonstrated.

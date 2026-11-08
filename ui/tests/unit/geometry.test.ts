@@ -131,7 +131,7 @@ describe('packGlassInstance', () => {
 describe('constants', () => {
   it('stays within the instancing budget', () => {
     expect(MAX_GLASS_SHAPES).toBeGreaterThan(0);
-    expect(MAX_GLASS_SHAPES).toBeLessThanOrEqual(12);
+    expect(MAX_GLASS_SHAPES).toBeLessThanOrEqual(16);
     expect(GLASS_INSTANCE_FLOATS).toBe(14);
   });
 });

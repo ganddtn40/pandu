@@ -1,4 +1,14 @@
-import { clampDpr, hasGlassSize, packGlassInstance, parseRadius, GLASS_INSTANCE_FLOATS, MAX_GLASS_SHAPES } from './geometry';
+import { designState } from '../lib/design/design.svelte';
+import type { DesignPreferences, ThemeMode } from '../lib/design/types';
+import {
+  clampDpr,
+  hasGlassSize,
+  isGlassRectVisible,
+  packGlassInstance,
+  parseRadius,
+  GLASS_INSTANCE_FLOATS,
+  MAX_GLASS_SHAPES,
+} from './geometry';
 import {
   BLUR_FRAG,
   COPY_FRAG,
@@ -7,8 +17,6 @@ import {
   WALLPAPER_FRAG,
   WALLPAPER_VERT,
 } from './shaders';
-
-type Theme = 'light' | 'dark';
 
 interface GlassStats {
   mode: 'webgl' | 'fallback';
@@ -33,11 +41,30 @@ interface ShapeStyle {
   opacity: number;
 }
 
-const STYLES: Record<Theme, Record<number, ShapeStyle>> = {
+interface EngineDesign {
+  theme: ThemeMode;
+  surface: DesignPreferences['surface'];
+  accent: [number, number, number];
+  glassIntensity: number;
+  glassBlur: number;
+  glassRefraction: number;
+  wallpaper: DesignPreferences['wallpaper'];
+  wallpaperImage: string | null;
+  borders: boolean;
+  motion: DesignPreferences['motion'];
+  performance: boolean;
+}
+
+const STYLES: Record<ThemeMode, Record<number, ShapeStyle>> = {
   light: {
     1: { tint: 0.14, opacity: 0.74 },
     2: { tint: 0.11, opacity: 0.64 },
     3: { tint: 0.09, opacity: 0.52 },
+  },
+  frost: {
+    1: { tint: 0.15, opacity: 0.76 },
+    2: { tint: 0.12, opacity: 0.66 },
+    3: { tint: 0.1, opacity: 0.54 },
   },
   dark: {
     1: { tint: 0.68, opacity: 0.86 },
@@ -46,14 +73,14 @@ const STYLES: Record<Theme, Record<number, ShapeStyle>> = {
   },
 };
 
+const DEFAULT_ACCENT: [number, number, number] = [1, 0.478, 0.184];
+
 export interface GlassController {
   destroy: () => void;
   refresh: () => void;
 }
 
 export function initGlass(canvas: HTMLCanvasElement, forceFallback = false): GlassController {
-  const html = document.documentElement;
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const reducedTransparency = window.matchMedia('(prefers-reduced-transparency: reduce)').matches;
 
   if (forceFallback || reducedTransparency) {
@@ -74,7 +101,7 @@ export function initGlass(canvas: HTMLCanvasElement, forceFallback = false): Gla
   }
 
   try {
-    return createEngine(canvas, gl, reducedMotion);
+    return createEngine(canvas, gl);
   } catch (error) {
     console.warn('[cockpit] glass renderer could not start', error);
     return fallback(canvas, 'init-failed');
@@ -86,9 +113,7 @@ function fallback(canvas: HTMLCanvasElement, reason: string): GlassController {
   const html = document.documentElement;
   html.dataset.glassMode = 'fallback';
   html.dataset.glassReason = reason;
-  for (const element of document.querySelectorAll<HTMLElement>('[data-glass]')) {
-    delete element.dataset.glassRendered;
-  }
+  clearRendered();
   window.__cockpitGlassMode = 'fallback';
   window.__cockpitGlassReady = true;
   window.__cockpitGlassStats = {
@@ -105,11 +130,65 @@ function fallback(canvas: HTMLCanvasElement, reason: string): GlassController {
   };
 }
 
-function createEngine(
-  canvas: HTMLCanvasElement,
-  gl: WebGL2RenderingContext,
-  reducedMotion: boolean,
-): GlassController {
+function clearRendered(): void {
+  for (const element of document.querySelectorAll<HTMLElement>('[data-glass-rendered]')) {
+    delete element.dataset.glassRendered;
+  }
+}
+
+function parseColor(value: string): [number, number, number] {
+  const text = value.trim();
+  if (text.startsWith('#')) {
+    const digits = text.slice(1);
+    const full =
+      digits.length === 3
+        ? digits
+            .split('')
+            .map((digit) => digit + digit)
+            .join('')
+        : digits;
+    if (full.length !== 6) return DEFAULT_ACCENT;
+    return [
+      Number.parseInt(full.slice(0, 2), 16) / 255,
+      Number.parseInt(full.slice(2, 4), 16) / 255,
+      Number.parseInt(full.slice(4, 6), 16) / 255,
+    ];
+  }
+  const match = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(text);
+  if (!match) return DEFAULT_ACCENT;
+  return [Number(match[1]) / 255, Number(match[2]) / 255, Number(match[3]) / 255];
+}
+
+function readTheme(): ThemeMode {
+  const value = document.documentElement.dataset.theme;
+  return value === 'light' ? 'light' : value === 'frost' ? 'frost' : 'dark';
+}
+
+function readDesign(): EngineDesign {
+  const value = designState.value;
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent');
+  return {
+    theme: value.theme,
+    surface: value.surface,
+    accent: parseColor(accent),
+    glassIntensity: value.glassIntensity,
+    glassBlur: value.glassBlur,
+    glassRefraction: value.glassRefraction,
+    wallpaper: value.wallpaper,
+    wallpaperImage: value.wallpaperImage,
+    borders: value.borders,
+    motion: value.motion,
+    performance: value.performance,
+  };
+}
+
+function themeValue(theme: ThemeMode): number {
+  if (theme === 'light') return 0;
+  if (theme === 'frost') return 2;
+  return 1;
+}
+
+function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): GlassController {
   const wallpaperProgram = program(gl, WALLPAPER_VERT, WALLPAPER_FRAG);
   const copyProgram = program(gl, WALLPAPER_VERT, COPY_FRAG);
   const blurProgram = program(gl, WALLPAPER_VERT, BLUR_FRAG);
@@ -119,14 +198,23 @@ function createEngine(
     'uResolution',
     'uTheme',
     'uPattern',
+    'uWallpaper',
+    'uAccent',
+    'uImage',
+    'uImageAspect',
   ]);
   const copyUniforms = uniforms(gl, copyProgram, ['uTexture']);
-  const blurUniforms = uniforms(gl, blurProgram, ['uTexture', 'uTexel', 'uDirection']);
+  const blurUniforms = uniforms(gl, blurProgram, ['uTexture', 'uTexel', 'uDirection', 'uScale']);
   const glassUniforms = uniforms(gl, glassProgram, [
     'uBlur',
     'uResolution',
     'uTheme',
     'uPointer',
+    'uAccent',
+    'uIntensity',
+    'uRefraction',
+    'uBorders',
+    'uMotion',
   ]);
 
   const emptyVao = gl.createVertexArray();
@@ -164,8 +252,18 @@ function createEngine(
   gl.bindVertexArray(null);
   gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
-  let theme: Theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-  let pattern = document.documentElement.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
+  const mediaReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const html = document.documentElement;
+  let design = readDesign();
+  let active = !design.performance && design.surface !== 'matte';
+  let theme = design.theme;
+  let pattern: 'smoky' | 'checker' =
+    html.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
+  let accent = design.accent;
+  let intensity = design.glassIntensity / 100;
+  let refraction = 0.25 + (design.glassRefraction / 100) * 1.5;
+  let blurScale = 0.25 + (design.glassBlur / 100) * 1.5;
+  let motion = design.motion === 'full' && !mediaReducedMotion;
   let shapes: ShapeMeta[] = [];
   let frame = 0;
   let lastFrame = 0;
@@ -197,6 +295,10 @@ function createEngine(
   const textures: WebGLTexture[] = [];
   const framebuffers: WebGLFramebuffer[] = [];
   let blurTexture: WebGLTexture | null = null;
+  let imageTexture: WebGLTexture | null = null;
+  let imageAspect = 1;
+  let imageSource: string | null = null;
+  let imageLoading = false;
 
   const isMobile = window.matchMedia('(max-width: 720px)').matches;
   const minFrameMs = isMobile ? 33 : 16;
@@ -215,33 +317,19 @@ function createEngine(
   });
 
   const attributeObserver = new MutationObserver(() => {
-    let dirty = false;
-    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-    if (nextTheme !== theme) {
-      theme = nextTheme;
-      dirty = true;
-    }
-    const nextPattern =
-      document.documentElement.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
-    if (nextPattern !== pattern) {
-      pattern = nextPattern;
-      dirty = true;
-    }
-    if (!dirty) return;
-    blurDirty = true;
-    requestRender();
+    syncDesign();
   });
 
   const statsTimer = window.setInterval(() => {
-    stats.mode = 'webgl';
-    stats.shapes = shapes.length;
+    stats.mode = active ? 'webgl' : 'fallback';
+    stats.shapes = active ? shapes.length : 0;
     stats.fps = redrawsThisSecond;
     stats.redrawsPerSecond = redrawsThisSecond;
     redrawsThisSecond = 0;
   }, 1000);
 
   const onPointerMove = (event: PointerEvent): void => {
-    if (reducedMotion) return;
+    if (!motion) return;
     targetX = (event.clientX / Math.max(window.innerWidth, 1)) * 2 - 1;
     targetY = (event.clientY / Math.max(window.innerHeight, 1)) * 2 - 1;
     pointerSettling = true;
@@ -266,13 +354,14 @@ function createEngine(
     }
   };
 
-  const onThemeEvent = (): void => {
-    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-    const nextPattern =
-      document.documentElement.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
-    if (nextTheme === theme && nextPattern === pattern) return;
-    theme = nextTheme;
-    pattern = nextPattern;
+  const onDesignEvent = (): void => {
+    syncDesign();
+  };
+
+  const onPatternEvent = (): void => {
+    const next = html.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
+    if (next === pattern) return;
+    pattern = next;
     blurDirty = true;
     requestRender();
   };
@@ -284,7 +373,7 @@ function createEngine(
 
   function tick(time: number): void {
     frame = 0;
-    if (destroyed || document.visibilityState === 'hidden') return;
+    if (destroyed || !active || document.visibilityState === 'hidden') return;
     if (time - lastFrame < minFrameMs) {
       frame = window.requestAnimationFrame(tick);
       return;
@@ -307,40 +396,151 @@ function createEngine(
     }
   }
 
-  function rebuildShapes(): void {
-    const next: ShapeMeta[] = [];
-    for (const el of document.querySelectorAll<HTMLElement>('[data-glass]')) {
-      const rect = el.getBoundingClientRect();
-      if (!hasGlassSize(rect)) continue;
-      const style = getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-        continue;
-      }
-      const depth = Math.min(Math.max(Number(el.dataset.glassDepth) || 2, 1), 3);
-      const radius = parseRadius(style.borderTopLeftRadius || style.borderRadius, rect.width, rect.height);
-      const clipEl = findClip(el);
-      let clipRect: DOMRect | null = null;
-      let clipRadius = 0;
-      if (clipEl) {
-        clipRect = clipEl.getBoundingClientRect();
-        if (!hasGlassSize(clipRect)) {
-          clipRect = null;
-        } else {
-          const clipStyle = getComputedStyle(clipEl);
-          clipRadius = parseRadius(
-            clipStyle.borderTopLeftRadius || clipStyle.borderRadius,
-            clipRect.width,
-            clipRect.height,
-          );
-        }
-      }
-      next.push({ el, depth, radius, clipEl, clipRadius, rect, clipRect });
-      if (next.length >= MAX_GLASS_SHAPES) break;
+  function syncDesign(): void {
+    const next = readDesign();
+    const previous = design;
+    design = next;
+    theme = next.theme;
+    accent = next.accent;
+    intensity = next.glassIntensity / 100;
+    refraction = 0.25 + (next.glassRefraction / 100) * 1.5;
+    blurScale = 0.25 + (next.glassBlur / 100) * 1.5;
+    motion = next.motion === 'full' && !mediaReducedMotion;
+    if (!motion) pointerSettling = false;
+
+    if (next.theme !== previous.theme || next.glassBlur !== previous.glassBlur) {
+      blurDirty = true;
+    }
+    if (
+      next.wallpaper !== previous.wallpaper ||
+      next.wallpaperImage !== previous.wallpaperImage
+    ) {
+      syncWallpaperImage();
+      blurDirty = true;
     }
 
-    for (const element of document.querySelectorAll<HTMLElement>('[data-glass-rendered]')) {
-      delete element.dataset.glassRendered;
+    const nextActive = !next.performance && next.surface !== 'matte';
+    if (nextActive !== active) {
+      setActive(nextActive, next.performance ? 'performance' : 'matte');
     }
+
+    refreshQueued = true;
+    geometryDirty = true;
+    requestRender();
+  }
+
+  function setActive(next: boolean, reason: string): void {
+    active = next;
+    if (!active) {
+      canvas.hidden = true;
+      clearRendered();
+      shapes = [];
+      stats.mode = 'fallback';
+      stats.shapes = 0;
+      stats.fps = 0;
+      stats.redrawsPerSecond = 0;
+      html.dataset.glassMode = 'fallback';
+      html.dataset.glassReason = reason;
+      window.__cockpitGlassMode = 'fallback';
+      window.__cockpitGlassReady = true;
+      return;
+    }
+    canvas.hidden = false;
+    delete html.dataset.glassReason;
+    html.dataset.glassMode = 'pending';
+    window.__cockpitGlassMode = 'webgl';
+    // Render once more to publish the webgl mode, even after a dynamic pause.
+    ready = false;
+    blurDirty = true;
+    geometryDirty = true;
+    refreshQueued = true;
+    requestRender();
+  }
+
+  function syncWallpaperImage(): void {
+    const source = design.wallpaper === 'image' ? design.wallpaperImage : null;
+    if (!source || source === imageSource) return;
+    imageSource = source;
+    imageLoading = true;
+    const image = new Image();
+    image.onload = () => {
+      imageLoading = false;
+      if (destroyed) return;
+      if (imageTexture) gl.deleteTexture(imageTexture);
+      const texture = gl.createTexture();
+      if (!texture) return;
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      imageTexture = texture;
+      imageAspect = image.naturalWidth / Math.max(image.naturalHeight, 1);
+      blurDirty = true;
+      requestRender();
+    };
+    image.onerror = () => {
+      imageLoading = false;
+    };
+    image.src = source;
+  }
+
+  function wallpaperMode(): number {
+    if (pattern === 'checker') return 0;
+    if (design.wallpaper === 'image' && imageTexture && !imageLoading) return 2;
+    if (design.wallpaper === 'none') return 1;
+    return 0;
+  }
+
+  function layerAllowed(element: HTMLElement): boolean {
+    if (design.surface === 'matte') return false;
+    if (design.surface === 'hybrid') return element.dataset.glassLayer === 'float';
+    return true;
+  }
+
+  function rebuildShapes(): void {
+    const next: ShapeMeta[] = [];
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    if (active) {
+      for (const el of document.querySelectorAll<HTMLElement>('[data-glass]')) {
+        if (!layerAllowed(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (!hasGlassSize(rect) || !isGlassRectVisible(rect, viewport)) continue;
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+          continue;
+        }
+        const depth = Math.min(Math.max(Number(el.dataset.glassDepth) || 2, 1), 3);
+        const radius = parseRadius(
+          style.borderTopLeftRadius || style.borderRadius,
+          rect.width,
+          rect.height,
+        );
+        const clipEl = findClip(el);
+        let clipRect: DOMRect | null = null;
+        let clipRadius = 0;
+        if (clipEl) {
+          clipRect = clipEl.getBoundingClientRect();
+          if (!hasGlassSize(clipRect)) {
+            clipRect = null;
+          } else {
+            const clipStyle = getComputedStyle(clipEl);
+            clipRadius = parseRadius(
+              clipStyle.borderTopLeftRadius || clipStyle.borderRadius,
+              clipRect.width,
+              clipRect.height,
+            );
+          }
+        }
+        next.push({ el, depth, radius, clipEl, clipRadius, rect, clipRect });
+        if (next.length >= MAX_GLASS_SHAPES) break;
+      }
+    }
+
+    clearRendered();
     for (const shape of next) {
       shape.el.dataset.glassRendered = 'true';
     }
@@ -406,13 +606,20 @@ function createEngine(
     const quarterHeight = Math.max(Math.floor(canvasHeight / 4), 1);
     if (!blurTexture || textures.length < 4) return;
 
-    // Render the expensive procedural wallpaper once, then reuse the texture.
+    // Render the wallpaper once, then reuse the texture. The procedural path is
+    // the expensive one; the image path is a single texture sample.
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[0] ?? null);
     gl.viewport(0, 0, canvasWidth, canvasHeight);
     gl.useProgram(wallpaperProgram);
     gl.uniform2f(wallpaperUniforms.uResolution ?? null, cssWidth, cssHeight);
-    gl.uniform1f(wallpaperUniforms.uTheme ?? null, theme === 'dark' ? 1 : 0);
+    gl.uniform1f(wallpaperUniforms.uTheme ?? null, themeValue(theme));
     gl.uniform1f(wallpaperUniforms.uPattern ?? null, pattern === 'checker' ? 1 : 0);
+    gl.uniform1f(wallpaperUniforms.uWallpaper ?? null, wallpaperMode());
+    gl.uniform3f(wallpaperUniforms.uAccent ?? null, accent[0], accent[1], accent[2]);
+    gl.uniform1f(wallpaperUniforms.uImageAspect ?? null, imageAspect);
+    gl.uniform1i(wallpaperUniforms.uImage ?? null, 1);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, imageTexture);
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
@@ -428,6 +635,7 @@ function createEngine(
     gl.useProgram(blurProgram);
     gl.uniform1i(blurUniforms.uTexture ?? null, 0);
     gl.uniform2f(blurUniforms.uTexel ?? null, 1 / quarterWidth, 1 / quarterHeight);
+    gl.uniform1f(blurUniforms.uScale ?? null, blurScale);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[2] ?? null);
     gl.viewport(0, 0, quarterWidth, quarterHeight);
@@ -497,7 +705,7 @@ function createEngine(
         data.set(packed, index * GLASS_INSTANCE_FLOATS);
       }
 
-      if (!reducedMotion && pointerSettling) {
+      if (motion && pointerSettling) {
         pointerX += (targetX - pointerX) * 0.18;
         pointerY += (targetY - pointerY) * 0.18;
         if (Math.abs(targetX - pointerX) < 0.002 && Math.abs(targetY - pointerY) < 0.002) {
@@ -512,8 +720,13 @@ function createEngine(
       gl.useProgram(glassProgram);
       gl.uniform1i(glassUniforms.uBlur ?? null, 0);
       gl.uniform2f(glassUniforms.uResolution ?? null, cssWidth, cssHeight);
-      gl.uniform1f(glassUniforms.uTheme ?? null, theme === 'dark' ? 1 : 0);
+      gl.uniform1f(glassUniforms.uTheme ?? null, themeValue(theme));
       gl.uniform2f(glassUniforms.uPointer ?? null, pointerX, pointerY);
+      gl.uniform3f(glassUniforms.uAccent ?? null, accent[0], accent[1], accent[2]);
+      gl.uniform1f(glassUniforms.uIntensity ?? null, intensity);
+      gl.uniform1f(glassUniforms.uRefraction ?? null, refraction);
+      gl.uniform1f(glassUniforms.uBorders ?? null, design.borders ? 1 : 0);
+      gl.uniform1f(glassUniforms.uMotion ?? null, motion ? 1 : 0);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, blurTexture);
       gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
@@ -530,27 +743,42 @@ function createEngine(
 
     if (!ready) {
       ready = true;
-      const html = document.documentElement;
       html.dataset.glassMode = 'webgl';
       html.dataset.glassRenderer = 'webgl2';
+      delete html.dataset.glassReason;
       window.__cockpitGlassMode = 'webgl';
       window.__cockpitGlassReady = true;
     }
   }
 
-  attributeObserver.observe(document.documentElement, {
+  attributeObserver.observe(html, {
     attributes: true,
-    attributeFilter: ['data-theme', 'data-glass-pattern'],
+    attributeFilter: [
+      'data-theme',
+      'data-surface',
+      'data-accent',
+      'data-borders',
+      'data-motion',
+      'data-wallpaper',
+      'data-performance',
+      'data-glass-pattern',
+    ],
   });
   mutationObserver.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('pointermove', onPointerMove, { passive: true });
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
   window.addEventListener('resize', onResize, { passive: true });
-  window.addEventListener('cockpit:theme', onThemeEvent);
-  window.addEventListener('cockpit:pattern', onThemeEvent);
+  window.addEventListener('cockpit:design', onDesignEvent);
+  window.addEventListener('cockpit:theme', onDesignEvent);
+  window.addEventListener('cockpit:pattern', onPatternEvent);
   document.addEventListener('visibilitychange', onVisibility);
 
-  requestRender();
+  syncWallpaperImage();
+  if (!active) {
+    setActive(false, design.performance ? 'performance' : 'matte');
+  } else {
+    requestRender();
+  }
 
   return {
     destroy: () => {
@@ -563,11 +791,13 @@ function createEngine(
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('scroll', onScroll, { capture: true });
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('cockpit:theme', onThemeEvent);
-      window.removeEventListener('cockpit:pattern', onThemeEvent);
+      window.removeEventListener('cockpit:design', onDesignEvent);
+      window.removeEventListener('cockpit:theme', onDesignEvent);
+      window.removeEventListener('cockpit:pattern', onPatternEvent);
       document.removeEventListener('visibilitychange', onVisibility);
       for (const texture of textures) gl.deleteTexture(texture);
       for (const framebuffer of framebuffers) gl.deleteFramebuffer(framebuffer);
+      if (imageTexture) gl.deleteTexture(imageTexture);
       gl.deleteBuffer(cornerBuffer);
       gl.deleteBuffer(instanceBuffer);
       gl.deleteVertexArray(emptyVao);

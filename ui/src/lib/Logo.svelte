@@ -1,29 +1,87 @@
-<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-  <circle
-    cx="16"
-    cy="16"
-    r="12.4"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="2.3"
-    opacity="0.92"
-  ></circle>
-  <circle
-    cx="16"
-    cy="16"
-    r="7.4"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1"
-    opacity="0.3"
-  ></circle>
+<script lang="ts">
+  let { size = 36, className = '' }: { size?: number; className?: string } = $props();
+</script>
+
+<svg
+  class={className}
+  width={size}
+  height={size}
+  viewBox="0 0 64 64"
+  role="img"
+  aria-label="Cockpit"
+>
+  <defs>
+    <linearGradient id="cockpit-mark-shell" x1="10" y1="6" x2="54" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3a424d" />
+      <stop offset="0.52" stop-color="#1a1f26" />
+      <stop offset="1" stop-color="#0b0e12" />
+    </linearGradient>
+    <linearGradient id="cockpit-mark-ring" x1="18" y1="16" x2="46" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.96" />
+      <stop offset="0.55" stop-color="#c9d4df" stop-opacity="0.86" />
+      <stop offset="1" stop-color="#7f8d9c" stop-opacity="0.72" />
+    </linearGradient>
+    <linearGradient id="cockpit-mark-gloss" x1="14" y1="6" x2="46" y2="38" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28" />
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.04" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <radialGradient id="cockpit-mark-glow" cx="0.72" cy="0.18" r="0.8">
+      <stop offset="0" stop-color="#ffb27a" stop-opacity="0.28" />
+      <stop offset="1" stop-color="#ff7a2f" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="cockpit-mark-accent" x1="38" y1="16" x2="50" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb27a" />
+      <stop offset="1" stop-color="#ff6a1a" />
+    </linearGradient>
+  </defs>
+
   <path
-    d="M16 16 16 9.4"
+    d="M32 4C49.8 4 60 14.2 60 32S49.8 60 32 60 4 49.8 4 32 14.2 4 32 4Z"
+    fill="url(#cockpit-mark-shell)"
+  />
+  <path
+    d="M32 4C49.8 4 60 14.2 60 32S49.8 60 32 60 4 49.8 4 32 14.2 4 32 4Z"
+    fill="url(#cockpit-mark-glow)"
+  />
+  <path
+    d="M32 4C49.8 4 60 14.2 60 32S49.8 60 32 60 4 49.8 4 32 14.2 4 32 4Z"
+    fill="url(#cockpit-mark-gloss)"
+  />
+
+  <circle
+    cx="32"
+    cy="32"
+    r="18.5"
     fill="none"
-    stroke="currentColor"
+    stroke="url(#cockpit-mark-ring)"
+    stroke-width="2.6"
+  />
+  <circle cx="32" cy="32" r="12.6" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1" />
+  <path
+    d="M32 32 32 19.8"
+    fill="none"
+    stroke="#ffffff"
+    stroke-opacity="0.7"
+    stroke-width="2.1"
+    stroke-linecap="round"
+  />
+  <path
+    d="M32 32 39.6 39.6"
+    fill="none"
+    stroke="#ffffff"
+    stroke-opacity="0.28"
     stroke-width="1.6"
     stroke-linecap="round"
-    opacity="0.55"
-  ></path>
-  <circle cx="16" cy="8.6" r="2.3" fill="currentColor"></circle>
+  />
+  <circle cx="32" cy="19.8" r="3.3" fill="url(#cockpit-mark-accent)" />
+  <circle cx="32" cy="19.8" r="1.2" fill="#fff6ee" fill-opacity="0.9" />
+  <path
+    d="M17.4 17.4C21.2 13.6 26.2 11.4 31.6 11.2"
+    fill="none"
+    stroke="#ffffff"
+    stroke-opacity="0.42"
+    stroke-width="1.4"
+    stroke-linecap="round"
+  />
 </svg>

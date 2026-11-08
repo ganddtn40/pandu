@@ -1,40 +1,40 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import Logo from './Logo.svelte';
+  import { routeState } from './router.svelte';
   import { toast } from './toast-store.svelte';
 
   interface NavItem {
     id: string;
     label: string;
     icon: string;
-    active: boolean;
+    href: string;
   }
 
   const items: NavItem[] = [
-    { id: 'home', label: 'Home', icon: 'home', active: true },
-    { id: 'flights', label: 'Flights', icon: 'plane', active: false },
-    { id: 'approvals', label: 'Approvals', icon: 'approvals', active: false },
-    { id: 'settings', label: 'Settings', icon: 'settings', active: false },
+    { id: 'home', label: 'Home', icon: 'home', href: '/' },
+    { id: 'inbox', label: 'Inbox', icon: 'inbox', href: '/inbox' },
+    { id: 'flights', label: 'Flights', icon: 'plane', href: '/flights' },
+    { id: 'market', label: 'Market', icon: 'market', href: '/market' },
+    { id: 'settings', label: 'Settings', icon: 'settings', href: '/settings' },
   ];
-
-  function go(item: NavItem, event: MouseEvent): void {
-    if (item.active) return;
-    event.preventDefault();
-    toast(`${item.label} arrives with the next screen.`);
-  }
 </script>
 
-<aside class="rail glass" data-glass data-glass-depth="1" data-glass-clip="none">
+<aside class="rail float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none">
+  <a class="rail__brand" href="/" data-route aria-label="Cockpit home">
+    <Logo size={30} />
+  </a>
+
   <nav class="rail__nav" aria-label="Primary">
     {#each items as item}
       <a
         class="rail__item"
-        class:is-active={item.active}
-        href="/"
-        data-route={item.active ? '' : undefined}
+        class:is-active={routeState.path === item.href}
+        href={item.href}
+        data-route
         data-tooltip={item.label}
         aria-label={item.label}
-        aria-current={item.active ? 'page' : undefined}
-        onclick={(event) => go(item, event)}
+        aria-current={routeState.path === item.href ? 'page' : undefined}
       >
         <Icon name={item.icon} size={21} />
       </a>

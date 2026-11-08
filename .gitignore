@@ -34,6 +34,9 @@ test-results/
 playwright-report/
 blob-report/
 
+# Generated logo exports (SVGs are the source)
+/design/logo/png/
+
 # Cockpit local data
 .cockpit/
 data/

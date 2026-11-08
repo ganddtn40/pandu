@@ -1,32 +1,40 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import AppearanceSheet from './lib/AppearanceSheet.svelte';
   import BottomTabs from './lib/BottomTabs.svelte';
   import GlassPreview from './lib/GlassPreview.svelte';
-  import ShellPreview from './lib/ShellPreview.svelte';
+  import HomePreview from './lib/HomePreview.svelte';
+  import OnboardingPreview from './lib/OnboardingPreview.svelte';
+  import QuickPrompt from './lib/QuickPrompt.svelte';
   import SideRail from './lib/SideRail.svelte';
   import Toast from './lib/Toast.svelte';
   import TopBar from './lib/TopBar.svelte';
-  import { readPreferences } from './lib/preferences';
+  import FlightsScreen from './lib/screens/FlightsScreen.svelte';
+  import InboxScreen from './lib/screens/InboxScreen.svelte';
+  import MarketScreen from './lib/screens/MarketScreen.svelte';
+  import SettingsScreen from './lib/screens/SettingsScreen.svelte';
+  import { openQuickPrompt } from './lib/quick-prompt.svelte';
+  import { routeLabel } from './lib/router';
   import { initRouter, routeState } from './lib/router.svelte';
   import { initGlass, type GlassController } from './glass/engine';
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let glass: GlassController | undefined;
 
-  function storedPerformance(): boolean {
-    try {
-      return localStorage.getItem('cockpit.performance') === '1';
-    } catch {
-      return false;
+  const isWelcome = $derived(routeState.path === '/welcome');
+  const forcedFallback = new URLSearchParams(window.location.search).get('glass') === 'off';
+
+  function onKeydown(event: KeyboardEvent): void {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openQuickPrompt();
     }
   }
-
-  const preferences = readPreferences(window.location.search, storedPerformance());
 
   onMount(() => {
     const cleanupRouter = initRouter();
     if (canvas) {
-      glass = initGlass(canvas, preferences.forceFallback);
+      glass = initGlass(canvas, forcedFallback);
     }
     return () => {
       cleanupRouter();
@@ -35,27 +43,43 @@
   });
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <svelte:head>
-  <title>{routeState.path === '/glass-preview' ? 'Glass preview · Cockpit' : 'Cockpit'}</title>
+  <title>{routeLabel(routeState.path)} · Cockpit</title>
 </svelte:head>
 
 <canvas bind:this={canvas} class="glass-canvas" aria-hidden="true"></canvas>
 
-<div class="app-shell">
-  <TopBar />
+{#if isWelcome}
+  <OnboardingPreview />
+{:else}
+  <div class="app-shell">
+    <TopBar />
 
-  <div class="workspace">
-    <SideRail />
-    <main class="panel glass" data-glass data-glass-depth="1" aria-label="Cockpit">
-      {#if routeState.path === '/glass-preview'}
-        <GlassPreview />
-      {:else}
-        <ShellPreview />
-      {/if}
-    </main>
+    <div class="workspace">
+      <SideRail />
+      <main class="panel" aria-label="Cockpit">
+        {#if routeState.path === '/glass-preview'}
+          <GlassPreview />
+        {:else if routeState.path === '/inbox'}
+          <InboxScreen />
+        {:else if routeState.path === '/flights'}
+          <FlightsScreen />
+        {:else if routeState.path === '/market'}
+          <MarketScreen />
+        {:else if routeState.path === '/settings'}
+          <SettingsScreen />
+        {:else}
+          <HomePreview />
+        {/if}
+      </main>
+    </div>
+
+    <BottomTabs />
   </div>
+{/if}
 
-  <BottomTabs />
-</div>
-
+<AppearanceSheet />
+<QuickPrompt />
 <Toast />

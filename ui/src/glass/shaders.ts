@@ -15,8 +15,12 @@ precision highp float;
 
 in vec2 vUv;
 uniform vec2 uResolution;
-uniform float uTheme;
-uniform float uPattern;
+uniform float uTheme;      // 0 light, 1 dark, 2 frost
+uniform float uPattern;    // checker lab override
+uniform float uWallpaper;  // 0 procedural, 1 none, 2 image
+uniform vec3 uAccent;
+uniform sampler2D uImage;
+uniform float uImageAspect;
 out vec4 outColor;
 
 float hash21(vec2 p) {
@@ -51,6 +55,28 @@ float blob(vec2 p, vec2 center, float radius, float softness) {
   return smoothstep(radius, radius - softness, length(p - center));
 }
 
+vec3 themeBackground(float theme) {
+  if (theme < 0.5) return vec3(0.890, 0.875, 0.839);
+  if (theme < 1.5) return vec3(0.027, 0.035, 0.047);
+  return vec3(0.859, 0.902, 0.941);
+}
+
+vec2 coverUv(vec2 uv, float viewAspect, float imageAspect) {
+  vec2 scale = vec2(1.0);
+  if (viewAspect > imageAspect) {
+    scale.y = imageAspect / max(viewAspect, 0.0001);
+  } else {
+    scale.x = viewAspect / max(imageAspect, 0.0001);
+  }
+  return (uv - 0.5) * scale + 0.5;
+}
+
+// Theme values are 0 light, 1 dark, 2 frost. Light and frost are light
+// surfaces; only dark uses the smoked, near-black treatment.
+float isLightTheme(float theme) {
+  return abs(theme - 1.0) > 0.5 ? 1.0 : 0.0;
+}
+
 void main() {
   float aspect = uResolution.x / max(uResolution.y, 1.0);
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
@@ -62,8 +88,27 @@ void main() {
 
   vec3 color;
   float grain;
+  float lightMode = isLightTheme(uTheme);
 
-  if (uPattern > 0.5) {
+  if (uWallpaper > 1.5) {
+    // A user wallpaper. It is scrimmed toward the theme so UI text keeps its
+    // contrast no matter how busy the photograph is.
+    vec2 imageUv = coverUv(uv, aspect, uImageAspect);
+    color = texture(uImage, imageUv).rgb;
+    if (lightMode > 0.5) {
+      color = mix(color, vec3(0.945, 0.960, 0.980), 0.24);
+    } else {
+      color = mix(color, vec3(0.020, 0.026, 0.036), 0.44);
+    }
+    grain = 0.004;
+  } else if (uWallpaper > 0.5) {
+    // No wallpaper: a flat graphite or paper field with one soft accent glow.
+    color = themeBackground(uTheme);
+    color = mix(color, uAccent, 0.04);
+    float vignette = smoothstep(0.30, 1.10, length(uv - vec2(0.5)));
+    color *= 1.0 - vignette * (lightMode > 0.5 ? 0.06 : 0.18);
+    grain = 0.002;
+  } else if (uPattern > 0.5) {
     // High-contrast checker plus warm/cool diagonal bands. This is the
     // refraction test: any edge bend or channel split becomes obvious.
     vec2 cells = vec2(uv.x * aspect, uv.y) * 8.0;
@@ -74,6 +119,19 @@ void main() {
     float cool = step(0.70, fract((uv.x * aspect - uv.y) * 7.0));
     color = mix(color, vec3(0.18, 0.46, 0.92), cool * 0.22);
     grain = 0.004;
+  } else if (uTheme > 1.5) {
+    // Frost: cool, airy light with a blue-green cast.
+    color = vec3(0.906, 0.933, 0.957);
+    color = mix(color, vec3(0.760, 0.858, 0.972), blob(q, vec2(0.20 * aspect, 0.18), 0.74, 0.64));
+    color = mix(color, vec3(0.690, 0.820, 0.930), blob(q, vec2(0.84 * aspect, 0.20), 0.68, 0.60));
+    color = mix(color, vec3(0.800, 0.910, 0.890), blob(q, vec2(0.78 * aspect, 0.84), 0.72, 0.62));
+    color = mix(color, vec3(0.760, 0.800, 0.940), blob(q, vec2(0.20 * aspect, 0.88), 0.66, 0.58));
+    color = mix(color, vec3(0.960, 0.976, 1.000), blob(q, vec2(0.52 * aspect, 0.46), 0.52, 0.48));
+    color = mix(color, uAccent, blob(q, vec2(0.28 * aspect, 0.22), 0.44, 0.50) * 0.04);
+    float wash = smoothstep(0.0, 1.0, uv.x * 0.7 + (1.0 - uv.y) * 0.3);
+    color += wash * vec3(0.010, 0.014, 0.018);
+    color -= smoothstep(0.35, 1.0, length(uv - vec2(0.5))) * 0.020;
+    grain = 0.008;
   } else if (uTheme < 0.5) {
     color = vec3(0.906, 0.922, 0.945);
     color = mix(color, vec3(0.760, 0.842, 0.955), blob(q, vec2(0.22 * aspect, 0.20), 0.72, 0.62));
@@ -81,12 +139,13 @@ void main() {
     color = mix(color, vec3(0.790, 0.900, 0.842), blob(q, vec2(0.78 * aspect, 0.82), 0.74, 0.64));
     color = mix(color, vec3(0.842, 0.822, 0.930), blob(q, vec2(0.20 * aspect, 0.90), 0.64, 0.58));
     color = mix(color, vec3(1.000, 0.968, 0.916), blob(q, vec2(0.52 * aspect, 0.46), 0.52, 0.48));
+    color = mix(color, uAccent, blob(q, vec2(0.28 * aspect, 0.24), 0.44, 0.50) * 0.05);
     float wash = smoothstep(0.0, 1.0, uv.x * 0.7 + (1.0 - uv.y) * 0.3);
     color += wash * vec3(0.018, 0.012, 0.006);
     color -= smoothstep(0.35, 1.0, length(uv - vec2(0.5))) * 0.018;
     grain = 0.012;
   } else {
-    // Smoky visionOS panel: a near-black base with broad blue-gray,
+    // Smoky graphite panel: a near-black base with broad blue-gray,
     // warm-cream, and muted mauve pools. The pools stay between roughly
     // 18% and 45% luminance so the glass has something to refract.
     color = vec3(0.100, 0.108, 0.124);
@@ -95,6 +154,7 @@ void main() {
     color = mix(color, vec3(0.430, 0.390, 0.320), blob(q, vec2(0.78 * aspect, 0.84), 0.74, 0.66));
     color = mix(color, vec3(0.185, 0.215, 0.270), blob(q, vec2(0.22 * aspect, 0.86), 0.68, 0.60));
     color = mix(color, vec3(0.395, 0.350, 0.300), blob(q, vec2(0.56 * aspect, 0.50), 0.56, 0.52));
+    color = mix(color, uAccent, blob(q, vec2(0.30 * aspect, 0.22), 0.50, 0.55) * 0.06);
     float wash = smoothstep(0.0, 1.0, uv.x * 0.65 + (1.0 - uv.y) * 0.35);
     color += wash * vec3(0.022, 0.020, 0.016);
     color -= smoothstep(0.30, 1.05, length(uv - vec2(0.5))) * 0.028;
@@ -105,7 +165,7 @@ void main() {
   float g = hash21(gl_FragCoord.xy + uTheme * 17.0) - 0.5;
   color += g * grain;
 
-  if (uPattern < 0.5) {
+  if (uPattern < 0.5 && uWallpaper < 1.5) {
     // Calm the palette a touch so text stays comfortable on top of the glass.
     float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
     color = mix(vec3(luma), color, 0.88);
@@ -134,10 +194,11 @@ in vec2 vUv;
 uniform sampler2D uTexture;
 uniform vec2 uTexel;
 uniform vec2 uDirection;
+uniform float uScale;
 out vec4 outColor;
 
 void main() {
-  vec2 step = uTexel * uDirection;
+  vec2 step = uTexel * uDirection * uScale;
   vec3 color = texture(uTexture, vUv).rgb * 0.2270270270;
   color += texture(uTexture, vUv + step * 1.3846153846).rgb * 0.3162162162;
   color += texture(uTexture, vUv - step * 1.3846153846).rgb * 0.3162162162;
@@ -195,6 +256,11 @@ uniform sampler2D uBlur;
 uniform vec2 uResolution;
 uniform float uTheme;
 uniform vec2 uPointer;
+uniform vec3 uAccent;
+uniform float uIntensity;
+uniform float uRefraction;
+uniform float uBorders;
+uniform float uMotion;
 out vec4 outColor;
 
 float sdRoundBox(vec2 p, vec2 b, float r) {
@@ -234,7 +300,7 @@ void main() {
     vScreenPos.x / max(uResolution.x, 1.0),
     1.0 - vScreenPos.y / max(uResolution.y, 1.0)
   );
-  vec2 offset = normal * edge * (12.0 / uResolution);
+  vec2 offset = normal * edge * (12.0 * uRefraction / uResolution);
 
   vec3 refracted = vec3(
     texture(uBlur, uv + offset * 1.05).r,
@@ -245,21 +311,28 @@ void main() {
 
   // Light glass is milky; dark glass is a smoked, near-black panel so bright
   // wallpaper pools still read through the refraction without washing out text.
-  vec3 tintColor = uTheme < 0.5 ? vec3(1.0) : vec3(0.045, 0.055, 0.070);
-  vec3 color = mix(refracted, tintColor, clamp(vStyle.y, 0.0, 0.9));
+  // The accent tints the panel just enough to feel intentional.
+  float lightMode = abs(uTheme - 1.0) > 0.5 ? 1.0 : 0.0;
+  vec3 tintColor = lightMode > 0.5
+    ? mix(vec3(1.0), uAccent, 0.06)
+    : mix(vec3(0.045, 0.055, 0.070), uAccent, 0.10);
+  float tintAmount = clamp(vStyle.y * (0.45 + uIntensity), 0.0, 0.94);
+  vec3 color = mix(refracted, tintColor, tintAmount);
 
   // A gentle inner falloff keeps the surface from looking like flat plastic.
   float inner = smoothstep(-52.0, 0.0, d);
-  color *= 1.0 - inner * (uTheme < 0.5 ? 0.055 : 0.16);
+  color *= 1.0 - inner * (lightMode > 0.5 ? 0.055 : 0.16);
 
-  // Specular rim, anchored to the top-left and nudged by the pointer.
-  vec2 lightDir = normalize(vec2(-0.55, -0.85) + uPointer * 0.18);
+  // Specular rim, anchored to the top-left and nudged by the pointer. The
+  // border toggle fades the rim without changing the shape's geometry.
+  float rimScale = mix(0.20, 1.0, uBorders);
+  vec2 lightDir = normalize(vec2(-0.55, -0.85) + uPointer * 0.18 * uMotion);
   float rim = smoothstep(3.2, 0.0, abs(d));
   float spec = pow(max(dot(normal, lightDir), 0.0), 2.2) * rim;
-  color += spec * (uTheme < 0.5 ? 0.60 : 0.42);
-  color += rim * max(-normal.y, 0.0) * (uTheme < 0.5 ? 0.16 : 0.10);
+  color += spec * (lightMode > 0.5 ? 0.60 : 0.42) * rimScale;
+  color += rim * max(-normal.y, 0.0) * (lightMode > 0.5 ? 0.16 : 0.10) * rimScale;
 
-  float alpha = clamp(vStyle.z + rim * 0.10, 0.0, 1.0) * mask;
+  float alpha = clamp(vStyle.z * (0.62 + uIntensity * 0.68) + rim * 0.10 * rimScale, 0.0, 1.0) * mask;
   outColor = vec4(clamp(color, 0.0, 1.0), alpha);
 }
 `;
