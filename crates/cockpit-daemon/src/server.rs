@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use axum::Router;
-use axum::extract::Request;
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::extract::{Request, State};
+use axum::http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
@@ -21,14 +21,16 @@ use crate::config::{Config, is_loopback_host};
 use crate::error::{DaemonError, Result};
 use crate::logwatch;
 use crate::proxy::proxy_handler;
+use crate::remote::auth::constant_time_eq;
 use crate::remote::{RemoteMode, RemoteServerHandle, host};
 use crate::state::AppState;
 use crate::ui;
 
 /// Build the complete HTTP surface: API, UI, and the catch-all proxy.
-pub fn build_router(state: AppState) -> Router {
+pub fn build_router(state: AppState, bound_port: u16) -> Router {
     let api = Router::new()
         .route("/health", get(api::health))
+        .route("/csrf", get(csrf_token))
         .route("/overview", get(api::overview))
         .route("/stats", get(api::stats))
         .route("/sessions", get(api::list_sessions))
@@ -110,6 +112,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/demo/seed", post(api::seed_demo))
         .route("/live", get(api::live))
         .fallback(api::not_found)
+        .route_layer(middleware::from_fn_with_state(
+            HostGuard {
+                state: state.clone(),
+                port: bound_port,
+            },
+            require_host_csrf,
+        ))
         .with_state(state.clone());
 
     Router::new()
@@ -117,7 +126,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/index.html", get(ui::index))
         .nest("/api", api)
         .fallback(proxy_handler)
-        .layer(cors_layer(&state))
+        .layer(cors_layer(&state, bound_port))
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(require_loopback_host))
         .with_state(state)
@@ -125,26 +134,32 @@ pub fn build_router(state: AppState) -> Router {
 
 /// Only loopback origins may talk to the daemon from a browser. The embedded
 /// UI is same-origin; the Vite dev and preview servers are explicitly allowed.
-fn cors_layer(state: &AppState) -> CorsLayer {
-    let mut origins: Vec<HeaderValue> = Vec::new();
-    let mut add = |origin: &str| {
-        if let Ok(value) = HeaderValue::from_str(origin) {
-            if !origins.contains(&value) {
-                origins.push(value);
-            }
+fn allowed_origins(state: &AppState, bound_port: u16) -> Vec<String> {
+    let mut origins: Vec<String> = Vec::new();
+    let mut add = |origin: String| {
+        if !origins.contains(&origin) {
+            origins.push(origin);
         }
     };
 
-    for port in [state.config.port, 5174, 4174] {
+    for port in [bound_port, state.config.port, 5174, 4174] {
         if port == 0 {
             continue;
         }
-        add(&format!("http://127.0.0.1:{port}"));
-        add(&format!("http://localhost:{port}"));
+        add(format!("http://127.0.0.1:{port}"));
+        add(format!("http://localhost:{port}"));
     }
     for origin in &state.config.allowed_origins {
-        add(origin);
+        add(origin.clone());
     }
+    origins
+}
+
+fn cors_layer(state: &AppState, bound_port: u16) -> CorsLayer {
+    let origins: Vec<HeaderValue> = allowed_origins(state, bound_port)
+        .into_iter()
+        .filter_map(|origin| HeaderValue::from_str(&origin).ok())
+        .collect();
 
     CorsLayer::new()
         .allow_methods([
@@ -156,7 +171,119 @@ fn cors_layer(state: &AppState) -> CorsLayer {
             Method::OPTIONS,
         ])
         .allow_headers(Any)
+        .expose_headers([HeaderName::from_static("x-cockpit-csrf")])
         .allow_origin(AllowOrigin::list(origins))
+}
+
+/// The per-process CSRF token, served only to the UI loaded from this daemon.
+/// A cross-origin page cannot read the response (CORS allowlist) or the header.
+async fn csrf_token(State(state): State<AppState>) -> Response {
+    let token = state.csrf.as_str().to_string();
+    let mut response = axum::Json(json!({ "token": token })).into_response();
+    if let Ok(value) = HeaderValue::from_str(&token) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static("x-cockpit-csrf"), value);
+    }
+    response
+}
+
+#[derive(Clone)]
+struct HostGuard {
+    state: AppState,
+    port: u16,
+}
+
+/// Protect every state-changing host API route. A browser form or a `no-cors`
+/// cross-origin request cannot set `X-Cockpit-CSRF` or read it, and both the
+/// Origin and JSON content type are required before the handler runs.
+async fn require_host_csrf(
+    State(guard): State<HostGuard>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method();
+    if matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    ) {
+        return next.run(request).await;
+    }
+
+    let Some(origin) = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return csrf_error(
+            StatusCode::FORBIDDEN,
+            "origin_required",
+            "State-changing host requests need an Origin header.",
+        );
+    };
+    if !allowed_origins(&guard.state, guard.port)
+        .iter()
+        .any(|allowed| allowed == origin)
+    {
+        return csrf_error(
+            StatusCode::FORBIDDEN,
+            "forbidden_origin",
+            "This Origin is not allowed to change Cockpit.",
+        );
+    }
+
+    let content_type = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .eq_ignore_ascii_case("application/json")
+    {
+        return csrf_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "content_type_required",
+            "State-changing host requests must use application/json.",
+        );
+    }
+
+    let Some(token) = request
+        .headers()
+        .get("x-cockpit-csrf")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return csrf_error(
+            StatusCode::FORBIDDEN,
+            "csrf_missing",
+            "The CSRF token is missing. Reload Cockpit and try again.",
+        );
+    };
+    if !constant_time_eq(token.trim().as_bytes(), guard.state.csrf.as_bytes()) {
+        return csrf_error(
+            StatusCode::FORBIDDEN,
+            "csrf_invalid",
+            "The CSRF token is not valid. Reload Cockpit and try again.",
+        );
+    }
+
+    next.run(request).await
+}
+
+fn csrf_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
+    (
+        status,
+        axum::Json(json!({
+            "error": {
+                "code": code,
+                "message": message,
+            }
+        })),
+    )
+        .into_response()
 }
 
 /// Reject DNS-rebinding attempts: a browser must not be able to reach this
@@ -560,7 +687,11 @@ async fn serve_on(
     state: AppState,
     shutdown: oneshot::Receiver<()>,
 ) -> Result<()> {
-    let router = build_router(state.clone());
+    let bound_port = listener
+        .local_addr()
+        .map(|addr| addr.port())
+        .unwrap_or(state.config.port);
+    let router = build_router(state.clone(), bound_port);
     let sweeper = tokio::spawn(sweep_sessions(state.clone()));
     let watcher = state.config.log_watch.then(|| {
         tokio::spawn(logwatch::watch_loop(

@@ -32,6 +32,9 @@ pub struct AppState {
     pub logwatch: Arc<LogWatcher>,
     pub pairing: Arc<PairingManager>,
     pub remote: Arc<RemoteAccess>,
+    /// Per-process token that every state-changing host request must present.
+    /// It is only handed to the UI served by this daemon and never stored.
+    pub csrf: Arc<String>,
     pub client: reqwest::Client,
     pub started_at: Instant,
 }
@@ -111,6 +114,7 @@ impl AppState {
             logwatch,
             pairing,
             remote,
+            csrf: Arc::new(crate::remote::auth::new_token()),
             client,
             started_at: Instant::now(),
         })

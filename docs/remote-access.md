@@ -489,6 +489,11 @@ endpoints × scopes table live in [`security.md`](security.md). The short
 version:
 
 - Remote access is a separate listener and a separate router.
+- Host controls stay on the computer and reject cross-site requests: every
+  state-changing host call needs the loopback `Origin`, `Content-Type:
+  application/json`, and a per-process CSRF token from `GET /api/csrf`. A
+  cross-origin form or `no-cors` request cannot enable remote access, create a
+  code, confirm a pairing, change scopes, decide an approval, revoke, or panic.
 - Pairing is host-confirmed; codes are single-use and short-lived.
 - Tokens are 256-bit, stored hashed, sent in a header, compared in constant
   time, and revoked immediately.

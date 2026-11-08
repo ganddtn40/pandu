@@ -83,6 +83,51 @@ fn host_base(daemon: &ServerHandle) -> String {
     format!("http://{}", daemon.addr)
 }
 
+/// Headers every state-changing host request must carry: the loopback Origin,
+/// the per-process CSRF token, and a JSON content type.
+fn host_headers(daemon: &ServerHandle) -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::ORIGIN,
+        format!("http://{}", daemon.addr).parse().unwrap(),
+    );
+    headers.insert("x-cockpit-csrf", daemon.state.csrf.parse().unwrap());
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+    headers
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn send_host_mutation(
+    client: &reqwest::Client,
+    host: &str,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    origin: Option<&str>,
+    csrf: Option<&str>,
+    content_type: &str,
+) -> reqwest::Response {
+    let mut builder = match method {
+        "POST" => client.post(format!("{host}{path}")),
+        "PATCH" => client.patch(format!("{host}{path}")),
+        other => panic!("unexpected method {other}"),
+    };
+    if let Some(origin) = origin {
+        builder = builder.header("origin", origin);
+    }
+    if let Some(csrf) = csrf {
+        builder = builder.header("x-cockpit-csrf", csrf);
+    }
+    builder = builder.header("content-type", content_type);
+    if let Some(body) = body {
+        builder = builder.body(serde_json::to_vec(body).unwrap());
+    }
+    builder.send().await.unwrap()
+}
+
 /// Start a daemon with the remote listener enabled in tunnel mode on loopback.
 async fn start_remote_daemon(home: &Path, upstream: SocketAddr) -> (ServerHandle, String) {
     let port = free_port().await;
@@ -93,6 +138,7 @@ async fn start_remote_daemon(home: &Path, upstream: SocketAddr) -> (ServerHandle
     let public_url = format!("http://127.0.0.1:{port}");
     let response = reqwest::Client::new()
         .post(format!("{host}/api/remote/enable"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "mode": "tunnel", "publicUrl": public_url }))
         .send()
         .await
@@ -136,6 +182,7 @@ async fn tunnel_status_waits_for_the_public_host_and_rejects_host_or_origin_mism
 
     let enabled: Value = client
         .post(format!("{host}/api/remote/enable"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "mode": "tunnel", "publicUrl": public_url }))
         .send()
         .await
@@ -197,6 +244,7 @@ async fn pair_device(
     let client = reqwest::Client::new();
     let issued: Value = client
         .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(daemon))
         .send()
         .await
         .unwrap()
@@ -240,6 +288,7 @@ async fn pair_device(
 
     let confirmed = client
         .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
+        .headers(host_headers(daemon))
         .send()
         .await
         .unwrap();
@@ -277,6 +326,7 @@ async fn set_scopes(
             "{}/api/remote/devices/{device_id}",
             host_base(daemon)
         ))
+        .headers(host_headers(daemon))
         .json(&json!({
             "scopes": scopes,
             "requireHostConfirmation": require_host_confirmation,
@@ -291,9 +341,18 @@ async fn set_scopes(
     );
 }
 
-async fn append_agent_output(client: &reqwest::Client, host: &str, session_id: &str, data: &str) {
+async fn append_agent_output(
+    client: &reqwest::Client,
+    daemon: &ServerHandle,
+    session_id: &str,
+    data: &str,
+) {
     let response = client
-        .post(format!("{host}/api/agents/{session_id}/output"))
+        .post(format!(
+            "{}/api/agents/{session_id}/output",
+            host_base(daemon)
+        ))
+        .headers(host_headers(daemon))
         .json(&json!({ "data": data }))
         .send()
         .await
@@ -309,18 +368,18 @@ async fn append_agent_output(client: &reqwest::Client, host: &str, session_id: &
 /// window before setting the exact state the agent is waiting in.
 async fn set_agent_prompt_state(
     client: &reqwest::Client,
-    host: &str,
+    daemon: &ServerHandle,
     session_id: &str,
     output: &str,
 ) {
-    append_agent_output(client, host, session_id, &".".repeat(900)).await;
-    append_agent_output(client, host, session_id, output).await;
+    append_agent_output(client, daemon, session_id, &".".repeat(900)).await;
+    append_agent_output(client, daemon, session_id, output).await;
 }
 
-async fn mark_awaiting_prompt(client: &reqwest::Client, host: &str, session_id: &str) {
+async fn mark_awaiting_prompt(client: &reqwest::Client, daemon: &ServerHandle, session_id: &str) {
     set_agent_prompt_state(
         client,
-        host,
+        daemon,
         session_id,
         "Type your response and press Enter",
     )
@@ -579,6 +638,7 @@ async fn revocation_closes_a_live_socket_immediately() {
             host_base(&daemon),
             device.id
         ))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -654,6 +714,7 @@ async fn live_events_hide_content_from_status_only_devices() {
     // Status events still flow to a status-only device.
     let registered: Value = client
         .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "Live agent",
             "workingDir": "C:/work",
@@ -685,7 +746,7 @@ async fn live_events_hide_content_from_status_only_devices() {
 
     // Terminal output is content, so it never leaves the daemon for this
     // device, and the payload text never appears on the socket.
-    append_agent_output(&client, &host, &session_id, "terminal-secret-value").await;
+    append_agent_output(&client, &daemon, &session_id, "terminal-secret-value").await;
     let leaked = tokio::time::timeout(Duration::from_millis(1200), async {
         while let Some(Ok(frame)) = socket.next().await {
             if let Message::Text(text) = frame {
@@ -705,7 +766,7 @@ async fn live_events_hide_content_from_status_only_devices() {
     // Raising the Content scope takes effect on the existing socket without a
     // replay of anything it already missed.
     set_scopes(&daemon, &device.id, &["view:status", "view:content"], false).await;
-    append_agent_output(&client, &host, &session_id, "visible-now").await;
+    append_agent_output(&client, &daemon, &session_id, "visible-now").await;
     let saw_output = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(Ok(frame)) = socket.next().await {
             if let Message::Text(text) = frame {
@@ -734,6 +795,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     // A wrong code consumes attempts and locks the IP after five failures.
     let issued: Value = client
         .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -781,6 +843,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     let host = host_base(&daemon);
     let issued: Value = client
         .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -834,6 +897,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
 
     let confirmed = client
         .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -871,6 +935,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     // Denying a request never creates a device.
     let issued: Value = client
         .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -891,6 +956,7 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
     let denied_secret = denied_claim["claimSecret"].as_str().unwrap().to_string();
     client
         .post(format!("{host}/api/remote/pair/pending/{denied_id}/deny"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -917,9 +983,12 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
     let client = reqwest::Client::new();
     let host = host_base(&daemon);
 
-    let issue = |client: reqwest::Client, host: String| async move {
+    let issue = |client: reqwest::Client, host: String, csrf: String| async move {
         let issued: Value = client
             .post(format!("{host}/api/remote/pair/code"))
+            .header("origin", &host)
+            .header("x-cockpit-csrf", csrf)
+            .header("content-type", "application/json")
             .send()
             .await
             .unwrap()
@@ -931,7 +1000,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
 
     // A validated forwarded address from the loopback tunnel connector is the
     // real client address.
-    let code = issue(client.clone(), host.clone()).await;
+    let code = issue(client.clone(), host.clone(), daemon.state.csrf.to_string()).await;
     let claim = client
         .post(format!("{remote}/api/remote/pair/claim"))
         .header("cf-connecting-ip", "203.0.113.9")
@@ -959,7 +1028,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
 
     // Without a forwarded address the TCP peer is the tunnel connector, not
     // the user. That loopback address is never used as the client identity.
-    let code = issue(client.clone(), host.clone()).await;
+    let code = issue(client.clone(), host.clone(), daemon.state.csrf.to_string()).await;
     let claim = client
         .post(format!("{remote}/api/remote/pair/claim"))
         .json(&json!({ "code": code, "deviceName": "Untrusted phone" }))
@@ -988,7 +1057,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
     assert!(!pairing.to_string().contains("127.0.0.1"));
 
     // A malformed forwarded value is not trusted either.
-    let code = issue(client.clone(), host.clone()).await;
+    let code = issue(client.clone(), host.clone(), daemon.state.csrf.to_string()).await;
     let claim = client
         .post(format!("{remote}/api/remote/pair/claim"))
         .header("cf-connecting-ip", "not-an-ip")
@@ -1028,6 +1097,7 @@ async fn pairing_queue_is_capped_at_three_claims() {
     for index in 0..3 {
         let issued: Value = client
             .post(format!("{host}/api/remote/pair/code"))
+            .headers(host_headers(&daemon))
             .send()
             .await
             .unwrap()
@@ -1053,6 +1123,7 @@ async fn pairing_queue_is_capped_at_three_claims() {
     // A fourth request is refused, and the code is not consumed.
     let issued: Value = client
         .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -1076,6 +1147,7 @@ async fn pairing_queue_is_capped_at_three_claims() {
             "{host}/api/remote/pair/pending/{}/confirm",
             first_claim.unwrap()
         ))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -1201,6 +1273,332 @@ async fn host_origin_cors_and_security_headers_are_enforced() {
             .get("access-control-allow-origin")
             .is_none()
     );
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn host_mutations_reject_cross_origin_forms_and_require_csrf() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+
+    // The token is served only by the host listener, and the header matches
+    // the value the daemon enforces.
+    let csrf_response = client.get(format!("{host}/api/csrf")).send().await.unwrap();
+    assert_eq!(csrf_response.status(), StatusCode::OK);
+    let header_token = csrf_response
+        .headers()
+        .get("x-cockpit-csrf")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let csrf_body: Value = csrf_response.json().await.unwrap();
+    assert_eq!(csrf_body["token"], header_token.as_str());
+    assert_eq!(header_token, daemon.state.csrf.as_str());
+
+    let device = pair_device(&daemon, &remote, "CSRF phone", None).await;
+
+    // A pending claim gives the confirm endpoint a real target.
+    let issued: Value = client
+        .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = issued["code"].as_str().unwrap().to_string();
+    let claim: Value = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .json(&json!({ "code": code, "deviceName": "CSRF pending" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let claim_id = claim["claimId"].as_str().unwrap().to_string();
+    let claim_secret = claim["claimSecret"].as_str().unwrap().to_string();
+
+    // A pending guard event gives the approval endpoint a real target.
+    let proxy = client.clone();
+    let proxy_url = format!("{host}/v1/chat/completions");
+    let pending_request = tokio::spawn(async move {
+        proxy
+            .post(proxy_url)
+            .json(&destructive_request())
+            .send()
+            .await
+            .unwrap()
+    });
+    let event = wait_for_pending_event(&client, &host).await;
+    let event_id = event["id"].as_str().unwrap().to_string();
+    let nonce = event["approvalNonce"].as_str().unwrap().to_string();
+    let session_id = event["sessionId"].as_str().unwrap().to_string();
+
+    struct HostMutation {
+        name: &'static str,
+        method: &'static str,
+        path: String,
+        body: Option<Value>,
+    }
+
+    let mutations = vec![
+        HostMutation {
+            name: "enable",
+            method: "POST",
+            path: "/api/remote/enable".to_string(),
+            body: Some(json!({ "mode": "tunnel", "publicUrl": remote.clone() })),
+        },
+        HostMutation {
+            name: "create code",
+            method: "POST",
+            path: "/api/remote/pair/code".to_string(),
+            body: None,
+        },
+        HostMutation {
+            name: "confirm pairing",
+            method: "POST",
+            path: format!("/api/remote/pair/pending/{claim_id}/confirm"),
+            body: None,
+        },
+        HostMutation {
+            name: "scope change",
+            method: "PATCH",
+            path: format!("/api/remote/devices/{}", device.id),
+            body: Some(json!({
+                "scopes": ["view:content"],
+                "requireHostConfirmation": false,
+            })),
+        },
+        HostMutation {
+            name: "approval decision",
+            method: "POST",
+            path: format!("/api/guards/events/{event_id}/decision"),
+            body: Some(json!({
+                "decision": "deny",
+                "nonce": nonce.clone(),
+                "sessionId": session_id.clone(),
+            })),
+        },
+        HostMutation {
+            name: "revoke",
+            method: "POST",
+            path: format!("/api/remote/devices/{}/revoke", device.id),
+            body: None,
+        },
+        HostMutation {
+            name: "panic",
+            method: "POST",
+            path: "/api/remote/panic".to_string(),
+            body: None,
+        },
+    ];
+
+    let wrong_token = "0".repeat(64);
+    for mutation in &mutations {
+        // A `no-cors` page can only send text/plain and cannot set the token.
+        let cross_origin = send_host_mutation(
+            &client,
+            &host,
+            mutation.method,
+            &mutation.path,
+            mutation.body.as_ref(),
+            Some("https://evil.example"),
+            None,
+            "text/plain",
+        )
+        .await;
+        assert_eq!(
+            cross_origin.status(),
+            StatusCode::FORBIDDEN,
+            "{} must reject a foreign Origin",
+            mutation.name
+        );
+        let body: Value = cross_origin.json().await.unwrap();
+        assert_eq!(
+            body["error"]["code"], "forbidden_origin",
+            "{}",
+            mutation.name
+        );
+
+        // Native requests without an Origin are refused too.
+        let no_origin = send_host_mutation(
+            &client,
+            &host,
+            mutation.method,
+            &mutation.path,
+            mutation.body.as_ref(),
+            None,
+            None,
+            "application/json",
+        )
+        .await;
+        assert_eq!(
+            no_origin.status(),
+            StatusCode::FORBIDDEN,
+            "{} must require an Origin",
+            mutation.name
+        );
+        let body: Value = no_origin.json().await.unwrap();
+        assert_eq!(
+            body["error"]["code"], "origin_required",
+            "{}",
+            mutation.name
+        );
+
+        // A same-origin form post without the token is refused before JSON.
+        let form = send_host_mutation(
+            &client,
+            &host,
+            mutation.method,
+            &mutation.path,
+            mutation.body.as_ref(),
+            Some(host.as_str()),
+            None,
+            "text/plain",
+        )
+        .await;
+        assert_eq!(
+            form.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "{} must require JSON",
+            mutation.name
+        );
+        let body: Value = form.json().await.unwrap();
+        assert_eq!(
+            body["error"]["code"], "content_type_required",
+            "{}",
+            mutation.name
+        );
+
+        // JSON without a token is still refused.
+        let no_token = send_host_mutation(
+            &client,
+            &host,
+            mutation.method,
+            &mutation.path,
+            mutation.body.as_ref(),
+            Some(host.as_str()),
+            None,
+            "application/json",
+        )
+        .await;
+        assert_eq!(
+            no_token.status(),
+            StatusCode::FORBIDDEN,
+            "{} must require the CSRF token",
+            mutation.name
+        );
+        let body: Value = no_token.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "csrf_missing", "{}", mutation.name);
+
+        let wrong = send_host_mutation(
+            &client,
+            &host,
+            mutation.method,
+            &mutation.path,
+            mutation.body.as_ref(),
+            Some(host.as_str()),
+            Some(&wrong_token),
+            "application/json",
+        )
+        .await;
+        assert_eq!(
+            wrong.status(),
+            StatusCode::FORBIDDEN,
+            "{} must reject a wrong token",
+            mutation.name
+        );
+        let body: Value = wrong.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "csrf_invalid", "{}", mutation.name);
+    }
+
+    // Rejected confirms did not consume the claim.
+    let pending: Value = client
+        .post(format!("{remote}/api/remote/pair/claim/{claim_id}"))
+        .header("x-pairing-secret", &claim_secret)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pending["status"], "pending");
+
+    // Rejected decisions did not resolve the approval.
+    let still_pending: Value = client
+        .get(format!("{host}/api/guards/events?status=pending"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        still_pending["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["id"] == event_id.as_str())
+    );
+
+    // Rejected revokes and panics left the device and listener alone.
+    let session = client
+        .get(format!("{remote}/api/remote/session"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(session.status(), StatusCode::OK);
+
+    // The same endpoints succeed with Origin + JSON + the real token.
+    let confirmed = client
+        .post(format!("{host}/api/remote/pair/pending/{claim_id}/confirm"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(confirmed.status().is_success());
+
+    let scoped = client
+        .patch(format!("{host}/api/remote/devices/{}", device.id))
+        .headers(host_headers(&daemon))
+        .json(&json!({
+            "scopes": ["view:content"],
+            "requireHostConfirmation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(scoped.status().is_success());
+
+    let decided = client
+        .post(format!("{host}/api/guards/events/{event_id}/decision"))
+        .headers(host_headers(&daemon))
+        .json(&json!({
+            "decision": "deny",
+            "nonce": nonce,
+            "sessionId": session_id,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(decided.status().is_success());
+    let _ = tokio::time::timeout(Duration::from_secs(5), pending_request).await;
+
+    let revoked = client
+        .post(format!("{host}/api/remote/devices/{}/revoke", device.id))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(revoked.status().is_success());
 
     daemon.shutdown().await.unwrap();
 }
@@ -1414,6 +1812,7 @@ async fn expired_remote_approvals_are_refused() {
     let remote = format!("http://127.0.0.1:{port}");
     let response = reqwest::Client::new()
         .post(format!("{host}/api/remote/enable"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "mode": "tunnel", "publicUrl": remote }))
         .send()
         .await
@@ -1479,6 +1878,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
 
     let registered: Value = client
         .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "Test agent",
             "workingDir": "C:/work",
@@ -1495,7 +1895,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
         .unwrap()
         .to_string();
 
-    mark_awaiting_prompt(&client, &host, &session_id).await;
+    mark_awaiting_prompt(&client, &daemon, &session_id).await;
 
     let secret_prompt = "remote secret prompt";
     let sent = client
@@ -1560,7 +1960,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
 
     // NUL, escape sequences, and control characters are stripped before the
     // prompt is queued; exactly one Enter is appended.
-    mark_awaiting_prompt(&client, &host, &session_id).await;
+    mark_awaiting_prompt(&client, &daemon, &session_id).await;
     let sanitized = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
@@ -1593,7 +1993,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
 
     // Six prompts per minute per device. Two were already sent above.
     for _ in 0..4 {
-        mark_awaiting_prompt(&client, &host, &session_id).await;
+        mark_awaiting_prompt(&client, &daemon, &session_id).await;
         let response = client
             .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
             .bearer_auth(&device.token)
@@ -1603,7 +2003,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
-    mark_awaiting_prompt(&client, &host, &session_id).await;
+    mark_awaiting_prompt(&client, &daemon, &session_id).await;
     let limited = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
@@ -1639,6 +2039,7 @@ async fn host_confirmation_is_required_for_remote_prompts_by_default() {
 
     let registered: Value = client
         .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "Test agent",
             "workingDir": "C:/work",
@@ -1655,7 +2056,7 @@ async fn host_confirmation_is_required_for_remote_prompts_by_default() {
         .unwrap()
         .to_string();
 
-    mark_awaiting_prompt(&client, &host, &session_id).await;
+    mark_awaiting_prompt(&client, &daemon, &session_id).await;
 
     let sent = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
@@ -1683,6 +2084,7 @@ async fn host_confirmation_is_required_for_remote_prompts_by_default() {
 
     let approved = client
         .post(format!("{host}/api/remote/prompts/{prompt_id}/approve"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -1719,6 +2121,7 @@ async fn remote_prompts_require_an_explicit_awaiting_state() {
 
     let registered: Value = client
         .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "State agent",
             "workingDir": "C:/work",
@@ -1745,7 +2148,7 @@ async fn remote_prompts_require_an_explicit_awaiting_state() {
         ("18 tests passed, 0 failed", "unknown"),
     ];
     for (output, state) in rejected {
-        set_agent_prompt_state(&client, &host, &session_id, output).await;
+        set_agent_prompt_state(&client, &daemon, &session_id, output).await;
         let response = client
             .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
             .bearer_auth(&device.token)
@@ -1793,7 +2196,7 @@ async fn remote_prompts_require_an_explicit_awaiting_state() {
     }
 
     // An explicit awaiting prompt is the only accepted state.
-    mark_awaiting_prompt(&client, &host, &session_id).await;
+    mark_awaiting_prompt(&client, &daemon, &session_id).await;
     let accepted = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
@@ -1820,6 +2223,7 @@ async fn auto_approve_sessions_always_wait_for_the_host() {
 
     let registered: Value = client
         .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "Yolo agent",
             "workingDir": "C:/work",
@@ -1838,7 +2242,7 @@ async fn auto_approve_sessions_always_wait_for_the_host() {
         .unwrap()
         .to_string();
 
-    mark_awaiting_prompt(&client, &host, &session_id).await;
+    mark_awaiting_prompt(&client, &daemon, &session_id).await;
     let sent = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
@@ -1863,6 +2267,7 @@ async fn auto_approve_sessions_always_wait_for_the_host() {
 
     let approved = client
         .post(format!("{host}/api/remote/prompts/{prompt_id}/approve"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -1964,6 +2369,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
 
     let registered: Value = client
         .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "Audit agent",
             "workingDir": "C:/work",
@@ -1979,7 +2385,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         .as_str()
         .unwrap()
         .to_string();
-    mark_awaiting_prompt(&client, &host, &agent_session).await;
+    mark_awaiting_prompt(&client, &daemon, &agent_session).await;
     let prompt_text = "audit-only prompt body";
     let sent = client
         .post(format!("{remote}/api/remote/agents/{agent_session}/prompt"))
@@ -2027,6 +2433,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
     // A denied pairing and a failed login are audited too.
     let issued: Value = client
         .post(format!("{host}/api/remote/pair/code"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -2050,6 +2457,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
             "{host}/api/remote/pair/pending/{}/deny",
             claim["claimId"].as_str().unwrap()
         ))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -2064,6 +2472,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
 
     let revoked = client
         .post(format!("{host}/api/remote/devices/{}/revoke", device.id))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -2071,6 +2480,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
 
     let disabled = client
         .post(format!("{host}/api/remote/disable"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap();
@@ -2249,6 +2659,7 @@ async fn panic_stops_the_listener_and_revokes_every_device() {
 
     let panic: Value = client
         .post(format!("{host}/api/remote/panic"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -2315,6 +2726,7 @@ async fn panic_stops_the_listener_and_revokes_every_device() {
     // The old token cannot be used even if the listener is turned back on.
     let reenable = client
         .post(format!("{host}/api/remote/enable"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "mode": "tunnel", "publicUrl": remote }))
         .send()
         .await

@@ -30,15 +30,28 @@ async function shotOf(locator: Locator, name: string): Promise<void> {
   await locator.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
 }
 
+/** Host mutations need the loopback Origin, JSON, and the per-process token. */
+async function hostPost(page: Page, pathname: string): Promise<void> {
+  const csrf = await page.request.get(`${DEMO_DAEMON}/api/csrf`);
+  const { token } = (await csrf.json()) as { token: string };
+  await page.request.post(`${DEMO_DAEMON}${pathname}`, {
+    headers: {
+      origin: 'http://127.0.0.1:4174',
+      'x-cockpit-csrf': token,
+      'content-type': 'application/json',
+    },
+    data: {},
+    failOnStatusCode: false,
+  });
+}
+
 test.describe('remote access', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test.afterEach(async ({ page }) => {
     // Panic is idempotent and keeps the visual suite's layout free of the
     // persistent remote banner if this test fails halfway through.
-    await page.request
-      .post(`${DEMO_DAEMON}/api/remote/panic`, { failOnStatusCode: false })
-      .catch(() => {});
+    await hostPost(page, '/api/remote/panic').catch(() => {});
   });
 
   test('pairs a device and serves only the remote surface', async ({ page, browser }) => {

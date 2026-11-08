@@ -11,6 +11,18 @@ const DESIGN_KEY = 'cockpit.design';
 const WALLPAPER_KEY = 'cockpit.wallpaperImage';
 const ONBOARDED_KEY = 'cockpit.onboarded';
 
+/** Host mutations need the loopback Origin, JSON, and the per-process token. */
+async function hostHeaders(page: Page, daemon: string): Promise<Record<string, string>> {
+  const response = await page.request.get(`${daemon}/api/csrf`);
+  expect(response.ok()).toBeTruthy();
+  const { token } = (await response.json()) as { token: string };
+  return {
+    origin: 'http://127.0.0.1:4174',
+    'x-cockpit-csrf': token,
+    'content-type': 'application/json',
+  };
+}
+
 interface PrepareOptions {
   daemon?: string;
   onboarded?: boolean;
@@ -889,7 +901,9 @@ test.describe('desktop shell', () => {
   });
 
   test('shows a sign-in prompt on a live daemon without an answer box', async ({ page }) => {
+    const headers = await hostHeaders(page, LIVE_DAEMON);
     const registered = await page.request.post(`${LIVE_DAEMON}/api/agents/register`, {
+      headers,
       data: {
         agentName: 'Gemini CLI',
         projectName: 'billing-service',
@@ -903,6 +917,7 @@ test.describe('desktop shell', () => {
     const event = await page.request.post(
       `${LIVE_DAEMON}/api/agents/${session.sessionId}/events`,
       {
+        headers,
         data: {
           type: 'auth_required',
           message: 'Sign in with your browser to continue.',

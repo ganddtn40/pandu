@@ -132,8 +132,74 @@ async function requestAt<T>(origin: string, path: string, init: RequestInit = {}
   return (await response.json()) as T;
 }
 
+let hostCsrfToken: string | null = null;
+let hostCsrfPending: Promise<string> | null = null;
+
+/**
+ * The daemon hands its per-process CSRF token only to the UI it serves. Fetch
+ * it once per page, and fetch again after a failed call so a daemon restart is
+ * recovered without a manual reload.
+ */
+async function hostCsrf(): Promise<string> {
+  if (hostCsrfToken) return hostCsrfToken;
+  if (!hostCsrfPending) {
+    hostCsrfPending = (async () => {
+      const response = await fetch(`${daemonOrigin()}/api/csrf`, {
+        headers: { accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        throw new DaemonError(
+          'Cockpit could not issue a CSRF token. Reload the page and try again.',
+          response.status,
+          'csrf_unavailable',
+        );
+      }
+      const body = (await response.json()) as { token?: string };
+      if (!body.token) {
+        throw new DaemonError(
+          'Cockpit did not return a CSRF token. Reload the page and try again.',
+          response.status,
+          'csrf_unavailable',
+        );
+      }
+      hostCsrfToken = body.token;
+      return body.token;
+    })().finally(() => {
+      hostCsrfPending = null;
+    });
+  }
+  return hostCsrfPending;
+}
+
+function isStateChanging(init: RequestInit): boolean {
+  const method = (init.method ?? 'GET').toUpperCase();
+  return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  return requestAt<T>(daemonOrigin(), path, init);
+  if (!isStateChanging(init)) return requestAt<T>(daemonOrigin(), path, init);
+  const token = await hostCsrf();
+  try {
+    return await requestAt<T>(daemonOrigin(), path, {
+      ...init,
+      headers: {
+        'content-type': 'application/json',
+        'x-cockpit-csrf': token,
+        ...init.headers,
+      },
+    });
+  } catch (error) {
+    // A daemon restart rotates the token. Drop the stale one so the next
+    // state-changing call fetches the new token instead of failing forever.
+    if (
+      error instanceof DaemonError &&
+      (error.code === 'csrf_invalid' || error.code === 'csrf_missing')
+    ) {
+      hostCsrfToken = null;
+    }
+    throw error;
+  }
 }
 
 /** The pairing/remote token is shown once and stored only on this device. */

@@ -766,6 +766,34 @@ fn render_markdown_report(diagnostics: &Diagnostics, registry: &AdapterRegistry)
 // pair
 // ---------------------------------------------------------------------------
 
+/// Fetch the per-process token that every state-changing host request needs.
+/// The token is only served by the loopback listener; a remote page cannot
+/// read it because its origin is not in the CORS allowlist.
+pub(crate) async fn host_csrf(client: &reqwest::Client, base: &str) -> anyhow::Result<String> {
+    let response = client
+        .get(format!("{base}/api/csrf"))
+        .send()
+        .await
+        .context("could not reach the Cockpit daemon")?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .context("the daemon returned an unreadable response")?;
+    if !status.is_success() {
+        bail!(
+            "{}",
+            body.pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("could not obtain a CSRF token")
+        );
+    }
+    body.get("token")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .context("the daemon did not return a CSRF token")
+}
+
 async fn pair(config: Config, args: PairArgs) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -879,8 +907,12 @@ async fn pair(config: Config, args: PairArgs) -> anyhow::Result<()> {
         );
     }
     let base = format!("http://{}:{}", client_host(&config.host), config.port);
+    let csrf = host_csrf(&client, &base).await?;
     let response = client
         .post(format!("{base}/api/remote/pair/code"))
+        .header("origin", &base)
+        .header("x-cockpit-csrf", &csrf)
+        .header("content-type", "application/json")
         .send()
         .await
         .context("could not reach the Cockpit daemon")?;

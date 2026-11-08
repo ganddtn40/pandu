@@ -189,6 +189,21 @@ async fn start_daemon(home: &std::path::Path, upstream: SocketAddr) -> ServerHan
         .expect("the daemon should start")
 }
 
+/// Headers every state-changing host request must carry.
+fn host_headers(daemon: &ServerHandle) -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::ORIGIN,
+        format!("http://{}", daemon.addr).parse().unwrap(),
+    );
+    headers.insert("x-cockpit-csrf", daemon.state.csrf.parse().unwrap());
+    headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+    headers
+}
+
 async fn wait_for_step(client: &reqwest::Client, daemon: &ServerHandle, session_id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -544,6 +559,7 @@ parser = "generic-jsonl"
 
     let scan: Value = client
         .post(format!("http://{}/api/logwatch/scan", daemon.addr))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -593,6 +609,7 @@ parser = "generic-jsonl"
 
     let again: Value = client
         .post(format!("http://{}/api/logwatch/scan", daemon.addr))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -633,6 +650,7 @@ async fn api_seeds_demo_flights_and_serves_settings() {
 
     let seeded: Value = client
         .post(format!("http://{}/api/demo/seed", daemon.addr))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -643,6 +661,7 @@ async fn api_seeds_demo_flights_and_serves_settings() {
 
     let again: Value = client
         .post(format!("http://{}/api/demo/seed", daemon.addr))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -733,6 +752,7 @@ async fn api_seeds_demo_flights_and_serves_settings() {
 
     let settings: Value = client
         .put(format!("http://{}/api/settings", daemon.addr))
+        .headers(host_headers(&daemon))
         .json(&json!({ "theme": "glass", "budget": { "usd": 5 } }))
         .send()
         .await
@@ -749,6 +769,7 @@ async fn api_seeds_demo_flights_and_serves_settings() {
             "http://{}/api/sessions/{active_id}/end",
             daemon.addr
         ))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -845,6 +866,7 @@ async fn guards_and_budgets_stop_requests_before_they_reach_the_provider() {
     // A zero-dollar session budget blocks as soon as the session has spend.
     let created = client
         .post(format!("http://{}/api/budgets", daemon.addr))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "name": "Tiny",
             "scope": "session",
@@ -884,6 +906,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     // Register a PTY session. The daemon stores the claim but never spawns it.
     let registered: Value = client
         .post(format!("{base}/api/agents/register"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "agentName": "Claude Code",
             "projectName": "checkout-service",
@@ -909,6 +932,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     // Output arriving over HTTP is sanitized again on the daemon side.
     let output = client
         .post(format!("{base}/api/agents/{id}/output"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "data": "\u{1b}[31mred\u{1b}[0m plain\r\nnext" }))
         .send()
         .await
@@ -929,6 +953,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     // Two keystroke batches, then a long poll starting from the beginning.
     let first: Value = client
         .post(format!("{base}/api/agents/{id}/input"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "data": "y\n" }))
         .send()
         .await
@@ -939,6 +964,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     assert_eq!(first["sequence"], 0);
     let second: Value = client
         .post(format!("{base}/api/agents/{id}/input"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "data": "n\n" }))
         .send()
         .await
@@ -974,6 +1000,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     // An oversized keystroke batch is rejected instead of buffered.
     let oversized = client
         .post(format!("{base}/api/agents/{id}/input"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "data": "x".repeat(5_000) }))
         .send()
         .await
@@ -983,6 +1010,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     // A typed event lands in the persisted Inbox.
     let created: Value = client
         .post(format!("{base}/api/agents/{id}/events"))
+        .headers(host_headers(&daemon))
         .json(&json!({
             "type": "permission",
             "message": "Permission requested: write 3 files.",
@@ -1013,6 +1041,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
 
     let acked: Value = client
         .post(format!("{base}/api/agent-events/{event_id}/ack"))
+        .headers(host_headers(&daemon))
         .send()
         .await
         .unwrap()
@@ -1044,6 +1073,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
     // Ending the session is idempotent and closes the stored flight.
     let ended: Value = client
         .post(format!("{base}/api/agents/{id}/end"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "exitCode": 0 }))
         .send()
         .await
@@ -1067,6 +1097,7 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
 
     let late_input = client
         .post(format!("{base}/api/agents/{id}/input"))
+        .headers(host_headers(&daemon))
         .json(&json!({ "data": "late\n" }))
         .send()
         .await

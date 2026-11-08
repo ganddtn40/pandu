@@ -111,11 +111,40 @@ pub async fn run(request: PtyRequest<'_>) -> anyhow::Result<PtyOutcome> {
     let pid = spawned.child.process_id();
     let cwd = std::env::current_dir().context("could not read the working directory")?;
 
-    let client = reqwest::Client::builder()
+    let base = format!("http://{}", request.addr);
+    let bootstrap = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .context("could not build the daemon client")?;
-    let base = format!("http://{}", request.addr);
+    let csrf = match crate::host_csrf(&bootstrap, &base).await {
+        Ok(token) => token,
+        Err(error) => {
+            // Never leave a spawned agent behind when the daemon refuses.
+            let _ = spawned.killer.kill();
+            let _ = spawned.child.wait();
+            return Err(error);
+        }
+    };
+    let mut host_headers = reqwest::header::HeaderMap::new();
+    host_headers.insert(
+        reqwest::header::ORIGIN,
+        base.parse()
+            .context("could not build the host Origin header")?,
+    );
+    host_headers.insert(
+        "x-cockpit-csrf",
+        csrf.parse()
+            .context("the daemon returned an invalid CSRF token")?,
+    );
+    host_headers.insert(
+        reqwest::header::CONTENT_TYPE,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .default_headers(host_headers)
+        .build()
+        .context("could not build the daemon client")?;
     let command_line = std::iter::once(request.program)
         .chain(request.args.iter().map(String::as_str))
         .collect::<Vec<_>>()

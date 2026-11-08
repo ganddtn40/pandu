@@ -58,14 +58,26 @@ it does not contain it.
 - A `Host` header middleware rejects requests whose host is not `localhost` or a
   loopback IP literal. This blocks DNS-rebinding pages that resolve an attacker
   hostname to `127.0.0.1`.
+- Every state-changing host route (`POST`, `PATCH`, `DELETE` under `/api`) must
+  carry an allowed loopback `Origin`, `Content-Type: application/json`, and the
+  per-process CSRF token in `X-Cockpit-CSRF`. The token is generated at startup,
+  served only by the host listener at `GET /api/csrf`, and compared in constant
+  time. A missing or foreign `Origin` is `origin_required`/`forbidden_origin`; a
+  form or `text/plain` post is `content_type_required` (415); a missing or wrong
+  token is `csrf_missing`/`csrf_invalid`. A `no-cors` page cannot set the header
+  or the JSON content type, so it cannot reach enable, pairing, scope, approval,
+  revoke, or panic endpoints. The `/v1` model proxy is unaffected.
 - The UI and the API share the daemon origin, so no cross-origin read is needed
-  in normal use.
+  in normal use. The UI fetches the CSRF token once, caches it, and retries after
+  a stale-token error; the CLI does the same for `cockpit pair` and the PTY
+  control plane.
 - This section describes the host listener. The optional remote listener is a
   separate listener and router; see section 3.9.
 
 Evidence: `config::tests::rejects_non_loopback_hosts`,
 `config::tests::rejects_non_loopback_origins`,
-`integration::a_foreign_host_header_is_rejected`.
+`integration::a_foreign_host_header_is_rejected`,
+`remote::host_mutations_reject_cross_origin_forms_and_require_csrf`.
 
 ### 3.2 The PTY command boundary
 
@@ -206,7 +218,10 @@ token, or read the audit log.
   access is on, a second listener serves only the remote dashboard, the scoped
   `/api/remote/*` routes, and the live WebSocket. Model proxy paths (`/v1`,
   `/openai`, `/anthropic`, `/s/...`) and host-management routes are not mounted
-  there; they return 404 before the UI fallback.
+  there; they return 404 before the UI fallback. Host control (enable, disable,
+  pairing, scopes, revoke, panic) stays on the loopback listener and requires the
+  loopback `Origin`, a JSON content type, and the per-process CSRF token, so a
+  paired device or a web page cannot drive it.
 - **Bind rules.** `Loopback` means off. Tailscale binds only the detected
   tailnet IPv4. Tunnel binds only `127.0.0.1` and requires an explicit public
   URL. LAN binds only the detected LAN IPv4 and always uses TLS. No mode binds
@@ -281,6 +296,7 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `tunnel_identity_trusts_only_forwarded_addresses`,
 `a_valid_token_bypasses_an_untrusted_ip_lockout`,
 `host_origin_cors_and_security_headers_are_enforced`,
+`host_mutations_reject_cross_origin_forms_and_require_csrf`,
 `remote_approvals_need_the_pin_and_cannot_be_replayed`,
 `expired_remote_approvals_are_refused`,
 `remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim`,
