@@ -214,8 +214,10 @@ Pairing is always a two-step flow: the device asks, and the host confirms.
    high-risk actions from this device. The host only sees that a PIN is set.
 6. Tap **Send pairing request**. The phone says *"Waiting for the host to
    confirm…"*.
-7. On the computer, Cockpit shows **Pair Pixel 8?** with the request IP and
-   whether a PIN is set.
+7. On the computer, Cockpit shows **Pair Pixel 8?** with the request IP when it
+   can be trusted, and whether a PIN is set. A tunnel request without a
+   validated forwarded address says the client address is unavailable rather
+   than showing the local tunnel connector.
 
    ![Host confirms the device by name](screenshots/phase7/04-host-pair-confirm.png)
 
@@ -225,7 +227,9 @@ Pairing is always a two-step flow: the device asks, and the host confirms.
    ![Paired device dashboard](screenshots/phase7/05-remote-paired-dashboard.png)
 
 If the code expires, create a new one. A code cannot be reused, and a denied
-request never receives a token.
+request never receives a token. Only one code is active at a time — creating a
+new one replaces the old code. Up to three requests can wait for the host at
+once; answer or deny one before another device can join the queue.
 
 ### What the device stores
 

@@ -3,7 +3,7 @@
 //! A code is 128 bits, expires after two minutes, is single use, and is stored
 //! only as a hash. A successful claim does **not** issue a token by itself: the
 //! host sees `Pair <device name>?` and must confirm before the waiting device
-//! receives its one-time token. A new device always starts with View only.
+//! receives its one-time token. A new device always starts with Status only.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -22,6 +22,9 @@ use crate::store::{NewRemoteDevice, Store, now_iso};
 pub const PAIR_CODE_TTL_SECONDS: i64 = 2 * 60;
 pub const MAX_ATTEMPTS: u8 = 5;
 pub const CLAIM_TTL_SECONDS: u64 = 90;
+/// At most this many requests may sit waiting for the host at once. The host
+/// has to answer or deny one before another device can join the queue.
+pub const MAX_PENDING_CLAIMS: usize = 3;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +88,7 @@ pub enum PairingError {
     ClaimNotFound,
     AlreadyResolved,
     BadPin,
+    Busy,
 }
 
 impl PairingError {
@@ -99,6 +103,9 @@ impl PairingError {
             Self::ClaimNotFound => "That pairing request is no longer waiting.",
             Self::AlreadyResolved => "That pairing request was already answered.",
             Self::BadPin => "The PIN must be 4 to 8 digits.",
+            Self::Busy => {
+                "Too many pairing requests are waiting for the host. Answer or deny one first."
+            }
         }
     }
 
@@ -111,6 +118,7 @@ impl PairingError {
             Self::ClaimNotFound => "pairing_missing",
             Self::AlreadyResolved => "pairing_resolved",
             Self::BadPin => "pairing_bad_pin",
+            Self::Busy => "pairing_busy",
         }
     }
 }
@@ -260,6 +268,18 @@ impl PairingManager {
             });
         }
 
+        // The code stays active when the queue is full so the user can answer a
+        // waiting request and retry without creating a new code.
+        expire_claims(&mut state);
+        let waiting = state
+            .claims
+            .values()
+            .filter(|claim| claim.status == ClaimStatus::Pending)
+            .count();
+        if waiting >= MAX_PENDING_CLAIMS {
+            return Err(PairingError::Busy);
+        }
+
         // The code is single use, even if the host later denies the request.
         state.code = None;
         let claim_id = uuid::Uuid::new_v4().to_string();
@@ -365,7 +385,7 @@ impl PairingManager {
         pending
     }
 
-    /// Host confirmation. Creates the device with View only and hands the
+    /// Host confirmation. Creates the device with Status only and hands the
     /// one-time token to the waiting claim.
     pub fn confirm(&self, claim_id: &str) -> PairingResult<ConfirmedPairing> {
         let mut state = self.lock();
@@ -673,5 +693,35 @@ mod tests {
         let second = pairing.issue_code();
         assert!(pairing.begin_claim(&first.code, "X", None, None).is_err());
         assert!(pairing.begin_claim(&second.code, "X", None, None).is_ok());
+    }
+
+    #[test]
+    fn only_three_claims_wait_for_the_host_at_once() {
+        let pairing = manager();
+        let mut tickets = Vec::new();
+        for index in 0..MAX_PENDING_CLAIMS {
+            let issued = pairing.issue_code();
+            let ticket = pairing
+                .begin_claim(&issued.code, &format!("Device {index}"), None, None)
+                .expect("claim starts below the cap");
+            tickets.push(ticket);
+        }
+        assert_eq!(pairing.pending().len(), MAX_PENDING_CLAIMS);
+
+        let issued = pairing.issue_code();
+        assert_eq!(
+            pairing
+                .begin_claim(&issued.code, "Extra", None, None)
+                .unwrap_err(),
+            PairingError::Busy
+        );
+        // A full queue does not burn the code; the host can answer one and the
+        // waiting device can retry.
+        pairing.deny(&tickets[0].claim_id).unwrap();
+        assert!(
+            pairing
+                .begin_claim(&issued.code, "Extra", None, None)
+                .is_ok()
+        );
     }
 }

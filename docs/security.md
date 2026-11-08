@@ -254,11 +254,16 @@ token, or read the audit log.
   possible. `Host` and `Origin` are checked against the mode (tunnel public host
   plus loopback, `.ts.net`/tailnet IPs, or LAN IPs/`.local`). Cookies are not
   used.
-- **Abuse limits.** Per-IP and per-device rate limits, exponential lockout, a
-  bounded connection semaphore, request body limits, and heartbeat timeouts
-  apply to the remote listener. `cf-connecting-ip` is trusted only in Tunnel
-  mode when the socket peer is loopback, so a remote client cannot spoof its
-  address to reset the per-IP limit.
+- **Abuse limits.** Pairing claims are keyed per claim, authenticated requests
+  per device, and unauthenticated attempts per trusted client IP. At most three
+  claims can wait for the host and only one pairing code is active at a time.
+  Exponential lockout, a bounded connection semaphore, request body limits, and
+  heartbeat timeouts also apply. In Tunnel mode the TCP peer is always the local
+  connector, so `cf-connecting-ip` is the only client identity and is trusted
+  only when the peer is loopback and the value parses as an IP; otherwise the
+  request shares an `untrusted` bucket and no address is shown to the host. A
+  valid bearer token bypasses an IP lockout, so unauthenticated brute force
+  cannot cut off an already-paired device.
 - **Audit.** Pair, confirm, deny, revoke, rotate, scope changes, login failures,
   every approve/deny, every remote prompt (size/hash only), remote on/off, and
   notification changes are appended to a host-only audit log. The log is
@@ -272,6 +277,9 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `every_remote_endpoint_enforces_its_scope`,
 `revocation_closes_a_live_socket_immediately`,
 `pairing_is_single_use_host_confirmed_and_brute_force_limited`,
+`pairing_queue_is_capped_at_three_claims`,
+`tunnel_identity_trusts_only_forwarded_addresses`,
+`a_valid_token_bypasses_an_untrusted_ip_lockout`,
 `host_origin_cors_and_security_headers_are_enforced`,
 `remote_approvals_need_the_pin_and_cannot_be_replayed`,
 `expired_remote_approvals_are_refused`,
@@ -294,8 +302,9 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote::pairing::tests::a_denied_claim_never_issues_a_token`,
 `remote::pairing::tests::a_wrong_code_is_limited_and_locks_the_code`,
 `remote::pairing::tests::an_expired_code_is_refused`,
-`remote::pairing::tests::malformed_codes_and_pins_are_rejected`, and
-`remote::pairing::tests::a_new_code_replaces_the_old_one`.
+`remote::pairing::tests::malformed_codes_and_pins_are_rejected`,
+`remote::pairing::tests::a_new_code_replaces_the_old_one`, and
+`remote::pairing::tests::only_three_claims_wait_for_the_host_at_once`.
 
 ## 4. Tests that gate this phase
 

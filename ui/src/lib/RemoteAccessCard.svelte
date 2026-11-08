@@ -631,7 +631,7 @@
               <article class="remote-claim">
                 <div class="remote-claim__body">
                   <strong>{t('remote.pairRequest', { name: claim.deviceName })}</strong>
-                  <span>{t('remote.pairMeta', { ip: claim.ip ?? t('common.unknown') })}</span>
+                  <span>{claim.ip ? t('remote.pairMeta', { ip: claim.ip }) : t('remote.pairMetaUnknown')}</span>
                   <span>{claim.hasPin ? t('remote.pairHasPin') : t('remote.pairNoPin')}</span>
                 </div>
                 <div class="button-row button-row--tight">

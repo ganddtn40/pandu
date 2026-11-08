@@ -910,6 +910,223 @@ async fn pairing_is_single_use_host_confirmed_and_brute_force_limited() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn tunnel_identity_trusts_only_forwarded_addresses() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+
+    let issue = |client: reqwest::Client, host: String| async move {
+        let issued: Value = client
+            .post(format!("{host}/api/remote/pair/code"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        issued["code"].as_str().unwrap().to_string()
+    };
+
+    // A validated forwarded address from the loopback tunnel connector is the
+    // real client address.
+    let code = issue(client.clone(), host.clone()).await;
+    let claim = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .header("cf-connecting-ip", "203.0.113.9")
+        .json(&json!({ "code": code, "deviceName": "Tunnel phone" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(claim.status().is_success());
+
+    let pending: Value = client
+        .get(format!("{host}/api/remote/pair/pending"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pairing = pending["pairings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pairing| pairing["deviceName"] == "Tunnel phone")
+        .expect("the host sees the trusted claim");
+    assert_eq!(pairing["ip"], "203.0.113.9");
+
+    // Without a forwarded address the TCP peer is the tunnel connector, not
+    // the user. That loopback address is never used as the client identity.
+    let code = issue(client.clone(), host.clone()).await;
+    let claim = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .json(&json!({ "code": code, "deviceName": "Untrusted phone" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(claim.status().is_success());
+    let pending: Value = client
+        .get(format!("{host}/api/remote/pair/pending"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pairing = pending["pairings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pairing| pairing["deviceName"] == "Untrusted phone")
+        .expect("the host sees the untrusted claim");
+    assert!(
+        pairing.get("ip").is_none(),
+        "an untrusted tunnel client has no displayable address: {pairing}"
+    );
+    assert!(!pairing.to_string().contains("127.0.0.1"));
+
+    // A malformed forwarded value is not trusted either.
+    let code = issue(client.clone(), host.clone()).await;
+    let claim = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .header("cf-connecting-ip", "not-an-ip")
+        .json(&json!({ "code": code, "deviceName": "Spoof phone" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(claim.status().is_success());
+    let pending: Value = client
+        .get(format!("{host}/api/remote/pair/pending"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pairing = pending["pairings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pairing| pairing["deviceName"] == "Spoof phone")
+        .expect("the host sees the spoofed claim");
+    assert!(pairing.get("ip").is_none());
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pairing_queue_is_capped_at_three_claims() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+
+    let mut first_claim = None;
+    for index in 0..3 {
+        let issued: Value = client
+            .post(format!("{host}/api/remote/pair/code"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let code = issued["code"].as_str().unwrap().to_string();
+        let claim: Value = client
+            .post(format!("{remote}/api/remote/pair/claim"))
+            .json(&json!({ "code": code, "deviceName": format!("Queue {index}") }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let claim_id = claim["claimId"].as_str().unwrap().to_string();
+        if first_claim.is_none() {
+            first_claim = Some(claim_id);
+        }
+    }
+
+    // A fourth request is refused, and the code is not consumed.
+    let issued: Value = client
+        .post(format!("{host}/api/remote/pair/code"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = issued["code"].as_str().unwrap().to_string();
+    let blocked = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .json(&json!({ "code": code, "deviceName": "Queue 3" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), StatusCode::BAD_REQUEST);
+    let body: Value = blocked.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "pairing_busy");
+
+    // Answering one request makes room for the waiting device.
+    let confirmed = client
+        .post(format!(
+            "{host}/api/remote/pair/pending/{}/confirm",
+            first_claim.unwrap()
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(confirmed.status().is_success());
+    let retried = client
+        .post(format!("{remote}/api/remote/pair/claim"))
+        .json(&json!({ "code": code, "deviceName": "Queue 3" }))
+        .send()
+        .await
+        .unwrap();
+    assert!(retried.status().is_success());
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_valid_token_bypasses_an_untrusted_ip_lockout() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let device = pair_device(&daemon, &remote, "Locked phone", None).await;
+
+    // Five bad tokens lock the untrusted tunnel bucket.
+    for attempt in 1..=5 {
+        let response = client
+            .get(format!("{remote}/api/remote/session"))
+            .bearer_auth("0".repeat(64))
+            .send()
+            .await
+            .unwrap();
+        if attempt < 5 {
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        } else {
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+
+    // The already-paired device still gets through with its real token.
+    let allowed = client
+        .get(format!("{remote}/api/remote/session"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), StatusCode::OK);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn host_origin_cors_and_security_headers_are_enforced() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();

@@ -5,12 +5,12 @@
 //! proxy paths are rejected with 404 before the dashboard fallback can see
 //! them.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -112,11 +112,11 @@ struct PairClaimInput {
 
 async fn pair_claim(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Extension(identity): Extension<ClientIdentity>,
     Json(input): Json<PairClaimInput>,
 ) -> Response {
-    let ip = client_ip(&headers);
-    let key = format!("pair:{ip}");
+    let key = identity.rate_key("pair");
+    let audit_ip = identity.audit_ip().map(str::to_string);
     if let Some(remaining) = state.remote.lockout_for(&key) {
         return rate_limited(remaining);
     }
@@ -127,8 +127,8 @@ async fn pair_claim(
         state.remote.audit(
             "pair.rate_limited",
             None,
-            Some(&ip),
-            json!({ "reason": "per_ip_window" }),
+            audit_ip.as_deref(),
+            json!({ "reason": "per_client_window" }),
             None,
             None,
         );
@@ -138,13 +138,13 @@ async fn pair_claim(
         &input.code,
         &input.device_name,
         input.pin.as_deref(),
-        Some(&ip),
+        audit_ip.as_deref(),
     ) {
         Ok(ticket) => {
             state.remote.audit(
                 "pair.request",
                 None,
-                Some(&ip),
+                audit_ip.as_deref(),
                 json!({
                     "claimId": ticket.claim_id,
                     "deviceName": input.device_name.chars().take(80).collect::<String>(),
@@ -166,7 +166,7 @@ async fn pair_claim(
             state.remote.audit(
                 "pair.failed",
                 None,
-                Some(&ip),
+                audit_ip.as_deref(),
                 json!({ "code": error.code() }),
                 None,
                 None,
@@ -181,11 +181,13 @@ async fn pair_claim(
 
 async fn pair_poll(
     State(state): State<AppState>,
+    Extension(identity): Extension<ClientIdentity>,
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let ip = client_ip(&headers);
-    let key = format!("pair-poll:{ip}");
+    // Polls belong to one claim, so a device waiting on one code cannot spend
+    // another claim's budget and an IP change does not reset the wait.
+    let key = format!("pair-poll:{id}");
     if !state
         .remote
         .allow_attempt(&key, 120, Duration::from_secs(60))
@@ -208,7 +210,7 @@ async fn pair_poll(
                 state.remote.audit(
                     "pair.claimed",
                     poll.device_id.as_deref().zip(poll.device_name.as_deref()),
-                    Some(&ip),
+                    identity.audit_ip(),
                     json!({ "claimId": id }),
                     None,
                     None,
@@ -318,8 +320,8 @@ struct RemoteDecisionInput {
 async fn guard_decision(
     State(state): State<AppState>,
     Extension(principal): Extension<RemotePrincipal>,
+    Extension(identity): Extension<ClientIdentity>,
     Path(id): Path<String>,
-    headers: HeaderMap,
     Json(input): Json<RemoteDecisionInput>,
 ) -> Response {
     if let Some(response) = require_scope(&principal, Scope::Respond) {
@@ -343,7 +345,7 @@ async fn guard_decision(
         state.remote.audit(
             "approval.needs_host",
             Some((&principal.device_id, &principal.device_name)),
-            Some(&client_ip(&headers)),
+            identity.audit_ip(),
             json!({ "eventId": event.id, "reason": "authentication_prompt" }),
             None,
             None,
@@ -383,7 +385,7 @@ async fn guard_decision(
             state.remote.audit(
                 "approval.pin_failed",
                 Some((&principal.device_id, &principal.device_name)),
-                Some(&client_ip(&headers)),
+                identity.audit_ip(),
                 json!({ "eventId": event.id }),
                 None,
                 None,
@@ -419,7 +421,7 @@ async fn guard_decision(
                     "approval.deny"
                 },
                 Some((&principal.device_id, &principal.device_name)),
-                Some(&client_ip(&headers)),
+                identity.audit_ip(),
                 json!({
                     "eventId": resolved.id,
                     "severity": resolved.severity.as_str(),
@@ -480,8 +482,8 @@ struct RemotePromptInput {
 async fn send_prompt(
     State(state): State<AppState>,
     Extension(principal): Extension<RemotePrincipal>,
+    Extension(identity): Extension<ClientIdentity>,
     Path(id): Path<String>,
-    headers: HeaderMap,
     Json(input): Json<RemotePromptInput>,
 ) -> Response {
     if let Some(response) = require_scope(&principal, Scope::Prompt) {
@@ -527,7 +529,7 @@ async fn send_prompt(
         state.remote.audit(
             "prompt.rejected",
             Some((&principal.device_id, &principal.device_name)),
-            Some(&client_ip(&headers)),
+            identity.audit_ip(),
             json!({
                 "sessionId": id,
                 "reason": view.prompt_state.as_str(),
@@ -548,7 +550,7 @@ async fn send_prompt(
         state.remote.audit(
             "prompt.rate_limited",
             Some((&principal.device_id, &principal.device_name)),
-            Some(&client_ip(&headers)),
+            identity.audit_ip(),
             json!({ "sessionId": id }),
             None,
             None,
@@ -560,7 +562,7 @@ async fn send_prompt(
         &principal,
         &id,
         &text,
-        Some(&client_ip(&headers)),
+        identity.audit_ip(),
         view.auto_approve,
     );
     // An adapter started with a skip-approvals flag is exactly where a remote
@@ -603,7 +605,7 @@ async fn send_prompt(
             state.remote.audit(
                 "prompt.sent",
                 Some((&principal.device_id, &principal.device_name)),
-                Some(&client_ip(&headers)),
+                identity.audit_ip(),
                 json!({
                     "promptId": prompt.id,
                     "sessionId": prompt.session_id,
@@ -647,7 +649,7 @@ pub(crate) fn push_prompt(state: &AppState, prompt: &PendingPrompt) -> Result<Op
 async fn logout(
     State(state): State<AppState>,
     Extension(principal): Extension<RemotePrincipal>,
-    headers: HeaderMap,
+    Extension(identity): Extension<ClientIdentity>,
 ) -> Json<Value> {
     let revoked = state
         .store
@@ -657,7 +659,7 @@ async fn logout(
     state.remote.audit(
         "device.self_revoke",
         Some((&principal.device_id, &principal.device_name)),
-        Some(&client_ip(&headers)),
+        identity.audit_ip(),
         json!({ "revoked": revoked }),
         None,
         None,
@@ -848,43 +850,57 @@ async fn authenticate(
     mut request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let ip = client_ip(request.headers());
-    let key = format!("auth:{ip}");
-    if let Some(remaining) = state.remote.lockout_for(&key) {
-        return rate_limited(remaining);
-    }
-    if !state
-        .remote
-        .allow_attempt(&key, 120, Duration::from_secs(60))
-    {
+    let identity = client_identity(&request);
+    let audit_ip = identity.audit_ip().map(str::to_string);
+    let Some(token) = bearer_token(request.headers()).map(str::to_string) else {
+        if let Some(response) = auth_ip_budget(&state, &identity) {
+            return response;
+        }
         state.remote.audit(
-            "auth.rate_limited",
+            "auth.missing",
             None,
-            Some(&ip),
-            json!({ "reason": "per_ip_window" }),
+            audit_ip.as_deref(),
+            json!({}),
             None,
             None,
         );
-        return rate_limited(Duration::from_secs(60));
-    }
-    let Some(token) = bearer_token(request.headers()) else {
-        state
-            .remote
-            .audit("auth.missing", None, Some(&ip), json!({}), None, None);
         return remote_auth_error(RemoteAuthError::Missing);
     };
-    match state.remote.authorize(token) {
+
+    // A valid token is checked before the per-IP failure budget so a lockout
+    // earned by unauthenticated attempts never cuts off an already-paired
+    // device. The device still has its own generous request budget.
+    match state.remote.authorize(&token) {
         Ok(principal) => {
-            state.remote.clear_auth_failures(&key);
+            let device_key = format!("auth-device:{}", principal.device_id);
+            if !state
+                .remote
+                .allow_attempt(&device_key, 600, Duration::from_secs(60))
+            {
+                state.remote.audit(
+                    "auth.rate_limited",
+                    Some((&principal.device_id, &principal.device_name)),
+                    audit_ip.as_deref(),
+                    json!({ "reason": "per_device_window" }),
+                    None,
+                    None,
+                );
+                return rate_limited(Duration::from_secs(60));
+            }
+            state.remote.clear_auth_failures(&identity.rate_key("auth"));
             request.extensions_mut().insert(principal);
             next.run(request).await
         }
         Err(error) => {
+            if let Some(response) = auth_ip_budget(&state, &identity) {
+                return response;
+            }
+            let key = identity.rate_key("auth");
             let lock = state.remote.record_auth_failure(&key);
             state.remote.audit(
                 "auth.failure",
                 None,
-                Some(&ip),
+                audit_ip.as_deref(),
                 json!({ "reason": error.code() }),
                 None,
                 None,
@@ -895,6 +911,30 @@ async fn authenticate(
             remote_auth_error(error)
         }
     }
+}
+
+/// Spend the unauthenticated budget for this client. Untrusted tunnel traffic
+/// shares one bucket instead of ever being keyed by the loopback peer.
+fn auth_ip_budget(state: &AppState, identity: &ClientIdentity) -> Option<Response> {
+    let key = identity.rate_key("auth");
+    if let Some(remaining) = state.remote.lockout_for(&key) {
+        return Some(rate_limited(remaining));
+    }
+    if !state
+        .remote
+        .allow_attempt(&key, 120, Duration::from_secs(60))
+    {
+        state.remote.audit(
+            "auth.rate_limited",
+            None,
+            identity.audit_ip(),
+            json!({ "reason": "per_client_window" }),
+            None,
+            None,
+        );
+        return Some(rate_limited(Duration::from_secs(60)));
+    }
+    None
 }
 
 async fn security_headers(
@@ -1054,6 +1094,34 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
+/// Where a remote request really came from. `ip` is only set when Cockpit can
+/// prove it: in tunnel mode the TCP peer is always the local tunnel connector,
+/// so only a validated `CF-Connecting-IP` from a loopback peer counts. An
+/// untrusted identity is never keyed by the loopback address and never shown
+/// to the host.
+#[derive(Debug, Clone, Default)]
+struct ClientIdentity {
+    ip: Option<String>,
+    trusted: bool,
+}
+
+impl ClientIdentity {
+    fn audit_ip(&self) -> Option<&str> {
+        if self.trusted {
+            self.ip.as_deref()
+        } else {
+            None
+        }
+    }
+
+    fn rate_key(&self, prefix: &str) -> String {
+        match self.audit_ip() {
+            Some(ip) => format!("{prefix}:{ip}"),
+            None => format!("{prefix}:untrusted"),
+        }
+    }
+}
+
 async fn capture_client_ip(
     State(state): State<AppState>,
     mut request: axum::extract::Request,
@@ -1063,41 +1131,44 @@ async fn capture_client_ip(
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|info| info.0.ip());
-    // `cf-connecting-ip` is only meaningful when a Cloudflare tunnel connects
-    // from loopback. A Tailscale or LAN client must never be able to spoof it
-    // and escape the per-IP rate limit.
-    let forwarded_ip = if state.remote.mode() == RemoteMode::Tunnel
-        && socket_ip.is_some_and(|ip| ip.is_loopback())
-    {
-        request
-            .headers()
-            .get("cf-connecting-ip")
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    } else {
-        None
+    let identity = match state.remote.mode() {
+        // The tunnel binds loopback, so the TCP peer is cloudflared itself.
+        // Trust the forwarded address only when it is a real IP; otherwise the
+        // request has no trustworthy client identity at all.
+        RemoteMode::Tunnel => {
+            let forwarded = if socket_ip.is_some_and(|ip| ip.is_loopback()) {
+                request
+                    .headers()
+                    .get("cf-connecting-ip")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::trim)
+                    .and_then(|value| value.parse::<IpAddr>().ok())
+                    .map(|ip| ip.to_string())
+            } else {
+                None
+            };
+            ClientIdentity {
+                trusted: forwarded.is_some(),
+                ip: forwarded,
+            }
+        }
+        // Tailscale, LAN, and loopback clients connect directly, so the socket
+        // address is the client address.
+        _ => ClientIdentity {
+            trusted: socket_ip.is_some(),
+            ip: socket_ip.map(|ip| ip.to_string()),
+        },
     };
-    let ip = forwarded_ip
-        .or_else(|| socket_ip.map(|ip| ip.to_string()))
-        .unwrap_or_else(|| "unknown".to_string());
-    if let Ok(value) = HeaderValue::from_str(&ip) {
-        request
-            .headers_mut()
-            .insert(HeaderName::from_static("x-cockpit-client-ip"), value);
-    }
+    request.extensions_mut().insert(identity);
     next.run(request).await
 }
 
-fn client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-cockpit-client-ip")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("unknown")
-        .to_string()
+fn client_identity(request: &axum::extract::Request) -> ClientIdentity {
+    request
+        .extensions()
+        .get::<ClientIdentity>()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Live events that carry terminal text or file paths. A status-only device
