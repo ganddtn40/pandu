@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { toast } from './toast-store.svelte';
-  import { themeState, setTheme } from './theme.svelte';
+  import { applyGlassPattern, readGlassPattern, type GlassPattern } from './glass-pattern';
 
   function storedPerformance(): boolean {
     try {
@@ -15,7 +16,26 @@
     new URLSearchParams(window.location.search).get('glass') === 'off' || storedPerformance();
 
   let guardOn = $state(true);
-  let renderer = forcedFallback ? 'CSS fallback' : 'WebGL2';
+  let pattern = $state<GlassPattern>(readGlassPattern(window.location.search));
+  let stats = $state({
+    mode: forcedFallback ? ('fallback' as const) : ('webgl' as const),
+    shapes: 0,
+    fps: 0,
+    redrawsPerSecond: 0,
+    redrawsTotal: 0,
+  });
+
+  const shaderLabel = $derived(stats.mode === 'webgl' ? 'On · WebGL2' : 'Off · CSS');
+  const fpsLabel = $derived(stats.fps === 0 ? '0 · idle' : String(stats.fps));
+
+  onMount(() => {
+    applyGlassPattern(pattern, false);
+    const timer = window.setInterval(() => {
+      const next = window.__cockpitGlassStats;
+      if (next) stats = { ...next };
+    }, 500);
+    return () => window.clearInterval(timer);
+  });
 
   function reload(params: { glass?: string | null; perf?: string | null }): void {
     const url = new URL(window.location.href);
@@ -23,6 +43,7 @@
       if (value === null) url.searchParams.delete(key);
       else url.searchParams.set(key, value);
     }
+    url.searchParams.set('pattern', pattern);
     window.location.assign(url.toString());
   }
 
@@ -46,6 +67,11 @@
       // Storage is optional.
     }
     reload({ perf: storedPerformance() ? '1' : null, glass: null });
+  }
+
+  function togglePattern(): void {
+    pattern = pattern === 'checker' ? 'smoky' : 'checker';
+    applyGlassPattern(pattern);
   }
 </script>
 
@@ -122,8 +148,8 @@
   <section class="preview-card glass" data-glass data-glass-depth="2">
     <h3>Renderer</h3>
     <p class="type-body" style="margin-bottom: 14px">
-      Current: <strong>{renderer}</strong>. The fallback uses CSS backdrop blur and keeps every
-      screen readable.
+      Current: <strong>{stats.mode === 'webgl' ? 'WebGL2' : 'CSS fallback'}</strong>. The fallback
+      uses the same wallpaper gradients and CSS backdrop blur.
     </p>
     <div class="control-row">
       <button class="btn btn--small btn--ghost" type="button" onclick={useFallback}>
@@ -138,26 +164,49 @@
       </button>
     </div>
   </section>
+
+  <section class="preview-card preview-card--wide glass" data-glass data-glass-depth="2">
+    <h3>Refraction test</h3>
+    <div class="refraction-layout">
+      <div class="refraction-sample" aria-hidden="true">
+        <div class="refraction-sample__glass glass" data-glass data-glass-depth="2">
+          <span class="refraction-sample__label">Glass over checker</span>
+        </div>
+      </div>
+      <div class="refraction-copy">
+        <p>
+          Switch the wallpaper to a high-contrast checker with warm and cool bands. The glass
+          rim bends the pattern, and the three colour channels sample at slightly different
+          offsets, so chromatic aberration becomes easy to see.
+        </p>
+        <div class="control-row">
+          <button
+            class="btn btn--small btn--ghost"
+            type="button"
+            aria-pressed={pattern === 'checker'}
+            onclick={togglePattern}
+          >
+            <Icon name="check" size={15} />
+            {pattern === 'checker' ? 'Use smoky wallpaper' : 'Use checker wallpaper'}
+          </button>
+          <span class="type-caption">Current: {pattern}</span>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <div class="preview-foot">
-  <div class="segmented segmented--small" role="group" aria-label="Appearance">
-    <button
-      type="button"
-      aria-pressed={themeState.value === 'light'}
-      onclick={() => setTheme('light')}
-    >
-      <Icon name="sun" size={15} />
-      <span>Light</span>
-    </button>
-    <button
-      type="button"
-      aria-pressed={themeState.value === 'dark'}
-      onclick={() => setTheme('dark')}
-    >
-      <Icon name="moon" size={15} />
-      <span>Dark</span>
-    </button>
-  </div>
-  <small>Every surface is drawn by one WebGL2 pass, with a CSS fallback.</small>
+  <small>
+    Every surface is drawn by one WebGL2 pass, with a CSS fallback. The debug readout stays out
+    of the render loop, so an idle canvas reports zero redraws.
+  </small>
 </div>
+
+<aside class="debug-overlay" data-glass-debug aria-label="Glass renderer diagnostics">
+  <span class="debug-overlay__head">Glass diagnostics</span>
+  <span>Shader</span><span>{shaderLabel}</span>
+  <span>Shapes</span><span>{stats.shapes}</span>
+  <span>FPS</span><span>{fpsLabel}</span>
+  <span>Redraws</span><span>{stats.redrawsPerSecond}/s</span>
+</aside>

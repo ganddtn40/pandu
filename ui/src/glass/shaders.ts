@@ -16,6 +16,7 @@ precision highp float;
 in vec2 vUv;
 uniform vec2 uResolution;
 uniform float uTheme;
+uniform float uPattern;
 out vec4 outColor;
 
 float hash21(vec2 p) {
@@ -62,7 +63,18 @@ void main() {
   vec3 color;
   float grain;
 
-  if (uTheme < 0.5) {
+  if (uPattern > 0.5) {
+    // High-contrast checker plus warm/cool diagonal bands. This is the
+    // refraction test: any edge bend or channel split becomes obvious.
+    vec2 cells = vec2(uv.x * aspect, uv.y) * 8.0;
+    float checker = mod(floor(cells.x) + floor(cells.y), 2.0);
+    color = mix(vec3(0.045, 0.050, 0.062), vec3(0.945, 0.950, 0.960), checker);
+    float band = step(0.62, fract((uv.x * aspect + uv.y) * 5.0));
+    color = mix(color, vec3(0.86, 0.28, 0.18), band * 0.28);
+    float cool = step(0.70, fract((uv.x * aspect - uv.y) * 7.0));
+    color = mix(color, vec3(0.18, 0.46, 0.92), cool * 0.22);
+    grain = 0.004;
+  } else if (uTheme < 0.5) {
     color = vec3(0.906, 0.922, 0.945);
     color = mix(color, vec3(0.760, 0.842, 0.955), blob(q, vec2(0.22 * aspect, 0.20), 0.72, 0.62));
     color = mix(color, vec3(0.972, 0.900, 0.796), blob(q, vec2(0.86 * aspect, 0.10), 0.66, 0.58));
@@ -74,15 +86,18 @@ void main() {
     color -= smoothstep(0.35, 1.0, length(uv - vec2(0.5))) * 0.018;
     grain = 0.012;
   } else {
-    color = vec3(0.040, 0.055, 0.076);
-    color = mix(color, vec3(0.080, 0.145, 0.220), blob(q, vec2(0.20 * aspect, 0.18), 0.76, 0.66));
-    color = mix(color, vec3(0.060, 0.180, 0.190), blob(q, vec2(0.84 * aspect, 0.22), 0.68, 0.60));
-    color = mix(color, vec3(0.135, 0.095, 0.180), blob(q, vec2(0.78 * aspect, 0.84), 0.72, 0.64));
-    color = mix(color, vec3(0.075, 0.110, 0.150), blob(q, vec2(0.22 * aspect, 0.86), 0.66, 0.58));
-    color = mix(color, vec3(0.160, 0.130, 0.085), blob(q, vec2(0.56 * aspect, 0.50), 0.54, 0.50));
+    // Smoky visionOS panel: a near-black base with broad blue-gray,
+    // warm-cream, and muted mauve pools. The pools stay between roughly
+    // 18% and 45% luminance so the glass has something to refract.
+    color = vec3(0.100, 0.108, 0.124);
+    color = mix(color, vec3(0.250, 0.280, 0.330), blob(q, vec2(0.20 * aspect, 0.18), 0.78, 0.68));
+    color = mix(color, vec3(0.330, 0.355, 0.390), blob(q, vec2(0.84 * aspect, 0.22), 0.70, 0.62));
+    color = mix(color, vec3(0.430, 0.390, 0.320), blob(q, vec2(0.78 * aspect, 0.84), 0.74, 0.66));
+    color = mix(color, vec3(0.185, 0.215, 0.270), blob(q, vec2(0.22 * aspect, 0.86), 0.68, 0.60));
+    color = mix(color, vec3(0.395, 0.350, 0.300), blob(q, vec2(0.56 * aspect, 0.50), 0.56, 0.52));
     float wash = smoothstep(0.0, 1.0, uv.x * 0.65 + (1.0 - uv.y) * 0.35);
-    color += wash * vec3(0.010, 0.008, 0.006);
-    color -= smoothstep(0.30, 1.05, length(uv - vec2(0.5))) * 0.030;
+    color += wash * vec3(0.022, 0.020, 0.016);
+    color -= smoothstep(0.30, 1.05, length(uv - vec2(0.5))) * 0.028;
     grain = 0.010;
   }
 
@@ -90,9 +105,11 @@ void main() {
   float g = hash21(gl_FragCoord.xy + uTheme * 17.0) - 0.5;
   color += g * grain;
 
-  // Calm the palette a touch so text stays comfortable on top of the glass.
-  float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-  color = mix(vec3(luma), color, 0.88);
+  if (uPattern < 0.5) {
+    // Calm the palette a touch so text stays comfortable on top of the glass.
+    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(vec3(luma), color, 0.88);
+  }
 
   outColor = vec4(color, 1.0);
 }
@@ -217,17 +234,19 @@ void main() {
     vScreenPos.x / max(uResolution.x, 1.0),
     1.0 - vScreenPos.y / max(uResolution.y, 1.0)
   );
-  vec2 offset = normal * edge * (8.0 / uResolution);
+  vec2 offset = normal * edge * (12.0 / uResolution);
 
   vec3 refracted = vec3(
-    texture(uBlur, uv + offset * 1.035).r,
+    texture(uBlur, uv + offset * 1.05).r,
     texture(uBlur, uv + offset).g,
-    texture(uBlur, uv + offset * 0.965).b
+    texture(uBlur, uv + offset * 0.95).b
   );
   refracted = boostSaturation(refracted, 1.14);
 
-  vec3 tintColor = uTheme < 0.5 ? vec3(1.0) : vec3(0.82, 0.86, 0.92);
-  vec3 color = mix(refracted, tintColor, clamp(vStyle.y, 0.0, 0.5));
+  // Light glass is milky; dark glass is a smoked, near-black panel so bright
+  // wallpaper pools still read through the refraction without washing out text.
+  vec3 tintColor = uTheme < 0.5 ? vec3(1.0) : vec3(0.045, 0.055, 0.070);
+  vec3 color = mix(refracted, tintColor, clamp(vStyle.y, 0.0, 0.9));
 
   // A gentle inner falloff keeps the surface from looking like flat plastic.
   float inner = smoothstep(-52.0, 0.0, d);

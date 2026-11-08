@@ -21,6 +21,11 @@
           if (forced === 'light' || forced === 'dark') theme = forced;
           document.documentElement.dataset.theme = theme;
           document.documentElement.style.colorScheme = theme;
+          var pattern = new URLSearchParams(location.search).get('pattern');
+          if (pattern !== 'checker' && pattern !== 'smoky') {
+            pattern = localStorage.getItem('cockpit.glassPattern') === 'checker' ? 'checker' : 'smoky';
+          }
+          document.documentElement.dataset.glassPattern = pattern;
         } catch (error) {
           document.documentElement.dataset.theme = 'dark';
         }

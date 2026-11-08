@@ -10,6 +10,14 @@ import {
 
 type Theme = 'light' | 'dark';
 
+interface GlassStats {
+  mode: 'webgl' | 'fallback';
+  shapes: number;
+  fps: number;
+  redrawsPerSecond: number;
+  redrawsTotal: number;
+}
+
 interface ShapeMeta {
   el: HTMLElement;
   depth: number;
@@ -32,9 +40,9 @@ const STYLES: Record<Theme, Record<number, ShapeStyle>> = {
     3: { tint: 0.09, opacity: 0.52 },
   },
   dark: {
-    1: { tint: 0.16, opacity: 0.66 },
-    2: { tint: 0.11, opacity: 0.56 },
-    3: { tint: 0.08, opacity: 0.44 },
+    1: { tint: 0.68, opacity: 0.86 },
+    2: { tint: 0.6, opacity: 0.78 },
+    3: { tint: 0.52, opacity: 0.68 },
   },
 };
 
@@ -83,6 +91,13 @@ function fallback(canvas: HTMLCanvasElement, reason: string): GlassController {
   }
   window.__cockpitGlassMode = 'fallback';
   window.__cockpitGlassReady = true;
+  window.__cockpitGlassStats = {
+    mode: 'fallback',
+    shapes: 0,
+    fps: 0,
+    redrawsPerSecond: 0,
+    redrawsTotal: 0,
+  };
   console.info(`[cockpit] glass fallback: ${reason}`);
   return {
     destroy: () => undefined,
@@ -100,7 +115,11 @@ function createEngine(
   const blurProgram = program(gl, WALLPAPER_VERT, BLUR_FRAG);
   const glassProgram = program(gl, GLASS_VERT, GLASS_FRAG);
 
-  const wallpaperUniforms = uniforms(gl, wallpaperProgram, ['uResolution', 'uTheme']);
+  const wallpaperUniforms = uniforms(gl, wallpaperProgram, [
+    'uResolution',
+    'uTheme',
+    'uPattern',
+  ]);
   const copyUniforms = uniforms(gl, copyProgram, ['uTexture']);
   const blurUniforms = uniforms(gl, blurProgram, ['uTexture', 'uTexel', 'uDirection']);
   const glassUniforms = uniforms(gl, glassProgram, [
@@ -146,6 +165,7 @@ function createEngine(
   gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
   let theme: Theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  let pattern = document.documentElement.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
   let shapes: ShapeMeta[] = [];
   let frame = 0;
   let lastFrame = 0;
@@ -163,6 +183,16 @@ function createEngine(
   let targetX = 0;
   let targetY = 0;
   let pointerSettling = false;
+  let redrawsThisSecond = 0;
+
+  const stats: GlassStats = {
+    mode: 'webgl',
+    shapes: 0,
+    fps: 0,
+    redrawsPerSecond: 0,
+    redrawsTotal: 0,
+  };
+  window.__cockpitGlassStats = stats;
 
   const textures: WebGLTexture[] = [];
   const framebuffers: WebGLFramebuffer[] = [];
@@ -176,18 +206,39 @@ function createEngine(
     requestRender();
   });
 
-  const mutationObserver = new MutationObserver(() => {
+  const mutationObserver = new MutationObserver((records) => {
+    // The preview's debug readout updates once a second. It must never wake the
+    // renderer, otherwise an idle canvas would redraw forever.
+    if (records.every((record) => isDebugNode(record.target))) return;
     refreshQueued = true;
     requestRender();
   });
 
-  const themeObserver = new MutationObserver(() => {
-    const next = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-    if (next === theme) return;
-    theme = next;
+  const attributeObserver = new MutationObserver(() => {
+    let dirty = false;
+    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    if (nextTheme !== theme) {
+      theme = nextTheme;
+      dirty = true;
+    }
+    const nextPattern =
+      document.documentElement.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
+    if (nextPattern !== pattern) {
+      pattern = nextPattern;
+      dirty = true;
+    }
+    if (!dirty) return;
     blurDirty = true;
     requestRender();
   });
+
+  const statsTimer = window.setInterval(() => {
+    stats.mode = 'webgl';
+    stats.shapes = shapes.length;
+    stats.fps = redrawsThisSecond;
+    stats.redrawsPerSecond = redrawsThisSecond;
+    redrawsThisSecond = 0;
+  }, 1000);
 
   const onPointerMove = (event: PointerEvent): void => {
     if (reducedMotion) return;
@@ -216,9 +267,12 @@ function createEngine(
   };
 
   const onThemeEvent = (): void => {
-    const next = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-    if (next === theme) return;
-    theme = next;
+    const nextTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    const nextPattern =
+      document.documentElement.dataset.glassPattern === 'checker' ? 'checker' : 'smoky';
+    if (nextTheme === theme && nextPattern === pattern) return;
+    theme = nextTheme;
+    pattern = nextPattern;
     blurDirty = true;
     requestRender();
   };
@@ -358,6 +412,7 @@ function createEngine(
     gl.useProgram(wallpaperProgram);
     gl.uniform2f(wallpaperUniforms.uResolution ?? null, cssWidth, cssHeight);
     gl.uniform1f(wallpaperUniforms.uTheme ?? null, theme === 'dark' ? 1 : 0);
+    gl.uniform1f(wallpaperUniforms.uPattern ?? null, pattern === 'checker' ? 1 : 0);
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
@@ -392,6 +447,9 @@ function createEngine(
   }
 
   function render(): void {
+    redrawsThisSecond += 1;
+    stats.redrawsTotal += 1;
+    stats.shapes = shapes.length;
     resizeIfNeeded();
     if (blurDirty) {
       renderWallpaperAndBlur();
@@ -480,12 +538,16 @@ function createEngine(
     }
   }
 
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  attributeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme', 'data-glass-pattern'],
+  });
   mutationObserver.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('pointermove', onPointerMove, { passive: true });
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
   window.addEventListener('resize', onResize, { passive: true });
   window.addEventListener('cockpit:theme', onThemeEvent);
+  window.addEventListener('cockpit:pattern', onThemeEvent);
   document.addEventListener('visibilitychange', onVisibility);
 
   requestRender();
@@ -494,13 +556,15 @@ function createEngine(
     destroy: () => {
       destroyed = true;
       if (frame) window.cancelAnimationFrame(frame);
+      window.clearInterval(statsTimer);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
-      themeObserver.disconnect();
+      attributeObserver.disconnect();
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('scroll', onScroll, { capture: true });
       window.removeEventListener('resize', onResize);
       window.removeEventListener('cockpit:theme', onThemeEvent);
+      window.removeEventListener('cockpit:pattern', onThemeEvent);
       document.removeEventListener('visibilitychange', onVisibility);
       for (const texture of textures) gl.deleteTexture(texture);
       for (const framebuffer of framebuffers) gl.deleteFramebuffer(framebuffer);
@@ -518,6 +582,11 @@ function createEngine(
       requestRender();
     },
   };
+}
+
+function isDebugNode(node: Node): boolean {
+  const element = node instanceof Element ? node : node.parentElement;
+  return element?.closest('[data-glass-debug]') != null;
 }
 
 function findClip(element: HTMLElement): HTMLElement | null {

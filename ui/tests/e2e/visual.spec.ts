@@ -101,6 +101,12 @@ test.describe('desktop shell', () => {
 
       await expectNoHorizontalOverflow(page);
       await screenshot(page, `glass-preview-${theme}.png`);
+
+      await page.locator('main.panel').evaluate((panel) => {
+        panel.scrollTop = panel.scrollHeight;
+      });
+      await page.waitForTimeout(150);
+      await screenshot(page, `glass-preview-refraction-${theme}.png`);
     });
   }
 
@@ -151,6 +157,31 @@ test.describe('desktop shell', () => {
     expect(focus?.outlineStyle).toBe('solid');
     expect(focus?.outlineWidth ?? 0).toBeGreaterThanOrEqual(2);
   });
+
+  test('idle glass canvas does not redraw', async ({ page }) => {
+    await openGlass(page, '/glass-preview?theme=dark&pattern=smoky');
+    await page.waitForTimeout(1200);
+
+    const before = await page.evaluate(() => window.__cockpitGlassStats?.redrawsTotal ?? -1);
+    await page.waitForTimeout(3000);
+    const after = await page.evaluate(() => window.__cockpitGlassStats?.redrawsTotal ?? -1);
+
+    expect(before).toBeGreaterThan(0);
+    expect(after - before).toBe(0);
+  });
+
+  test('toggles the checker refraction wallpaper', async ({ page }) => {
+    await openGlass(page, '/glass-preview?theme=dark&pattern=smoky');
+
+    await expect(page.locator('html')).toHaveAttribute('data-glass-pattern', 'smoky');
+    await page.getByRole('button', { name: 'Use checker wallpaper' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-glass-pattern', 'checker');
+    await expect(page.getByText('Current: checker', { exact: true })).toBeVisible();
+    await expect(page.locator('.debug-overlay')).toContainText('On · WebGL2');
+
+    await page.waitForTimeout(300);
+    await screenshot(page, 'glass-preview-checker-dark.png');
+  });
 });
 
 test.describe('phone shell', () => {
@@ -178,4 +209,31 @@ test.describe('phone shell', () => {
     await ready(page);
     expect(await findSmallTargets(page)).toEqual([]);
   });
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 360, height: 640 },
+  ]) {
+    test(`keeps the last card clear of the tab pill at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await openGlass(page, '/?theme=light');
+
+      await page.locator('main.panel').evaluate((panel) => {
+        panel.scrollTop = panel.scrollHeight;
+      });
+      await page.waitForTimeout(100);
+
+      const clearance = await page.evaluate(() => {
+        const recent = document.querySelector('.recent')?.getBoundingClientRect();
+        const tabbar = document.querySelector('.tabbar')?.getBoundingClientRect();
+        if (!recent || !tabbar) throw new Error('missing phone shell elements');
+        return tabbar.top - recent.bottom;
+      });
+
+      expect(clearance).toBeGreaterThanOrEqual(15);
+      await screenshot(page, `shell-phone-${viewport.width}-bottom.png`);
+    });
+  }
 });

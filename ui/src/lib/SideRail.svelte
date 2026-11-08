@@ -31,6 +31,7 @@
         class:is-active={item.active}
         href="/"
         data-route={item.active ? '' : undefined}
+        data-tooltip={item.label}
         aria-label={item.label}
         aria-current={item.active ? 'page' : undefined}
         onclick={(event) => go(item, event)}
@@ -43,6 +44,7 @@
   <button
     class="rail__plus"
     type="button"
+    data-tooltip="New flight"
     aria-label="New flight"
     onclick={() => toast('Start an agent to create a flight.')}
   >

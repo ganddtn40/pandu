@@ -443,6 +443,29 @@ Performance mode setting.
 - Screenshots are committed in `docs/screenshots/phase4/`. Phase 4 stops here
   for user visual approval before the four screens are built.
 
+### Phase 4 visual review fixes
+
+- Phone scroll areas reserve the floating tab pill height plus 16 px and the
+  safe-area inset; Playwright scrolls to the bottom at 390×844 and 360×640 and
+  asserts the last card keeps a 16 px gap.
+- The dark wallpaper now uses smoky blue-gray, warm-cream, and muted mauve
+  pools over a ~10% base. Dark glass is a smoked near-black tint with a stronger
+  edge offset, so the pools read through without lowering text contrast.
+- The CSS fallback reuses the same five-gradient wallpaper recipe, plus the
+  checker pattern, instead of a flat black body.
+- The brand mark is a currentColor ring with a compass dot and needle.
+- Light and dark text tokens are gated by a unit test that composites every
+  text token over every surface token, including the brightest wallpaper pool.
+  Light secondary text, accent ink, success, and danger were darkened to pass.
+- Stat numerals are 44 px / 600 weight with tabular figures; phone stat tiles
+  stack below 520 px so the numerals keep their size.
+- Rail icons and the new-flight button have hover/focus tooltips alongside
+  their aria-labels.
+- `/glass-preview` has a full-width refraction test with a checker wallpaper
+  toggle and a diagnostics overlay for shader mode, shape count, FPS, and
+  redraws. The debug readout is excluded from the mutation observer, and a
+  Playwright test asserts zero canvas redraws after three idle seconds.
+
 ## 9. Toolchain status
 
 At Phase 0, this machine had Node `v24.21.0` and pnpm `12.9.1`, but no `cargo`,
