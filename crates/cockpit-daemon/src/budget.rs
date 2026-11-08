@@ -327,6 +327,8 @@ impl BudgetService {
                 "limitUsd": status.limit_usd,
                 "usageRatio": status.usage_ratio,
             })),
+            approval_nonce: None,
+            approval_expires_at: None,
         })?;
 
         self.live.publish(
@@ -389,6 +391,8 @@ impl BudgetService {
                 "limitUsd": status.limit_usd,
                 "usageRatio": status.usage_ratio,
             })),
+            approval_nonce: None,
+            approval_expires_at: None,
         })?;
 
         self.live.publish(
@@ -407,7 +411,8 @@ impl BudgetService {
         Ok(event)
     }
 
-    fn record_event(&self, input: NewGuardEvent) -> Result<GuardEvent> {
+    fn record_event(&self, mut input: NewGuardEvent) -> Result<GuardEvent> {
+        crate::guards::prepare_approval(&mut input, self.approval_timeout);
         let event = self.store.insert_guard_event(input)?;
         self.live.publish(
             "guard.triggered",

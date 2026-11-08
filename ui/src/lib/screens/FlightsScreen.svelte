@@ -286,8 +286,12 @@
     if (detailsElement?.open) void loadSnapshot(snapshotId);
   }
 
-  function openFlight(id: string): void {
-    navigate(`/flights?session=${encodeURIComponent(id)}`);
+  function openFlight(session: Session): void {
+    if (session.captureMode === 'pty') {
+      navigate(`/session?id=${encodeURIComponent(session.id)}`);
+      return;
+    }
+    navigate(`/flights?session=${encodeURIComponent(session.id)}`);
   }
 
   function closeFlight(): void {
@@ -456,9 +460,9 @@
             class:is-active={selectedId === session.id}
             type="button"
             aria-current={selectedId === session.id ? 'true' : undefined}
-            onclick={() => openFlight(session.id)}
+            onclick={() => openFlight(session)}
           >
-            <span class="flight-row__icon"><Icon name="plane" size={17} /></span>
+            <span class="flight-row__icon"><Icon name={session.captureMode === 'pty' ? 'terminal' : 'plane'} size={17} /></span>
             <span class="flight-row__main">
               <span class="flight-row__title">
                 <strong>{session.title}</strong>
@@ -467,7 +471,9 @@
                 {/if}
               </span>
               <span class="flight-row__meta">
-                {sessionAgent(session)} · {timeAgo(session.startedAt, t)} · {t('flights.steps', { count: session.totals.stepCount })}
+                {sessionAgent(session)} · {timeAgo(session.startedAt, t)} · {session.captureMode === 'pty'
+                  ? t('flights.liveTerminal')
+                  : t('flights.steps', { count: session.totals.stepCount })}
               </span>
             </span>
             <span class="flight-row__side">

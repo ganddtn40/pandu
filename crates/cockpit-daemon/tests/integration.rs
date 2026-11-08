@@ -690,11 +690,11 @@ async fn api_seeds_demo_flights_and_serves_settings() {
         .json()
         .await
         .unwrap();
-    assert_eq!(overview["stats"]["sessionCount"], 3);
-    assert_eq!(overview["stats"]["activeSessionCount"], 1);
+    assert_eq!(overview["stats"]["sessionCount"], 4);
+    assert_eq!(overview["stats"]["activeSessionCount"], 2);
     assert_eq!(overview["stats"]["unknownCostCalls"], 1);
     assert!(overview["stats"]["totalCostUsd"].as_f64().unwrap() > 0.0);
-    assert_eq!(overview["activeSessions"].as_array().unwrap().len(), 1);
+    assert_eq!(overview["activeSessions"].as_array().unwrap().len(), 2);
 
     let sessions: Value = client
         .get(format!("http://{}/api/sessions", daemon.addr))
@@ -704,9 +704,31 @@ async fn api_seeds_demo_flights_and_serves_settings() {
         .json()
         .await
         .unwrap();
-    assert_eq!(sessions["total"], 3);
+    assert_eq!(sessions["total"], 4);
     let list = sessions["sessions"].as_array().unwrap();
-    assert_eq!(list.len(), 3);
+    assert_eq!(list.len(), 4);
+
+    let agent_events: Value = client
+        .get(format!(
+            "http://{}/api/agent-events?status=open",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(agent_events["openCount"], 3);
+    let types: Vec<&str> = agent_events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|event| event["type"].as_str())
+        .collect();
+    assert!(types.contains(&"permission"));
+    assert!(types.contains(&"auth_required"));
+    assert!(types.contains(&"done"));
 
     let completed = list
         .iter()
@@ -878,6 +900,241 @@ async fn guards_and_budgets_stop_requests_before_they_reach_the_provider() {
     let denied_body: Value = denied.json().await.unwrap();
     assert_eq!(denied_body["error"]["code"], "budget_exceeded");
     assert_eq!(mock.captured.lock().unwrap().len(), 1);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_control_relays_sanitized_output_and_queues_input() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", daemon.addr);
+
+    // Register a PTY session. The daemon stores the claim but never spawns it.
+    let registered: Value = client
+        .post(format!("{base}/api/agents/register"))
+        .json(&json!({
+            "agentName": "Claude Code",
+            "projectName": "checkout-service",
+            "workingDir": "C:\\work\\checkout-service",
+            "adapter": "claude-code",
+            "pid": 1234
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = registered["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(registered["session"]["status"], "running");
+    assert_eq!(registered["session"]["agentName"], "Claude Code");
+    // No adapter in this build is verified yet, so detection must not guess.
+    assert_eq!(registered["session"]["verified"], false);
+
+    // Output arriving over HTTP is sanitized again on the daemon side.
+    let output = client
+        .post(format!("{base}/api/agents/{id}/output"))
+        .json(&json!({ "data": "\u{1b}[31mred\u{1b}[0m plain\r\nnext" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(output.status(), StatusCode::OK);
+
+    let detail: Value = client
+        .get(format!("{base}/api/agents/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["output"], "red plain\nnext");
+    assert_eq!(detail["session"]["outputSequence"], 1);
+
+    // Two keystroke batches, then a long poll starting from the beginning.
+    let first: Value = client
+        .post(format!("{base}/api/agents/{id}/input"))
+        .json(&json!({ "data": "y\n" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(first["sequence"], 0);
+    let second: Value = client
+        .post(format!("{base}/api/agents/{id}/input"))
+        .json(&json!({ "data": "n\n" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(second["sequence"], 1);
+
+    let poll: Value = client
+        .get(format!("{base}/api/agents/{id}/input?after=0&waitMs=1000"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(poll["chunks"].as_array().unwrap().len(), 2);
+    assert_eq!(poll["chunks"][0]["data"], "y\n");
+    assert_eq!(poll["chunks"][1]["data"], "n\n");
+
+    // Advancing the cursor drains the queue and frees its budget.
+    let drained: Value = client
+        .get(format!("{base}/api/agents/{id}/input?after=2&waitMs=0"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(drained["chunks"].as_array().unwrap().is_empty());
+
+    // An oversized keystroke batch is rejected instead of buffered.
+    let oversized = client
+        .post(format!("{base}/api/agents/{id}/input"))
+        .json(&json!({ "data": "x".repeat(5_000) }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(oversized.status(), StatusCode::BAD_REQUEST);
+
+    // A typed event lands in the persisted Inbox.
+    let created: Value = client
+        .post(format!("{base}/api/agents/{id}/events"))
+        .json(&json!({
+            "type": "permission",
+            "message": "Permission requested: write 3 files.",
+            "metadata": { "source": "test" }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let event_id = created["event"]["id"].as_str().unwrap().to_string();
+    assert_eq!(created["event"]["type"], "permission");
+    assert_eq!(created["event"]["status"], "open");
+    assert_eq!(created["event"]["agentName"], "Claude Code");
+    assert_eq!(created["event"]["projectName"], "checkout-service");
+
+    let inbox: Value = client
+        .get(format!("{base}/api/agent-events?status=open"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(inbox["openCount"], 1);
+    assert_eq!(inbox["events"].as_array().unwrap().len(), 1);
+
+    let acked: Value = client
+        .post(format!("{base}/api/agent-events/{event_id}/ack"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(acked["event"]["status"], "acknowledged");
+    let after_ack: Value = client
+        .get(format!("{base}/api/agent-events?status=open"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after_ack["openCount"], 0);
+
+    // Unknown agent sessions are a 404, not an empty 200.
+    let missing = client
+        .get(format!(
+            "{base}/api/agents/{}",
+            cockpit_core::ids::create_id()
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    // Ending the session is idempotent and closes the stored flight.
+    let ended: Value = client
+        .post(format!("{base}/api/agents/{id}/end"))
+        .json(&json!({ "exitCode": 0 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ended["session"]["status"], "exited");
+    assert_eq!(ended["session"]["exitCode"], 0);
+
+    let flight: Value = client
+        .get(format!("{base}/api/sessions/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(flight["captureMode"], "pty");
+    assert_eq!(flight["status"], "completed");
+
+    let late_input = client
+        .post(format!("{base}/api/agents/{id}/input"))
+        .json(&json!({ "data": "late\n" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(late_input.status(), StatusCode::BAD_REQUEST);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_foreign_host_header_is_rejected() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("http://{}/api/health", daemon.addr))
+        .header(reqwest::header::HOST, "cockpit.attacker.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "forbidden_host");
+
+    // The loopback host header still works.
+    let ok = client
+        .get(format!("http://{}/api/health", daemon.addr))
+        .header(
+            reqwest::header::HOST,
+            format!("127.0.0.1:{}", daemon.addr.port()),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
 
     daemon.shutdown().await.unwrap();
 }

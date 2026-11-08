@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import { openAddAgent } from './add-agent.svelte';
-  import { pendingGuards } from './api/daemon.svelte';
+  import { inboxAttentionCount } from './api/daemon.svelte';
   import { t, type MessageKey } from './i18n/i18n.svelte';
   import { routeState } from './router.svelte';
 
@@ -19,7 +19,7 @@
     { key: 'nav.settings', icon: 'settings', href: '/settings' },
   ];
 
-  const pendingCount = $derived(pendingGuards().length);
+  const pendingCount = $derived(inboxAttentionCount());
 </script>
 
 <aside class="rail float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none" data-glass-neutral>

@@ -1,28 +1,59 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import {
+    acknowledgeAgentEvent,
+    agentAttentionCount,
     daemonState,
     decideGuard,
+    openAgentEvents,
     pendingGuards,
     refreshDaemon,
     resolvedGuards,
     seedDemoData,
+    acknowledgedAgentEvents,
   } from '../api/daemon.svelte';
-  import type { GuardEvent } from '../api/types';
+  import type { AgentEvent, GuardEvent } from '../api/types';
+  import { agentEventKey, agentEventNeedsYou, agentEventTone } from '../agent-events';
   import { statusKey, timeAgo } from '../format';
   import { t } from '../i18n/i18n.svelte';
   import { navigate } from '../router.svelte';
   import { toast } from '../toast-store.svelte';
 
+  type ResolvedEntry =
+    | { kind: 'guard'; at: string; guard: GuardEvent }
+    | { kind: 'agent'; at: string; event: AgentEvent };
+
   let busy = $state<Record<string, boolean>>({});
+  let ackBusy = $state<Record<string, boolean>>({});
   let loadingDemo = $state(false);
   let confirmFor = $state<string | null>(null);
   let confirmText = $state('');
 
   const pending = $derived(pendingGuards());
-  const resolved = $derived(resolvedGuards().slice(0, 20));
+  const agentEvents = $derived(openAgentEvents());
+  const attention = $derived(pending.length + agentAttentionCount());
   const demo = $derived(daemonState.health?.demoMode === true);
   const offline = $derived(daemonState.status === 'offline' && daemonState.overview === null);
+  const resolvedEntries = $derived<ResolvedEntry[]>(
+    [
+      ...resolvedGuards().map(
+        (guard): ResolvedEntry => ({
+          kind: 'guard',
+          at: guard.resolvedAt ?? guard.requestedAt,
+          guard,
+        }),
+      ),
+      ...acknowledgedAgentEvents().map(
+        (event): ResolvedEntry => ({
+          kind: 'agent',
+          at: event.acknowledgedAt ?? event.createdAt,
+          event,
+        }),
+      ),
+    ]
+      .sort((a, b) => (a.at < b.at ? 1 : -1))
+      .slice(0, 20),
+  );
 
   function guardClass(event: GuardEvent): string {
     if (event.status === 'approved') return 'status-pill--ok';
@@ -43,6 +74,26 @@
       daemonState.sessions.find((session) => session.id === event.sessionId)?.title ??
       t('inbox.noSession')
     );
+  }
+
+  function agentSession(event: AgentEvent) {
+    return daemonState.sessions.find((session) => session.id === event.sessionId);
+  }
+
+  function liveAgent(event: AgentEvent) {
+    return daemonState.agents.find((session) => session.sessionId === event.sessionId);
+  }
+
+  function agentIsDemo(event: AgentEvent): boolean {
+    return event.metadata?.demo === true || agentSession(event)?.source === 'demo';
+  }
+
+  function agentNote(event: AgentEvent): string {
+    if (event.type === 'auth_required') return t('inbox.agentAuthNote');
+    if (event.type === 'done') return t('inbox.agentDoneNote');
+    if (event.type === 'error') return t('inbox.agentErrorNote');
+    if (agentEventNeedsYou(event.type)) return t('inbox.agentAnswerNote');
+    return t('inbox.agentInfoNote');
   }
 
   function isHighRisk(event: GuardEvent): boolean {
@@ -96,6 +147,27 @@
     }
   }
 
+  async function acknowledge(event: AgentEvent): Promise<void> {
+    if (ackBusy[event.id]) return;
+    ackBusy = { ...ackBusy, [event.id]: true };
+    try {
+      await acknowledgeAgentEvent(event.id);
+      toast(t('inbox.acknowledged'));
+    } catch {
+      toast(t('inbox.ackFailed'));
+    } finally {
+      ackBusy = { ...ackBusy, [event.id]: false };
+    }
+  }
+
+  function openAgent(event: AgentEvent): void {
+    if (liveAgent(event)) {
+      navigate(`/session?id=${encodeURIComponent(event.sessionId)}`);
+    } else {
+      navigate(`/flights?session=${encodeURIComponent(event.sessionId)}`);
+    }
+  }
+
   async function loadDemo(): Promise<void> {
     loadingDemo = true;
     try {
@@ -120,9 +192,9 @@
     <p class="screen-lede">{t('inbox.lede')}</p>
   </div>
   <div class="screen-actions">
-    <span class="status-pill" class:status-pill--warn={pending.length > 0} class:status-pill--ok={pending.length === 0}>
-      <span class="dot" class:dot--warn={pending.length > 0} class:dot--ok={pending.length === 0}></span>
-      {pending.length > 0 ? t('inbox.waiting', { count: pending.length }) : t('inbox.allClear')}
+    <span class="status-pill" class:status-pill--warn={attention > 0} class:status-pill--ok={attention === 0}>
+      <span class="dot" class:dot--warn={attention > 0} class:dot--ok={attention === 0}></span>
+      {attention > 0 ? t('inbox.waiting', { count: attention }) : t('inbox.allClear')}
     </span>
     {#if demo}
       <span class="status-pill status-pill--demo">{t('topbar.demo')}</span>
@@ -141,8 +213,57 @@
     </button>
   </section>
 {:else}
-  {#if pending.length > 0}
+  {#if agentEvents.length > 0 || pending.length > 0}
     <div class="guard-list">
+      {#each agentEvents as event (event.id)}
+        <article class="guard-card agent-event card" data-glass data-glass-layer="card" data-glass-depth="2">
+          <div class="guard-card__head">
+            <div class="guard-card__title">
+              <span class="status-pill {agentEventTone(event.type)}">{t(agentEventKey(event.type))}</span>
+              {#if agentIsDemo(event)}
+                <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+              {/if}
+              <h2>{event.agentName} · {event.projectName}</h2>
+            </div>
+            <span class="status-pill status-pill--warn">
+              <span class="dot dot--warn"></span>
+              {t('common.pending')}
+            </span>
+          </div>
+
+          {#if event.message}
+            <p class="guard-card__description">{event.message}</p>
+          {/if}
+
+          <dl class="guard-card__meta">
+            <div><dt>{t('flights.agent')}</dt><dd>{event.agentName}</dd></div>
+            <div><dt>{t('flights.project')}</dt><dd>{event.projectName}</dd></div>
+            <div><dt>{t('inbox.requestedAt')}</dt><dd>{timeAgo(event.createdAt, t)}</dd></div>
+          </dl>
+
+          <div class="agent-event__note" class:agent-event__note--auth={event.type === 'auth_required'}>
+            <Icon name={event.type === 'auth_required' ? 'lock' : 'terminal'} size={15} />
+            <span>{agentNote(event)}</span>
+          </div>
+
+          <div class="guard-card__actions">
+            <button
+              class="btn btn--primary"
+              type="button"
+              onclick={() => acknowledge(event)}
+              disabled={ackBusy[event.id]}
+            >
+              <Icon name="check" size={16} />
+              {t('inbox.acknowledge')}
+            </button>
+            <button class="btn btn--ghost" type="button" onclick={() => openAgent(event)}>
+              <Icon name={liveAgent(event) ? 'terminal' : 'plane'} size={16} />
+              {liveAgent(event) ? t('inbox.openSession') : t('inbox.openFlight')}
+            </button>
+          </div>
+        </article>
+      {/each}
+
       {#each pending as event (event.id)}
         <article class="guard-card card" data-glass data-glass-layer="card" data-glass-depth="2">
           <div class="guard-card__head">
@@ -284,28 +405,45 @@
     </section>
   {/if}
 
-  {#if resolved.length > 0}
+  {#if resolvedEntries.length > 0}
     <section class="resolved-section">
       <h2 class="section-title">{t('inbox.resolved')}</h2>
       <div class="resolved-list">
-        {#each resolved as event (event.id)}
-          <article class="resolved-row card">
-            <div class="resolved-row__main">
-              <span class="status-pill {guardClass(event)}">{t(statusKey(event.status))}</span>
-              <div>
-                <strong>
-                  {event.title}
-                  {#if event.metadata?.demo}
-                    <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
-                  {/if}
-                </strong>
-                <small>{sessionTitle(event)} · {timeAgo(event.resolvedAt ?? event.requestedAt, t)}</small>
+        {#each resolvedEntries as entry (entry.kind === 'guard' ? entry.guard.id : entry.event.id)}
+          {#if entry.kind === 'guard'}
+            <article class="resolved-row card">
+              <div class="resolved-row__main">
+                <span class="status-pill {guardClass(entry.guard)}">{t(statusKey(entry.guard.status))}</span>
+                <div>
+                  <strong>
+                    {entry.guard.title}
+                    {#if entry.guard.metadata?.demo}
+                      <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+                    {/if}
+                  </strong>
+                  <small>{sessionTitle(entry.guard)} · {timeAgo(entry.guard.resolvedAt ?? entry.guard.requestedAt, t)}</small>
+                </div>
               </div>
-            </div>
-            {#if event.resolvedBy}
-              <span class="resolved-row__by">{t('inbox.resolvedBy', { name: event.resolvedBy })}</span>
-            {/if}
-          </article>
+              {#if entry.guard.resolvedBy}
+                <span class="resolved-row__by">{t('inbox.resolvedBy', { name: entry.guard.resolvedBy })}</span>
+              {/if}
+            </article>
+          {:else}
+            <article class="resolved-row card">
+              <div class="resolved-row__main">
+                <span class="status-pill status-pill--ok">{t('common.acknowledged')}</span>
+                <div>
+                  <strong>
+                    {t(agentEventKey(entry.event.type))} · {entry.event.agentName}
+                    {#if agentIsDemo(entry.event)}
+                      <span class="status-pill status-pill--demo">{t('demo.badge')}</span>
+                    {/if}
+                  </strong>
+                  <small>{entry.event.projectName} · {timeAgo(entry.event.acknowledgedAt ?? entry.event.createdAt, t)}</small>
+                </div>
+              </div>
+            </article>
+          {/if}
         {/each}
       </div>
     </section>

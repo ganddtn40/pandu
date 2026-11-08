@@ -374,6 +374,39 @@ fn round_milli(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
+/// Generate a 256-bit single-use approval nonce.
+pub(crate) fn new_approval_nonce() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let mut nonce = String::with_capacity(64);
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(nonce, "{byte:02x}");
+    }
+    nonce
+}
+
+fn approval_expires_at(timeout: Duration) -> String {
+    let duration = chrono::Duration::from_std(timeout)
+        .unwrap_or_else(|_| chrono::Duration::milliseconds(120_000));
+    (chrono::Utc::now() + duration).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Give a pending event the nonce and expiry the approval API requires.
+/// Called by every service that can create a pause event.
+pub(crate) fn prepare_approval(input: &mut NewGuardEvent, timeout: Duration) {
+    if input.status != GuardEventStatus::Pending {
+        return;
+    }
+    if input.approval_nonce.is_none() {
+        input.approval_nonce = Some(new_approval_nonce());
+    }
+    if input.approval_expires_at.is_none() {
+        input.approval_expires_at = Some(approval_expires_at(timeout));
+    }
+}
+
 fn event_payload(event: &GuardEvent) -> Value {
     json!({
         "ruleId": event.rule_id,
@@ -469,11 +502,23 @@ impl GuardService {
     }
 
     pub fn list_events(&self, query: &GuardEventListQuery) -> GuardResult<Vec<GuardEvent>> {
+        let _ = self.expire_stale_approvals();
         Ok(self.store.list_guard_events(query)?)
     }
 
     pub fn pending(&self, session_id: Option<&str>) -> GuardResult<Vec<GuardEvent>> {
+        let _ = self.expire_stale_approvals();
         Ok(self.store.list_pending_guard_events(session_id)?)
+    }
+
+    /// Expire every approval whose window elapsed and emit one live event per
+    /// real transition. Failures are logged, never fatal for the caller.
+    pub fn expire_stale_approvals(&self) -> GuardResult<Vec<GuardEvent>> {
+        let expired = self.store.expire_pending_guard_events(&now_iso())?;
+        for event in &expired {
+            self.emit_resolved(event);
+        }
+        Ok(expired)
     }
 
     pub async fn resolve_event(
@@ -493,6 +538,61 @@ impl GuardService {
             .into());
         }
 
+        // Pending approvals are bound to one session, one nonce, and one
+        // expiry window. Replayed or late answers are rejected before any
+        // write happens.
+        let Some(stored_nonce) = event.approval_nonce.as_deref() else {
+            return Err(GuardServiceError::new(
+                409,
+                "invalid_approval",
+                "This approval is missing its one-time token. Reload the Inbox and try again.",
+            )
+            .into());
+        };
+        if decision.nonce.as_deref() != Some(stored_nonce) {
+            return Err(GuardServiceError::new(
+                409,
+                "invalid_approval",
+                "The approval token does not match this request.",
+            )
+            .into());
+        }
+        if decision.session_id.as_deref() != Some(event.session_id.as_str()) {
+            return Err(GuardServiceError::new(
+                409,
+                "invalid_approval",
+                "The approval token belongs to a different session.",
+            )
+            .into());
+        }
+        if event
+            .approval_expires_at
+            .as_deref()
+            .is_some_and(|expires_at| expires_at <= now_iso().as_str())
+        {
+            // Expiring is also a single-use transition: clear the nonce with
+            // the same atomic guard the approve/deny path uses.
+            let patch = GuardEventPatch {
+                status: Some(GuardEventStatus::Expired),
+                resolved_at: Some(now_iso()),
+                resolved_by: Some("cockpit".to_string()),
+                resolution_note: Some("The approval window elapsed.".to_string()),
+            };
+            if let Some(expired) =
+                self.store
+                    .resolve_guard_event_once(event_id, stored_nonce, &patch)?
+            {
+                self.emit_resolved(&expired);
+            }
+            self.broker.cancel(event_id, ApprovalOutcome::Expired).await;
+            return Err(GuardServiceError::new(
+                410,
+                "approval_expired",
+                "This approval expired. Ask the agent to request it again.",
+            )
+            .into());
+        }
+
         let status = match decision.decision {
             ApprovalChoice::Approve => GuardEventStatus::Approved,
             ApprovalChoice::Deny => GuardEventStatus::Denied,
@@ -501,19 +601,21 @@ impl GuardService {
             .actor
             .clone()
             .unwrap_or_else(|| decision.channel.clone());
+        let patch = GuardEventPatch {
+            status: Some(status),
+            resolved_at: Some(now_iso()),
+            resolved_by: Some(actor),
+            resolution_note: decision.note.clone(),
+        };
         let updated = self
             .store
-            .update_guard_event(
-                event_id,
-                &GuardEventPatch {
-                    status: Some(status),
-                    resolved_at: Some(now_iso()),
-                    resolved_by: Some(actor),
-                    resolution_note: decision.note.clone(),
-                },
-            )?
+            .resolve_guard_event_once(event_id, stored_nonce, &patch)?
             .ok_or_else(|| {
-                GuardServiceError::new(404, "not_found", "The guard event was not found.")
+                GuardServiceError::new(
+                    409,
+                    "conflict",
+                    "This approval was already answered or is no longer pending.",
+                )
             })?;
         self.emit_resolved(&updated);
         self.broker.resolve(event_id, decision.decision).await;
@@ -768,6 +870,8 @@ impl GuardService {
                     "location": finding.location.as_str(),
                     "confidence": finding.confidence,
                 })),
+                approval_nonce: None,
+                approval_expires_at: None,
             })?);
         }
 
@@ -1052,6 +1156,8 @@ impl GuardService {
                     "occurrences": count,
                     "confidence": hit.confidence,
                 })),
+                approval_nonce: None,
+                approval_expires_at: None,
             })?);
         }
         Ok(events)
@@ -1089,6 +1195,8 @@ impl GuardService {
                     "source": source,
                     "matchCount": matches.len(),
                 })),
+                approval_nonce: None,
+                approval_expires_at: None,
             })?,
         ])
     }
@@ -1178,6 +1286,8 @@ impl GuardService {
                 "occurrences": similar + 1,
                 "threshold": threshold,
             })),
+            approval_nonce: None,
+            approval_expires_at: None,
         })?])
     }
 
@@ -1193,7 +1303,8 @@ impl GuardService {
         Ok(refreshed)
     }
 
-    pub(crate) fn record_event(&self, input: NewGuardEvent) -> GuardResult<GuardEvent> {
+    pub(crate) fn record_event(&self, mut input: NewGuardEvent) -> GuardResult<GuardEvent> {
+        prepare_approval(&mut input, self.approval_timeout);
         let event = self.store.insert_guard_event(input)?;
         self.live.publish(
             "guard.triggered",
@@ -1378,11 +1489,63 @@ fn builtin_rules() -> Vec<(&'static str, GuardRuleInput)> {
 mod tests {
     use super::*;
     use crate::live::LiveBus;
+    use crate::store::NewSession;
+    use cockpit_core::model::{CaptureMode, SessionSource};
 
-    fn service() -> Arc<GuardService> {
+    fn setup_with_timeout(timeout_ms: u64) -> (Arc<GuardService>, Arc<Store>) {
         let store = Arc::new(Store::open(":memory:").unwrap());
         let bus = LiveBus::new(store.clone(), 0);
-        GuardService::new(store, bus, 100)
+        let service = GuardService::new(store.clone(), bus, timeout_ms);
+        (service, store)
+    }
+
+    fn service() -> Arc<GuardService> {
+        setup_with_timeout(100).0
+    }
+
+    fn pending_event(service: &GuardService, store: &Store) -> GuardEvent {
+        let session = store
+            .create_session(NewSession {
+                title: "Approval flight".to_string(),
+                source: SessionSource::Proxy,
+                capture_mode: CaptureMode::Proxy,
+                ..NewSession::default()
+            })
+            .unwrap();
+        service
+            .record_event(NewGuardEvent {
+                session_id: session.id,
+                step_id: None,
+                rule_id: "test-pause".to_string(),
+                kind: GuardRuleKind::DangerousCommand,
+                action: GuardAction::Pause,
+                severity: GuardSeverity::High,
+                status: GuardEventStatus::Pending,
+                title: "Test approval".to_string(),
+                description: "A pending approval used by tests.".to_string(),
+                command: Some("rm -rf build".to_string()),
+                evidence: Vec::new(),
+                metadata: None,
+                approval_nonce: None,
+                approval_expires_at: None,
+            })
+            .unwrap()
+    }
+
+    fn decision(
+        choice: ApprovalChoice,
+        nonce: Option<&str>,
+        session_id: Option<&str>,
+    ) -> ApprovalDecisionInput {
+        ApprovalDecisionInput {
+            decision: choice,
+            note: None,
+            actor: Some("test".to_string()),
+            channel: "dashboard".to_string(),
+            provider: None,
+            nonce: nonce.map(str::to_string),
+            session_id: session_id.map(str::to_string),
+        }
     }
 
     #[test]
@@ -1447,5 +1610,147 @@ mod tests {
         let expired = broker.wait_for("event-2", Duration::from_millis(5)).await;
         assert_eq!(expired, ApprovalOutcome::Expired);
         assert!(!broker.is_pending("event-2").await);
+    }
+
+    #[tokio::test]
+    async fn approvals_are_bound_to_nonce_and_session() {
+        let (service, store) = setup_with_timeout(5_000);
+        let event = pending_event(&service, &store);
+        let nonce = event.approval_nonce.clone().expect("a pending nonce");
+
+        // A missing or wrong nonce never resolves the event.
+        let missing = service
+            .resolve_event(
+                &event.id,
+                decision(ApprovalChoice::Approve, None, Some(&event.session_id)),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code(), "invalid_approval");
+        let wrong = service
+            .resolve_event(
+                &event.id,
+                decision(
+                    ApprovalChoice::Approve,
+                    Some("not-the-nonce"),
+                    Some(&event.session_id),
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(wrong.code(), "invalid_approval");
+
+        // The right nonce from the wrong session is rejected too.
+        let other = store
+            .create_session(NewSession {
+                title: "Other flight".to_string(),
+                source: SessionSource::Proxy,
+                capture_mode: CaptureMode::Proxy,
+                ..NewSession::default()
+            })
+            .unwrap();
+        let wrong_session = service
+            .resolve_event(
+                &event.id,
+                decision(ApprovalChoice::Approve, Some(&nonce), Some(&other.id)),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(wrong_session.code(), "invalid_approval");
+
+        let still_pending = store.get_guard_event(&event.id).unwrap().unwrap();
+        assert_eq!(still_pending.status, GuardEventStatus::Pending);
+        assert_eq!(
+            still_pending.approval_nonce.as_deref(),
+            Some(nonce.as_str())
+        );
+
+        // The correct tuple resolves once.
+        let resolved = service
+            .resolve_event(
+                &event.id,
+                decision(
+                    ApprovalChoice::Approve,
+                    Some(&nonce),
+                    Some(&event.session_id),
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolved.status, GuardEventStatus::Approved);
+        assert_eq!(resolved.approval_nonce, None);
+    }
+
+    #[tokio::test]
+    async fn a_replayed_approval_is_rejected() {
+        let (service, store) = setup_with_timeout(5_000);
+        let event = pending_event(&service, &store);
+        let nonce = event.approval_nonce.clone().expect("a pending nonce");
+
+        service
+            .resolve_event(
+                &event.id,
+                decision(
+                    ApprovalChoice::Approve,
+                    Some(&nonce),
+                    Some(&event.session_id),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let replay = service
+            .resolve_event(
+                &event.id,
+                decision(
+                    ApprovalChoice::Approve,
+                    Some(&nonce),
+                    Some(&event.session_id),
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(replay.code(), "conflict");
+        let stored = store.get_guard_event(&event.id).unwrap().unwrap();
+        assert_eq!(stored.status, GuardEventStatus::Approved);
+        assert_eq!(stored.resolved_by.as_deref(), Some("test"));
+    }
+
+    #[tokio::test]
+    async fn an_expired_approval_is_rejected_and_marked_expired() {
+        let (service, store) = setup_with_timeout(20);
+        let event = pending_event(&service, &store);
+        let nonce = event.approval_nonce.clone().expect("a pending nonce");
+        tokio::time::sleep(Duration::from_millis(40)).await;
+
+        let expired = service
+            .resolve_event(
+                &event.id,
+                decision(
+                    ApprovalChoice::Approve,
+                    Some(&nonce),
+                    Some(&event.session_id),
+                ),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(expired.code(), "approval_expired");
+
+        let stored = store.get_guard_event(&event.id).unwrap().unwrap();
+        assert_eq!(stored.status, GuardEventStatus::Expired);
+        assert_eq!(stored.approval_nonce, None);
+    }
+
+    #[tokio::test]
+    async fn the_expiry_sweep_only_touches_elapsed_events() {
+        let (service, store) = setup_with_timeout(20);
+        let expired_event = pending_event(&service, &store);
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let swept = service.expire_stale_approvals().unwrap();
+        assert_eq!(swept.len(), 1);
+        assert_eq!(swept[0].id, expired_event.id);
+
+        // A sweep with nothing to do is a no-op.
+        assert!(service.expire_stale_approvals().unwrap().is_empty());
     }
 }

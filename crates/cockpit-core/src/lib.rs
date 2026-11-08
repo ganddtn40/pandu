@@ -29,7 +29,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// The value changes whenever a migration is added. The daemon refuses to open
 /// a database written by a newer schema than it understands.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[cfg(test)]
 mod tests {
@@ -41,7 +41,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_starts_at_one() {
-        assert_eq!(SCHEMA_VERSION, 1);
+    fn schema_version_tracks_migrations() {
+        assert_eq!(SCHEMA_VERSION, 2);
     }
 }

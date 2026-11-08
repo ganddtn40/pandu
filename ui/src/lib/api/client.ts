@@ -1,5 +1,8 @@
 import type {
   AdapterList,
+  AgentEvent,
+  AgentOutput,
+  AgentSession,
   ApprovalDecision,
   DemoSeedResponse,
   GuardEvent,
@@ -119,4 +122,20 @@ export const daemonApi = {
   updateSettings: (patch: Record<string, string>) =>
     request<SettingsResponse>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
   seedDemo: () => request<DemoSeedResponse>('/demo/seed', { method: 'POST' }),
+  agents: () => request<{ sessions: AgentSession[] }>('/agents'),
+  agent: (id: string) =>
+    request<AgentOutput>(`/agents/${encodeURIComponent(id)}`),
+  agentInput: (id: string, data: string) =>
+    request<{ sequence: number }>(`/agents/${encodeURIComponent(id)}/input`, {
+      method: 'POST',
+      body: JSON.stringify({ data }),
+    }),
+  agentEvents: (status?: string) =>
+    request<{ events: AgentEvent[]; openCount: number }>(
+      `/agent-events?limit=200${status ? `&status=${encodeURIComponent(status)}` : ''}`,
+    ),
+  ackAgentEvent: (id: string) =>
+    request<{ event: AgentEvent }>(`/agent-events/${encodeURIComponent(id)}/ack`, {
+      method: 'POST',
+    }),
 };

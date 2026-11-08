@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{SecondsFormat, Utc};
+use cockpit_core::agent::{AgentEvent, AgentEventInput, AgentEventStatus, AgentEventType};
 use cockpit_core::guard::{
     BudgetEnforcement, BudgetPeriod, BudgetPolicy, BudgetPolicyInput, BudgetPolicyPatch,
     BudgetScope, GuardAction, GuardEvent, GuardEventListQuery, GuardEventStatus, GuardEvidence,
@@ -23,7 +24,7 @@ use serde_json::Value;
 
 use crate::error::{DaemonError, Result};
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -197,6 +198,8 @@ CREATE TABLE IF NOT EXISTS guard_events (
   command TEXT,
   evidence TEXT NOT NULL DEFAULT '[]',
   requested_at TEXT NOT NULL,
+  approval_nonce TEXT,
+  approval_expires_at TEXT,
   resolved_at TEXT,
   resolved_by TEXT,
   resolution_note TEXT,
@@ -205,6 +208,22 @@ CREATE TABLE IF NOT EXISTS guard_events (
 
 CREATE INDEX IF NOT EXISTS idx_guard_events_session ON guard_events(session_id, requested_at DESC);
 CREATE INDEX IF NOT EXISTS idx_guard_events_status ON guard_events(status, requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  agent_name TEXT NOT NULL DEFAULT '',
+  project_name TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  acknowledged_at TEXT,
+  metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_status ON agent_events(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_events_session ON agent_events(session_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS budget_policies (
   id TEXT PRIMARY KEY,
@@ -341,6 +360,9 @@ pub struct NewGuardEvent {
     pub command: Option<String>,
     pub evidence: Vec<GuardEvidence>,
     pub metadata: Option<Value>,
+    /// Filled by `GuardService::record_event` for pending approvals.
+    pub approval_nonce: Option<String>,
+    pub approval_expires_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -432,6 +454,37 @@ fn ensure_compatible_schema(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Bring an older database up to the current schema. `SCHEMA` already creates
+/// any missing tables, so this only adds columns that `CREATE TABLE IF NOT
+/// EXISTS` cannot add to an existing table.
+fn migrate_schema(connection: &Connection, from: u32) -> Result<()> {
+    if from < 2 {
+        add_column_if_missing(connection, "guard_events", "approval_nonce", "TEXT")?;
+        add_column_if_missing(connection, "guard_events", "approval_expires_at", "TEXT")?;
+    }
+    Ok(())
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns: Vec<String> = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(statement);
+    if columns.iter().any(|existing| existing == column) {
+        return Ok(());
+    }
+    connection.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+    ))?;
+    Ok(())
+}
+
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -469,8 +522,16 @@ impl Store {
                         "the database uses schema version {version}, but this build understands {SCHEMA_VERSION}"
                     )));
                 }
+                if version < SCHEMA_VERSION {
+                    migrate_schema(&connection, version)?;
+                    connection.execute(
+                        "UPDATE schema_meta SET value = ?1 WHERE key = 'schema_version'",
+                        params![SCHEMA_VERSION.to_string()],
+                    )?;
+                }
             }
             None => {
+                migrate_schema(&connection, 0)?;
                 connection.execute(
                     "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1)",
                     params![SCHEMA_VERSION.to_string()],
@@ -1626,8 +1687,9 @@ impl Store {
             connection.execute(
                 "INSERT INTO guard_events
                    (id, session_id, step_id, rule_id, kind, action, severity, status, title,
-                    description, command, evidence, requested_at, metadata)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    description, command, evidence, requested_at, approval_nonce,
+                    approval_expires_at, metadata)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     id,
                     input.session_id,
@@ -1642,6 +1704,8 @@ impl Store {
                     input.command,
                     evidence,
                     requested_at,
+                    input.approval_nonce,
+                    input.approval_expires_at,
                     metadata,
                 ],
             )?;
@@ -1743,6 +1807,170 @@ impl Store {
         )?;
         drop(connection);
         self.get_guard_event(id)
+    }
+
+    /// Resolve a pending approval exactly once.
+    ///
+    /// The `WHERE` clause is the security boundary: the nonce must still be
+    /// attached to this event and the event must still be pending. A replayed
+    /// or late decision updates nothing and returns `None`.
+    pub fn resolve_guard_event_once(
+        &self,
+        id: &str,
+        nonce: &str,
+        patch: &GuardEventPatch,
+    ) -> Result<Option<GuardEvent>> {
+        let connection = self.lock()?;
+        let updated = connection.execute(
+            "UPDATE guard_events SET
+               status = ?1, resolved_at = ?2, resolved_by = ?3, resolution_note = ?4,
+               approval_nonce = NULL
+             WHERE id = ?5 AND status = 'pending' AND approval_nonce = ?6",
+            params![
+                patch
+                    .status
+                    .map(GuardEventStatus::as_str)
+                    .unwrap_or("pending"),
+                patch.resolved_at,
+                patch.resolved_by,
+                patch.resolution_note,
+                id,
+                nonce,
+            ],
+        )?;
+        drop(connection);
+        if updated == 0 {
+            return Ok(None);
+        }
+        self.get_guard_event(id)
+    }
+
+    /// Mark every pending approval whose window elapsed as expired. Returns
+    /// only the rows this call actually changed so the caller can emit one
+    /// live event per real transition.
+    pub fn expire_pending_guard_events(&self, now: &str) -> Result<Vec<GuardEvent>> {
+        let ids: Vec<String> = {
+            let connection = self.lock()?;
+            let mut statement = connection.prepare(
+                "SELECT id FROM guard_events
+                 WHERE status = 'pending'
+                   AND approval_expires_at IS NOT NULL
+                   AND approval_expires_at <= ?1",
+            )?;
+            let rows = statement.query_map(params![now], |row| row.get::<_, String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+
+        let mut expired = Vec::new();
+        for id in ids {
+            let connection = self.lock()?;
+            let changed = connection.execute(
+                "UPDATE guard_events SET
+                   status = 'expired', resolved_at = ?1, resolved_by = 'cockpit',
+                   resolution_note = 'The approval window elapsed.', approval_nonce = NULL
+                 WHERE id = ?2 AND status = 'pending'",
+                params![now, id],
+            )?;
+            if changed == 0 {
+                continue;
+            }
+            let event = connection
+                .query_row(
+                    &format!("SELECT {GUARD_EVENT_COLUMNS} FROM guard_events WHERE id = ?1"),
+                    params![id],
+                    row_to_guard_event,
+                )
+                .optional()?;
+            expired.extend(event);
+        }
+        Ok(expired)
+    }
+
+    // ----- Agent control events --------------------------------------------
+
+    pub fn insert_agent_event(
+        &self,
+        session_id: &str,
+        agent_name: &str,
+        project_name: &str,
+        input: &AgentEventInput,
+    ) -> Result<AgentEvent> {
+        let id = cockpit_core::ids::create_id();
+        let created_at = now_iso();
+        let metadata = input
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        {
+            let connection = self.lock()?;
+            connection.execute(
+                "INSERT INTO agent_events
+                   (id, session_id, agent_name, project_name, type, message, status,
+                    created_at, metadata)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', ?7, ?8)",
+                params![
+                    id,
+                    session_id,
+                    agent_name,
+                    project_name,
+                    input.event_type.as_str(),
+                    input.message,
+                    created_at,
+                    metadata,
+                ],
+            )?;
+        }
+        self.get_agent_event(&id)?
+            .ok_or_else(|| DaemonError::other("agent event disappeared after insert"))
+    }
+
+    pub fn get_agent_event(&self, id: &str) -> Result<Option<AgentEvent>> {
+        let connection = self.lock()?;
+        let event = connection
+            .query_row(
+                &format!("SELECT {AGENT_EVENT_COLUMNS} FROM agent_events WHERE id = ?1"),
+                params![id],
+                row_to_agent_event,
+            )
+            .optional()?;
+        Ok(event)
+    }
+
+    pub fn list_agent_events(
+        &self,
+        status: Option<AgentEventStatus>,
+        limit: u32,
+    ) -> Result<Vec<AgentEvent>> {
+        let limit = if limit == 0 { 100 } else { limit.min(1_000) };
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "SELECT {AGENT_EVENT_COLUMNS} FROM agent_events
+             WHERE (?1 IS NULL OR status = ?1)
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?2"
+        ))?;
+        let rows = statement.query_map(
+            params![status.map(AgentEventStatus::as_str), limit],
+            row_to_agent_event,
+        )?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
+    pub fn acknowledge_agent_event(&self, id: &str) -> Result<Option<AgentEvent>> {
+        let now = now_iso();
+        let connection = self.lock()?;
+        connection.execute(
+            "UPDATE agent_events SET status = 'acknowledged', acknowledged_at = ?1
+             WHERE id = ?2 AND status = 'open'",
+            params![now, id],
+        )?;
+        drop(connection);
+        self.get_agent_event(id)
     }
 
     /// Remove only rows produced by a historical rescan. Request-time findings
@@ -2251,12 +2479,12 @@ fn row_to_guard_rule(row: &rusqlite::Row<'_>) -> rusqlite::Result<GuardRule> {
 
 const GUARD_EVENT_COLUMNS: &str =
     "id, session_id, step_id, rule_id, kind, action, severity, status,
-    title, description, command, evidence, requested_at, resolved_at, resolved_by,
-    resolution_note, metadata";
+    title, description, command, evidence, requested_at, approval_nonce,
+    approval_expires_at, resolved_at, resolved_by, resolution_note, metadata";
 
 fn row_to_guard_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<GuardEvent> {
     let evidence: String = row.get(11)?;
-    let metadata: Option<String> = row.get(16)?;
+    let metadata: Option<String> = row.get(18)?;
     Ok(GuardEvent {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -2272,9 +2500,32 @@ fn row_to_guard_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<GuardEvent> {
         command: row.get(10)?,
         evidence: serde_json::from_str(&evidence).unwrap_or_default(),
         requested_at: row.get(12)?,
-        resolved_at: row.get(13)?,
-        resolved_by: row.get(14)?,
-        resolution_note: row.get(15)?,
+        approval_nonce: row.get(13)?,
+        approval_expires_at: row.get(14)?,
+        resolved_at: row.get(15)?,
+        resolved_by: row.get(16)?,
+        resolution_note: row.get(17)?,
+        metadata: metadata.and_then(|value| serde_json::from_str(&value).ok()),
+    })
+}
+
+const AGENT_EVENT_COLUMNS: &str = "id, session_id, agent_name, project_name, type, message,
+    status, created_at, acknowledged_at, metadata";
+
+fn row_to_agent_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentEvent> {
+    let metadata: Option<String> = row.get(9)?;
+    Ok(AgentEvent {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        agent_name: row.get(2)?,
+        project_name: row.get(3)?,
+        event_type: AgentEventType::parse(&row.get::<_, String>(4)?)
+            .unwrap_or(AgentEventType::Question),
+        message: row.get(5)?,
+        status: AgentEventStatus::parse(&row.get::<_, String>(6)?)
+            .unwrap_or(AgentEventStatus::Open),
+        created_at: row.get(7)?,
+        acknowledged_at: row.get(8)?,
         metadata: metadata.and_then(|value| serde_json::from_str(&value).ok()),
     })
 }

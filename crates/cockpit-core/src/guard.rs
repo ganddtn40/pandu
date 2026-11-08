@@ -458,6 +458,12 @@ pub struct GuardEvent {
     #[serde(default)]
     pub evidence: Vec<GuardEvidence>,
     pub requested_at: String,
+    /// Single-use secret that must accompany an approval decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_nonce: Option<String>,
+    /// The instant after which this approval can no longer be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_expires_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -592,6 +598,12 @@ pub struct ApprovalDecisionInput {
     pub channel: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// The nonce shown with the pending event. Required for pause approvals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    /// The session the approval belongs to. Required for pause approvals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 fn default_channel() -> String {

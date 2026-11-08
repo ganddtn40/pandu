@@ -22,6 +22,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tracing_subscriber::EnvFilter;
 
+mod pty;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "cockpit",
@@ -291,20 +293,41 @@ async fn run_agent(config: Config, args: RunArgs) -> anyhow::Result<()> {
         None => println!("No adapter matched `{program}`. Running it without proxy settings."),
     }
 
-    let mut command = agent_command(&args.agent);
-    command.envs(environment.iter().cloned());
-    let status = command
-        .status()
-        .await
-        .with_context(|| format!("could not run `{program}`"))?;
+    let (program, arguments) = resolve_agent_command(&args.agent);
+    let agent_name = adapter
+        .as_ref()
+        .map(|adapter| adapter.name.clone())
+        .unwrap_or_else(|| {
+            Path::new(&program)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or(&program)
+                .to_string()
+        });
+    let adapter_id = adapter
+        .as_ref()
+        .map(|adapter| adapter.id.clone())
+        .unwrap_or_else(|| agent_name.clone());
+
+    let outcome = pty::run(pty::PtyRequest {
+        program: &program,
+        args: &arguments,
+        env: &environment,
+        agent_name: &agent_name,
+        adapter_id: &adapter_id,
+        addr,
+    })
+    .await;
 
     if let Daemon::Owned(handle) = daemon {
         handle.shutdown().await?;
     }
 
-    match status.code() {
+    let outcome = outcome?;
+    match outcome.exit_code {
         Some(0) => Ok(()),
         Some(code) => std::process::exit(code),
+        None if outcome.killed => std::process::exit(130),
         None => bail!("`{program}` ended without an exit code"),
     }
 }
@@ -403,7 +426,10 @@ fn proxy_environment(adapter: &Adapter, addr: SocketAddr) -> Vec<(String, String
     environment
 }
 
-fn agent_command(agent: &[String]) -> tokio::process::Command {
+/// Resolve the user's command to an executable path. Windows `.cmd`/`.bat`
+/// shims (how npm and most agent CLIs install themselves) must run through
+/// `cmd /C`; nothing else is ever added to the command.
+fn resolve_agent_command(agent: &[String]) -> (String, Vec<String>) {
     let program = &agent[0];
     let resolved = adapters::find_executable(program);
 
@@ -416,19 +442,18 @@ fn agent_command(agent: &[String]) -> tokio::process::Command {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             if extension == "cmd" || extension == "bat" {
-                let mut command = tokio::process::Command::new("cmd");
-                command.arg("/C").arg(path).args(&agent[1..]);
-                return command;
+                let mut arguments = vec!["/C".to_string(), path.display().to_string()];
+                arguments.extend(agent[1..].iter().cloned());
+                return ("cmd".to_string(), arguments);
             }
         }
     }
 
-    let mut command = match &resolved {
-        Some(path) => tokio::process::Command::new(path),
-        None => tokio::process::Command::new(program),
-    };
-    command.args(&agent[1..]);
-    command
+    let program = resolved
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| program.clone());
+    (program, agent[1..].to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -701,6 +726,7 @@ fn render_markdown_report(diagnostics: &Diagnostics, registry: &AdapterRegistry)
                 cockpit_core::model::CaptureMode::Proxy => "proxy",
                 cockpit_core::model::CaptureMode::LogWatch => "log-watch",
                 cockpit_core::model::CaptureMode::HookOtel => "hook",
+                cockpit_core::model::CaptureMode::Pty => "pty",
             })
             .collect::<Vec<_>>()
             .join(", ");

@@ -1,6 +1,146 @@
 use http::HeaderMap;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::provider::{AgentInfo, DetectedFrom};
+
+/// The control-plane event vocabulary shared by the CLI, daemon, and UI.
+///
+/// Adapters may only emit these types. Keeping the list closed prevents an
+/// untrusted agent from inventing UI states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgentEventType {
+    #[serde(rename = "agent.started")]
+    Started,
+    #[serde(rename = "done")]
+    Done,
+    #[serde(rename = "permission")]
+    Permission,
+    #[serde(rename = "question")]
+    Question,
+    #[serde(rename = "choice")]
+    Choice,
+    #[serde(rename = "auth_required")]
+    AuthRequired,
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "stuck")]
+    Stuck,
+    #[serde(rename = "budget.warn")]
+    BudgetWarn,
+    #[serde(rename = "context.high")]
+    ContextHigh,
+}
+
+impl AgentEventType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "agent.started",
+            Self::Done => "done",
+            Self::Permission => "permission",
+            Self::Question => "question",
+            Self::Choice => "choice",
+            Self::AuthRequired => "auth_required",
+            Self::Error => "error",
+            Self::Stuck => "stuck",
+            Self::BudgetWarn => "budget.warn",
+            Self::ContextHigh => "context.high",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "agent.started" => Some(Self::Started),
+            "done" => Some(Self::Done),
+            "permission" => Some(Self::Permission),
+            "question" => Some(Self::Question),
+            "choice" => Some(Self::Choice),
+            "auth_required" => Some(Self::AuthRequired),
+            "error" => Some(Self::Error),
+            "stuck" => Some(Self::Stuck),
+            "budget.warn" => Some(Self::BudgetWarn),
+            "context.high" => Some(Self::ContextHigh),
+            _ => None,
+        }
+    }
+
+    /// Events that require a human at the computer. Authentication prompts are
+    /// deliberately included: Cockpit never relays secrets.
+    pub fn needs_you(self) -> bool {
+        matches!(
+            self,
+            Self::Permission | Self::Question | Self::Choice | Self::AuthRequired | Self::Stuck
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentEventStatus {
+    #[default]
+    Open,
+    Acknowledged,
+}
+
+impl AgentEventStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Acknowledged => "acknowledged",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "open" => Some(Self::Open),
+            "acknowledged" => Some(Self::Acknowledged),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEvent {
+    pub id: String,
+    pub session_id: String,
+    pub agent_name: String,
+    pub project_name: String,
+    #[serde(rename = "type")]
+    pub event_type: AgentEventType,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub status: AgentEventStatus,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acknowledged_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEventInput {
+    #[serde(rename = "type")]
+    pub event_type: AgentEventType,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub metadata: Option<Value>,
+}
+
+/// The only data Cockpit is allowed to put in an OS or browser notification.
+///
+/// This type has no message, prompt, code, or token field on purpose. Any new
+/// field must be reviewed against the Phase 6 notification rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPayload {
+    pub event_type: String,
+    pub agent_name: String,
+    pub project_name: String,
+}
 
 const AGENT_PATTERNS: &[(&str, &str)] = &[
     ("claude code", "Claude Code"),

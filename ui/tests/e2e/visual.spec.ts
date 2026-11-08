@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase5');
+const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase6');
 mkdirSync(SHOTS, { recursive: true });
 
 const DEMO_DAEMON = 'http://127.0.0.1:4321';
@@ -278,7 +278,7 @@ test.describe('desktop shell', () => {
     await expect(page.locator('.status-pill--demo').first()).toBeVisible();
     await expect(page.locator('.tile--spend .tile__value')).not.toHaveText('$0.00');
     await expect(page.locator('.tile--tokens .tile__value')).not.toHaveText('0');
-    await expect(page.locator('.tile--recent .list-row')).toHaveCount(3);
+    await expect(page.locator('.tile--recent .list-row')).toHaveCount(4);
     await expect(page.locator('.tile--agents .agent-row')).toHaveCount(3);
     await expect(page.locator('.preview-note')).toContainText('Synced');
     await expect(page.locator('.preview-note')).toContainText('demo mode');
@@ -676,8 +676,8 @@ test.describe('desktop shell', () => {
 
   test('filters, opens, replays, and deep-links a recorded flight', async ({ page }) => {
     await open(page, '/flights');
-    await expect(page.locator('.flight-row')).toHaveCount(3);
-    await expect(page.locator('.flights-toolbar__count')).toContainText('3 flights');
+    await expect(page.locator('.flight-row')).toHaveCount(4);
+    await expect(page.locator('.flights-toolbar__count')).toContainText('4 flights');
 
     await page.getByRole('button', { name: 'Completed', exact: true }).click();
     await expect(page.locator('.flight-row')).toHaveCount(2);
@@ -789,11 +789,12 @@ test.describe('desktop shell', () => {
 
   test('approves a pending guard and records the decision', async ({ page }) => {
     await open(page, '/inbox');
-    const card = page.locator('.guard-card');
+    const card = page.locator('.guard-card:not(.agent-event)');
     await expect(card).toHaveCount(1);
     await expect(card.getByRole('heading', { level: 2, name: 'Deploy the landing page?' })).toBeVisible();
     await expect(card).toContainText('pnpm deploy --prod');
     await expect(card).toContainText('Demo mode is on');
+    await card.scrollIntoViewIfNeeded();
     await screenshot(page, 'desktop-inbox-pending.png');
 
     // High risk parks focus on the safe choice.
@@ -804,11 +805,121 @@ test.describe('desktop shell', () => {
     await confirm.fill('approve');
     await card.getByRole('button', { name: 'Confirm approve' }).click();
     await expect(page.locator('.toast')).toContainText('Approved. The agent can continue.');
-    await expect(page.locator('.guard-card')).toHaveCount(0);
+    await expect(page.locator('.guard-card:not(.agent-event)')).toHaveCount(0);
+    const resolved = page.locator('.resolved-row').filter({ hasText: 'Deploy the landing page?' });
     await expect(page.locator('.resolved-section')).toContainText('Resolved');
-    await expect(page.locator('.resolved-row')).toContainText('Deploy the landing page?');
-    await expect(page.locator('.resolved-row')).toContainText('Approved');
+    await expect(resolved).toContainText('Deploy the landing page?');
+    await expect(resolved).toContainText('Approved');
+    await resolved.scrollIntoViewIfNeeded();
     await screenshot(page, 'desktop-inbox-resolved.png');
+  });
+
+  test('lists agent events and acknowledges a finished agent', async ({ page }) => {
+    await open(page, '/inbox');
+    const events = page.locator('.agent-event');
+    await expect(events).toHaveCount(3);
+    await expect(events.filter({ hasText: 'Permission needed' })).toHaveCount(1);
+    await expect(events.filter({ hasText: 'Sign-in needed' })).toHaveCount(1);
+    const done = events.filter({ hasText: 'Agent finished' });
+    await expect(done).toHaveCount(1);
+    await expect(done).toContainText('Demo');
+    await expect(page.locator('.screen-actions')).toContainText('waiting');
+    // The high-risk guard parks focus on Deny, which scrolls the inbox down.
+    await page.locator('main.panel').evaluate((panel) => {
+      panel.scrollTop = 0;
+    });
+    await screenshot(page, 'desktop-inbox-agent-events.png');
+
+    await done.getByRole('button', { name: 'Acknowledge' }).click();
+    await expect(page.locator('.toast')).toContainText('Event acknowledged.');
+    await expect(page.locator('.agent-event')).toHaveCount(2);
+    const resolved = page.locator('.resolved-row').filter({ hasText: 'Agent finished' });
+    await expect(resolved).toContainText('Acknowledged');
+    await resolved.scrollIntoViewIfNeeded();
+    await screenshot(page, 'desktop-inbox-agent-ack.png');
+  });
+
+  test('opens a live PTY session and queues keystrokes', async ({ page }) => {
+    await open(page, '/inbox');
+    await page
+      .locator('.agent-event')
+      .filter({ hasText: 'Permission needed' })
+      .getByRole('button', { name: 'Open live session' })
+      .click();
+
+    await expect(page).toHaveURL(/\/session\?id=/);
+    await expect(page.getByRole('heading', { level: 1, name: 'checkout-service' })).toBeVisible();
+    const output = page.locator('.pty-output');
+    await expect(output).toContainText('Claude Code v2.1.0');
+    await expect(output).toContainText('Do you want to proceed with the file writes? [y/N]');
+    expect(await output.textContent()).not.toContain('\u001b');
+    await expect(page.getByText('Prompt detection unverified')).toBeVisible();
+    await expect(
+      page.getByText('Sanitized output. Control sequences that could spoof the interface are stripped.'),
+    ).toBeVisible();
+    await expect(page.locator('.screen-actions')).toContainText('Needs you');
+    await expect(page.locator('.session-answer')).toBeVisible();
+    await screenshot(page, 'desktop-session-live.png');
+
+    const answer = page.locator('.session-answer input');
+    await answer.fill('y');
+    await page.locator('.session-answer').getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.locator('.toast')).toContainText('Keystrokes queued.');
+    await expect(answer).toHaveValue('');
+  });
+
+  test('explains notification payloads and toggles Windows toasts', async ({ page }) => {
+    await open(page, '/settings');
+    const card = page
+      .locator('.settings-card')
+      .filter({ hasText: 'What a notification contains' });
+    await expect(card).toContainText('Event type, agent name, and project name only.');
+    await expect(card).toContainText('Demo mode never sends desktop toasts.');
+    await expect(card.locator('.notify-row')).toHaveCount(3);
+
+    const toastToggle = card.locator('.notify-row').first().locator('.toggle');
+    await expect(toastToggle).toHaveAttribute('aria-pressed', 'true');
+    await card.scrollIntoViewIfNeeded();
+    await screenshot(page, 'desktop-settings-notifications.png');
+
+    await toastToggle.click();
+    await expect(toastToggle).toHaveAttribute('aria-pressed', 'false');
+    await toastToggle.click();
+    await expect(toastToggle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('shows a sign-in prompt on a live daemon without an answer box', async ({ page }) => {
+    const registered = await page.request.post(`${LIVE_DAEMON}/api/agents/register`, {
+      data: {
+        agentName: 'Gemini CLI',
+        projectName: 'billing-service',
+        workingDir: '~/projects/billing-service',
+        adapter: 'gemini-cli',
+      },
+    });
+    expect(registered.ok()).toBeTruthy();
+    const { session } = await registered.json();
+
+    const event = await page.request.post(
+      `${LIVE_DAEMON}/api/agents/${session.sessionId}/events`,
+      {
+        data: {
+          type: 'auth_required',
+          message: 'Sign in with your browser to continue.',
+        },
+      },
+    );
+    expect(event.ok()).toBeTruthy();
+
+    await open(page, `/session?id=${session.sessionId}`, { daemon: LIVE_DAEMON });
+    await expect(page.getByRole('heading', { level: 1, name: 'billing-service' })).toBeVisible();
+    const auth = page.locator('.session-auth');
+    await expect(auth.getByRole('heading', { level: 2, name: 'Needs you at the computer' })).toBeVisible();
+    await expect(auth).toContainText('Cockpit never asks for or relays passwords');
+    await expect(auth).not.toContainText('Sign in with your browser to continue.');
+    await expect(page.locator('.session-answer input')).toHaveCount(0);
+    await expect(auth.getByRole('button', { name: 'I signed in at the computer' })).toBeVisible();
+    await screenshot(page, 'desktop-session-auth.png');
   });
 });
 
@@ -933,11 +1044,14 @@ test.describe('phone shell', () => {
 
   test('opens the phone flight list and detail', async ({ page }) => {
     await open(page, '/flights');
-    await expect(page.locator('.flight-row')).toHaveCount(3);
+    await expect(page.locator('.flight-row')).toHaveCount(4);
     await expectNoHorizontalOverflow(page);
     await screenshot(page, 'phone-flights.png');
 
-    await page.locator('.flight-row').first().click();
+    await page
+      .locator('.flight-row')
+      .filter({ hasText: 'Review landing page copy' })
+      .click();
     const detail = page.locator('.flight-detail');
     await expect(detail.getByRole('heading', { level: 2, name: 'Review landing page copy' })).toBeVisible();
 
@@ -968,6 +1082,18 @@ test.describe('phone shell', () => {
     expect(pending + resolved).toBeGreaterThan(0);
     await expectNoHorizontalOverflow(page);
     await screenshot(page, 'phone-inbox.png');
+  });
+
+  test('opens the phone notification settings', async ({ page }) => {
+    await open(page, '/settings');
+    const card = page
+      .locator('.settings-card')
+      .filter({ hasText: 'What a notification contains' });
+    await card.scrollIntoViewIfNeeded();
+    await expect(card).toBeVisible();
+    await expect(card.locator('.notify-row')).toHaveCount(3);
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'phone-settings-notifications.png');
   });
 
   test('starts in performance mode on a low-end device', async ({ page }) => {

@@ -24,3 +24,5 @@ tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+portable-pty = "0.9"
+crossterm = "0.29"

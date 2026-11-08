@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
-  import { activeSessions, daemonState, pendingGuards } from './api/daemon.svelte';
+  import { activeSessions, daemonState, inboxAttentionCount } from './api/daemon.svelte';
   import { openAppearance } from './design/appearance.svelte';
   import { t } from './i18n/i18n.svelte';
   import { openQuickPrompt } from './quick-prompt.svelte';
@@ -10,7 +10,7 @@
   const activeCount = $derived(
     daemonState.overview?.stats.activeSessionCount ?? activeSessions().length,
   );
-  const pendingCount = $derived(pendingGuards().length);
+  const pendingCount = $derived(inboxAttentionCount());
   const demo = $derived(daemonState.health?.demoMode === true);
 </script>
 

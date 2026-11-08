@@ -8,6 +8,7 @@
 //! never change or block the bytes travelling to the upstream provider.
 
 pub mod adapters;
+pub mod agents;
 pub mod api;
 pub mod budget;
 pub mod config;

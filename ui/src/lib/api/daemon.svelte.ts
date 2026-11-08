@@ -1,6 +1,8 @@
 import { daemonApi, DaemonError, liveSocketUrl } from './client';
 import type {
   AdapterStatus,
+  AgentEvent,
+  AgentSession,
   ApprovalDecision,
   GuardEvent,
   GuardRule,
@@ -9,6 +11,8 @@ import type {
   Overview,
   Session,
 } from './types';
+import { agentEventIsAttention } from '../agent-events';
+import { notifyAgentEvent } from '../notify.svelte';
 
 export type DaemonStatus = 'connecting' | 'online' | 'offline';
 
@@ -20,6 +24,9 @@ export const daemonState = $state<{
   rules: GuardRule[];
   adapters: AdapterStatus[];
   settings: Record<string, string>;
+  agents: AgentSession[];
+  agentEvents: AgentEvent[];
+  agentOpenCount: number;
   liveEvents: LiveEvent[];
   status: DaemonStatus;
   liveConnected: boolean;
@@ -34,6 +41,9 @@ export const daemonState = $state<{
   rules: [],
   adapters: [],
   settings: {},
+  agents: [],
+  agentEvents: [],
+  agentOpenCount: 0,
   liveEvents: [],
   status: 'connecting',
   liveConnected: false,
@@ -43,6 +53,8 @@ export const daemonState = $state<{
 });
 
 const MAX_LIVE_EVENTS = 500;
+const knownAgentEventIds = new Set<string>();
+let agentEventsInitialized = false;
 let socket: WebSocket | null = null;
 let reconnectTimer: number | undefined;
 let refreshTimer: number | undefined;
@@ -56,6 +68,32 @@ function errorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
   return 'The Cockpit daemon is not reachable.';
+}
+
+/**
+ * Emit one notification per newly arrived attention event. The first refresh
+ * only records what already exists so opening the app does not replay history.
+ */
+function trackAgentEvents(events: AgentEvent[]): void {
+  const fresh = events.filter(
+    (event) => event.status === 'open' && !knownAgentEventIds.has(event.id),
+  );
+  for (const event of events) knownAgentEventIds.add(event.id);
+  if (!agentEventsInitialized) {
+    agentEventsInitialized = true;
+    return;
+  }
+  for (const event of fresh) {
+    if (event.metadata?.demo === true) continue;
+    // Match the daemon: attention events and finished agents are worth a
+    // notification; starting a session is not.
+    if (!agentEventIsAttention(event.type) && event.type !== 'done') continue;
+    notifyAgentEvent({
+      type: event.type,
+      agentName: event.agentName,
+      projectName: event.projectName,
+    });
+  }
 }
 
 /** Pull every screen's data in one pass. Individual endpoints may fail. */
@@ -72,14 +110,17 @@ export async function refreshDaemon(): Promise<void> {
     daemonState.status = health.ok ? 'online' : 'offline';
     daemonState.error = health.ok ? null : 'The daemon database is unavailable.';
 
-    const [overview, sessions, guards, rules, adapters, settings] = await Promise.allSettled([
-      daemonApi.overview(),
-      daemonApi.sessions(100),
-      daemonApi.guards(),
-      daemonApi.rules(),
-      daemonApi.adapters(),
-      daemonApi.settings(),
-    ]);
+    const [overview, sessions, guards, rules, adapters, settings, agents, agentEvents] =
+      await Promise.allSettled([
+        daemonApi.overview(),
+        daemonApi.sessions(100),
+        daemonApi.guards(),
+        daemonApi.rules(),
+        daemonApi.adapters(),
+        daemonApi.settings(),
+        daemonApi.agents(),
+        daemonApi.agentEvents(),
+      ]);
 
     if (overview.status === 'fulfilled') daemonState.overview = overview.value;
     if (sessions.status === 'fulfilled') daemonState.sessions = sessions.value.sessions;
@@ -87,6 +128,12 @@ export async function refreshDaemon(): Promise<void> {
     if (rules.status === 'fulfilled') daemonState.rules = rules.value.rules;
     if (adapters.status === 'fulfilled') daemonState.adapters = adapters.value.adapters;
     if (settings.status === 'fulfilled') daemonState.settings = settings.value.settings;
+    if (agents.status === 'fulfilled') daemonState.agents = agents.value.sessions;
+    if (agentEvents.status === 'fulfilled') {
+      trackAgentEvents(agentEvents.value.events);
+      daemonState.agentEvents = agentEvents.value.events;
+      daemonState.agentOpenCount = agentEvents.value.openCount;
+    }
     daemonState.lastSyncedAt = Date.now();
   } catch (error) {
     daemonState.status = 'offline';
@@ -208,6 +255,45 @@ export function resolvedGuards(): GuardEvent[] {
     .sort((a, b) => (a.requestedAt < b.requestedAt ? 1 : -1));
 }
 
+/** Open agent events, newest first. */
+export function openAgentEvents(): AgentEvent[] {
+  return daemonState.agentEvents
+    .filter((event) => event.status === 'open')
+    .slice()
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+export function acknowledgedAgentEvents(): AgentEvent[] {
+  return daemonState.agentEvents
+    .filter((event) => event.status === 'acknowledged')
+    .slice()
+    .sort((a, b) =>
+      (a.acknowledgedAt ?? a.createdAt) < (b.acknowledgedAt ?? b.createdAt) ? 1 : -1,
+    );
+}
+
+/** Open events that actually wait on a human, plus errors. */
+export function agentAttentionCount(): number {
+  return openAgentEvents().filter((event) => agentEventIsAttention(event.type)).length;
+}
+
+/** The badge number shared by the rail, tab bar, and top bar. */
+export function inboxAttentionCount(): number {
+  return pendingGuards().length + agentAttentionCount();
+}
+
+export function agentById(id: string): AgentSession | undefined {
+  return daemonState.agents.find((session) => session.sessionId === id);
+}
+
+export function openAgentEventsFor(sessionId: string): AgentEvent[] {
+  return openAgentEvents().filter((event) => event.sessionId === sessionId);
+}
+
+export function hasAuthPrompt(sessionId: string): boolean {
+  return openAgentEventsFor(sessionId).some((event) => event.type === 'auth_required');
+}
+
 export function sessionById(id: string): Session | undefined {
   return daemonState.sessions.find((session) => session.id === id);
 }
@@ -238,13 +324,26 @@ export async function decideGuard(
   id: string,
   decision: ApprovalDecision,
 ): Promise<GuardEvent> {
+  const guard = guardById(id);
   const result = await daemonApi.decide(id, {
     actor: 'local-ui',
     channel: 'web',
+    // The daemon binds the answer to this request, nonce, and session. A late
+    // or replayed answer is rejected even if the UI sends it by mistake.
+    nonce: guard?.approvalNonce,
+    sessionId: guard?.sessionId,
     ...decision,
   });
   const index = daemonState.guards.findIndex((event) => event.id === id);
   if (index >= 0) daemonState.guards[index] = result.event;
+  scheduleRefresh();
+  return result.event;
+}
+
+export async function acknowledgeAgentEvent(id: string): Promise<AgentEvent> {
+  const result = await daemonApi.ackAgentEvent(id);
+  const index = daemonState.agentEvents.findIndex((event) => event.id === id);
+  if (index >= 0) daemonState.agentEvents[index] = result.event;
   scheduleRefresh();
   return result.event;
 }

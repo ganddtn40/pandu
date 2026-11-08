@@ -1,6 +1,19 @@
 export type SessionStatus = 'active' | 'completed' | 'failed' | 'killed';
 export type SessionSource = 'proxy' | 'demo' | 'manual' | 'log_watch' | 'hook_otel';
-export type CaptureMode = 'proxy' | 'log_watch' | 'hook_otel';
+export type CaptureMode = 'proxy' | 'log_watch' | 'hook_otel' | 'pty';
+export type AgentSessionStatus = 'running' | 'exited' | 'killed';
+export type AgentEventType =
+  | 'agent.started'
+  | 'done'
+  | 'permission'
+  | 'question'
+  | 'choice'
+  | 'auth_required'
+  | 'error'
+  | 'stuck'
+  | 'budget.warn'
+  | 'context.high';
+export type AgentEventStatus = 'open' | 'acknowledged';
 export type StepKind = 'model' | 'tool' | 'guard' | 'snapshot' | 'system';
 export type StepStatus = 'running' | 'completed' | 'failed' | 'blocked' | 'cancelled';
 export type StreamChunkKind = 'text' | 'thinking' | 'tool_call' | 'usage' | 'event' | 'done' | 'error';
@@ -182,6 +195,8 @@ export interface GuardEvent {
   command?: string;
   evidence: GuardEvidence[];
   requestedAt: string;
+  approvalNonce?: string;
+  approvalExpiresAt?: string;
   resolvedAt?: string;
   resolvedBy?: string;
   resolutionNote?: string;
@@ -304,6 +319,39 @@ export interface SettingsResponse {
   settings: Record<string, string>;
 }
 
+export interface AgentSession {
+  sessionId: string;
+  agentName: string;
+  projectName: string;
+  workingDir: string;
+  adapter: string;
+  verified: boolean;
+  status: AgentSessionStatus;
+  needsYou: boolean;
+  exitCode?: number;
+  createdAt: string;
+  updatedAt: string;
+  outputSequence: number;
+}
+
+export interface AgentOutput {
+  session: AgentSession;
+  output: string;
+}
+
+export interface AgentEvent {
+  id: string;
+  sessionId: string;
+  agentName: string;
+  projectName: string;
+  type: AgentEventType;
+  message: string;
+  status: AgentEventStatus;
+  createdAt: string;
+  acknowledgedAt?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface DemoSeedResponse {
   seeded: boolean;
   sessions: Session[];
@@ -315,4 +363,6 @@ export interface ApprovalDecision {
   actor?: string;
   channel?: string;
   provider?: string;
+  nonce?: string;
+  sessionId?: string;
 }

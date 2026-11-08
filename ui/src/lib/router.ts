@@ -4,6 +4,7 @@ export const ROUTES = [
   '/flights',
   '/market',
   '/settings',
+  '/session',
   '/welcome',
   '/glass-preview',
 ] as const;
@@ -65,6 +66,8 @@ export function routeLabel(path: RoutePath): string {
       return 'Market';
     case '/settings':
       return 'Settings';
+    case '/session':
+      return 'Live session';
     case '/welcome':
       return 'Welcome';
     case '/glass-preview':

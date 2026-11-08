@@ -1,8 +1,12 @@
 use std::net::SocketAddr;
 
 use axum::Router;
-use axum::http::{HeaderValue, Method};
+use axum::extract::Request;
+use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
+use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -11,7 +15,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::api;
-use crate::config::Config;
+use crate::config::{Config, is_loopback_host};
 use crate::error::{DaemonError, Result};
 use crate::logwatch;
 use crate::proxy::proxy_handler;
@@ -53,6 +57,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/adapters/{id}", get(api::get_adapter))
         .route("/logwatch", get(api::log_watch_status))
         .route("/logwatch/scan", post(api::scan_log_watch))
+        .route("/agents", get(api::list_agents))
+        .route("/agents/register", post(api::register_agent))
+        .route("/agents/{id}", get(api::get_agent))
+        .route("/agents/{id}/output", post(api::agent_output))
+        .route(
+            "/agents/{id}/input",
+            get(api::agent_input_poll).post(api::agent_input),
+        )
+        .route("/agents/{id}/events", post(api::record_agent_event))
+        .route("/agents/{id}/end", post(api::end_agent))
+        .route("/agent-events", get(api::list_agent_events))
+        .route("/agent-events/{id}/ack", post(api::acknowledge_agent_event))
         .route("/pair/code", post(api::pair_code))
         .route("/pair/claim", post(api::pair_claim))
         .route("/pair/status", get(api::pair_status))
@@ -68,11 +84,34 @@ pub fn build_router(state: AppState) -> Router {
         .fallback(proxy_handler)
         .layer(cors_layer(&state))
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(require_loopback_host))
         .with_state(state)
 }
 
+/// Only loopback origins may talk to the daemon from a browser. The embedded
+/// UI is same-origin; the Vite dev and preview servers are explicitly allowed.
 fn cors_layer(state: &AppState) -> CorsLayer {
-    let layer = CorsLayer::new()
+    let mut origins: Vec<HeaderValue> = Vec::new();
+    let mut add = |origin: &str| {
+        if let Ok(value) = HeaderValue::from_str(origin) {
+            if !origins.contains(&value) {
+                origins.push(value);
+            }
+        }
+    };
+
+    for port in [state.config.port, 5174, 4174] {
+        if port == 0 {
+            continue;
+        }
+        add(&format!("http://127.0.0.1:{port}"));
+        add(&format!("http://localhost:{port}"));
+    }
+    for origin in &state.config.allowed_origins {
+        add(origin);
+    }
+
+    CorsLayer::new()
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -81,27 +120,56 @@ fn cors_layer(state: &AppState) -> CorsLayer {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .allow_origin(AllowOrigin::list(origins))
+}
 
-    if state.config.allowed_origins.is_empty() {
-        return layer.allow_origin(Any);
+/// Reject DNS-rebinding attempts: a browser must not be able to reach this
+/// daemon through a hostname that merely resolves to 127.0.0.1.
+async fn require_loopback_host(request: Request, next: Next) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    match host {
+        Some(value) if host_header_is_loopback(value) => next.run(request).await,
+        None => next.run(request).await,
+        Some(_) => (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({
+                "error": {
+                    "code": "forbidden_host",
+                    "message": "Cockpit only accepts loopback host names in this build."
+                }
+            })),
+        )
+            .into_response(),
     }
+}
 
-    let origins: Vec<HeaderValue> = state
-        .config
-        .allowed_origins
-        .iter()
-        .filter_map(|origin| HeaderValue::from_str(origin).ok())
-        .collect();
-    if origins.is_empty() {
-        layer.allow_origin(Any)
+fn host_header_is_loopback(value: &str) -> bool {
+    let host = if let Some(rest) = value.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else if let Some((host, port)) = value.rsplit_once(':') {
+        if !port.is_empty() && port.chars().all(|character| character.is_ascii_digit()) {
+            host
+        } else {
+            value
+        }
     } else {
-        layer.allow_origin(AllowOrigin::list(origins))
-    }
+        value
+    };
+    is_loopback_host(host)
 }
 
 /// Bind the listener and create the shared application state.
 pub async fn bind(config: Config) -> Result<(TcpListener, AppState)> {
+    if !is_loopback_host(&config.host) {
+        return Err(DaemonError::config(format!(
+            "Cockpit only listens on loopback addresses in this build (got `{}`).",
+            config.host
+        )));
+    }
     let state = AppState::new(config)?;
     let listener = TcpListener::bind((state.config.host.as_str(), state.config.port)).await?;
     Ok((listener, state))
@@ -155,6 +223,11 @@ pub async fn spawn(config: Config) -> Result<ServerHandle> {
             }
             Ok(_) => {}
             Err(error) => tracing::warn!(%error, "could not check for demo flights"),
+        }
+        // The agent control plane has its own seed marker, so this stays
+        // idempotent even when the demo flights already exist.
+        if let Err(error) = state.agents.seed_demo() {
+            tracing::warn!(?error, "could not seed the demo agent session");
         }
     }
 

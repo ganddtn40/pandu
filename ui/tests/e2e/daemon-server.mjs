@@ -35,6 +35,7 @@ const child = spawn(binary, ['serve'], {
     COCKPIT_HOST: '127.0.0.1',
     COCKPIT_PORT: port,
     COCKPIT_LOG_WATCH: '0',
+    COCKPIT_NOTIFICATIONS: '0',
     COCKPIT_DEMO: mode === 'demo' ? '1' : '0',
   },
   stdio: ['ignore', 'inherit', 'inherit'],

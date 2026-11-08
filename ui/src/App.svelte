@@ -14,6 +14,7 @@
   import FlightsScreen from './lib/screens/FlightsScreen.svelte';
   import InboxScreen from './lib/screens/InboxScreen.svelte';
   import MarketScreen from './lib/screens/MarketScreen.svelte';
+  import SessionScreen from './lib/screens/SessionScreen.svelte';
   import SettingsScreen from './lib/screens/SettingsScreen.svelte';
   import { openQuickPrompt } from './lib/quick-prompt.svelte';
   import { routeLabel } from './lib/router';
@@ -75,6 +76,8 @@
           <MarketScreen />
         {:else if routeState.path === '/settings'}
           <SettingsScreen />
+        {:else if routeState.path === '/session'}
+          <SessionScreen />
         {:else}
           <HomePreview />
         {/if}

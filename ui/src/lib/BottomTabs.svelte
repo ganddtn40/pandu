@@ -1,6 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { pendingGuards } from './api/daemon.svelte';
+  import { inboxAttentionCount } from './api/daemon.svelte';
   import { t, type MessageKey } from './i18n/i18n.svelte';
   import { openQuickPrompt } from './quick-prompt.svelte';
   import { routeParam, routeState } from './router.svelte';
@@ -19,7 +19,7 @@
     { key: 'nav.settings', icon: 'settings', href: '/settings' },
   ];
 
-  const pendingCount = $derived(pendingGuards().length);
+  const pendingCount = $derived(inboxAttentionCount());
   // A phone flight detail owns the whole screen. The floating prompt would sit
   // on top of the transcript, so it disappears with the list.
   const phoneDetailOpen = $derived(

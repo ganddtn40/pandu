@@ -35,5 +35,8 @@ rust-embed = { workspace = true }
 glob = { workspace = true }
 regex = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.8"
+
 [dev-dependencies]
 tempfile = { workspace = true }

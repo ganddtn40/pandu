@@ -4,6 +4,7 @@ use std::time::Instant;
 use reqwest::redirect::Policy;
 
 use crate::adapters;
+use crate::agents::AgentControl;
 use crate::budget::BudgetService;
 use crate::config::Config;
 use crate::error::Result;
@@ -27,6 +28,7 @@ pub struct AppState {
     pub budgets: Arc<BudgetService>,
     pub snapshots: Arc<GitSnapshotService>,
     pub adapters: Arc<cockpit_core::adapter::AdapterRegistry>,
+    pub agents: Arc<AgentControl>,
     pub logwatch: Arc<LogWatcher>,
     pub pairing: Arc<PairingManager>,
     pub client: reqwest::Client,
@@ -74,6 +76,13 @@ impl AppState {
             &config.home,
             config.builtin_adapters,
         ));
+        let agents = AgentControl::new(
+            store.clone(),
+            live.clone(),
+            adapters.clone(),
+            config.notifications,
+            config.demo_mode,
+        );
         let logwatch = Arc::new(LogWatcher::new(
             store.clone(),
             adapters.clone(),
@@ -96,6 +105,7 @@ impl AppState {
             budgets,
             snapshots,
             adapters,
+            agents,
             logwatch,
             pairing,
             client,

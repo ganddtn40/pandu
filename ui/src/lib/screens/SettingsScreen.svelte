@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Icon from '../Icon.svelte';
-  import { daemonOrigin } from '../api/client';
+  import { daemonApi, daemonOrigin } from '../api/client';
   import {
+    daemonErrorMessage,
     daemonState,
     refreshDaemon,
     seedDemoData,
@@ -15,12 +17,23 @@
   import { LANGUAGES, RADII, SURFACE_STYLES, THEME_MODES } from '../design/types';
   import { formatUptime } from '../format';
   import { t } from '../i18n/i18n.svelte';
+  import {
+    notifyState,
+    refreshWebPermission,
+    setInAppNotifications,
+    setWebNotifications,
+  } from '../notify.svelte';
   import { navigate } from '../router.svelte';
   import { toast } from '../toast-store.svelte';
 
   let copiedId = $state<string | null>(null);
   let loadingDemo = $state(false);
   let checking = $state(false);
+  let savingNotify = $state(false);
+
+  onMount(() => {
+    refreshWebPermission();
+  });
 
   const design = $derived(designState.value);
   const accent = $derived(accentFor(design.accent, design.theme));
@@ -42,6 +55,20 @@
   const installed = $derived(daemonState.adapters.filter((adapter) => adapter.installed).length);
   const settingsEntries = $derived(
     Object.entries(daemonState.settings).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  const toastEnabled = $derived(
+    !['0', 'false', 'no', 'off'].includes(
+      (daemonState.settings['notify.toast'] ?? '1').trim().toLowerCase(),
+    ),
+  );
+  const webPermissionLabel = $derived(
+    notifyState.webPermission === 'granted'
+      ? t('settings.webGranted')
+      : notifyState.webPermission === 'denied'
+        ? t('settings.webDenied')
+        : notifyState.webPermission === 'unsupported'
+          ? t('settings.webUnsupported')
+          : t('settings.webDefault'),
   );
 
   function reset(): void {
@@ -90,6 +117,27 @@
     } finally {
       loadingDemo = false;
     }
+  }
+
+  async function toggleToast(): Promise<void> {
+    if (savingNotify) return;
+    savingNotify = true;
+    try {
+      const result = await daemonApi.updateSettings({
+        'notify.toast': toastEnabled ? '0' : '1',
+      });
+      daemonState.settings = result.settings;
+      toast(t('settings.notifySaved'));
+    } catch (error) {
+      toast(daemonErrorMessage(error) || t('settings.notifySaveFailed'));
+    } finally {
+      savingNotify = false;
+    }
+  }
+
+  async function toggleWeb(): Promise<void> {
+    await setWebNotifications(!notifyState.web);
+    refreshWebPermission();
   }
 </script>
 
@@ -196,6 +244,78 @@
         <Icon name="rotate" size={15} />
         {t('settings.reset')}
       </button>
+    </div>
+  </section>
+
+  <section class="settings-card card" data-glass data-glass-layer="card" data-glass-depth="2">
+    <div class="settings-card__head">
+      <span class="settings-card__icon"><Icon name="bell" size={19} /></span>
+      <div>
+        <h2>{t('settings.notifications')}</h2>
+        <p>{t('settings.notificationsNote')}</p>
+      </div>
+    </div>
+
+    <div class="notify-list">
+      <div class="notify-row">
+        <div class="notify-row__text">
+          <strong>{t('settings.toast')}</strong>
+          <span>{t('settings.toastNote')}</span>
+        </div>
+        <button
+          class="toggle"
+          type="button"
+          aria-pressed={toastEnabled}
+          onclick={toggleToast}
+          disabled={savingNotify}
+        >
+          <span class="toggle__track" aria-hidden="true"></span>
+          {toastEnabled ? t('common.on') : t('common.off')}
+        </button>
+      </div>
+
+      <div class="notify-row">
+        <div class="notify-row__text">
+          <strong>{t('settings.inApp')}</strong>
+          <span>{t('settings.inAppNote')}</span>
+        </div>
+        <button
+          class="toggle"
+          type="button"
+          aria-pressed={notifyState.inApp}
+          onclick={() => setInAppNotifications(!notifyState.inApp)}
+        >
+          <span class="toggle__track" aria-hidden="true"></span>
+          {notifyState.inApp ? t('common.on') : t('common.off')}
+        </button>
+      </div>
+
+      <div class="notify-row">
+        <div class="notify-row__text">
+          <strong>{t('settings.web')}</strong>
+          <span>{t('settings.webNote')}</span>
+          <small>{t('settings.webPermission', { state: webPermissionLabel })}</small>
+        </div>
+        <button
+          class="toggle"
+          type="button"
+          aria-pressed={notifyState.web}
+          onclick={toggleWeb}
+        >
+          <span class="toggle__track" aria-hidden="true"></span>
+          {notifyState.web ? t('common.on') : t('common.off')}
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-card__foot">
+      <p class="settings-card__note">
+        <strong>{t('settings.notifyPayload')}:</strong> {t('settings.notifyPayloadBody')}
+      </p>
+      <p class="settings-card__note">{t('settings.notifyToastUnsupported')}</p>
+      {#if demo}
+        <p class="settings-card__note">{t('settings.notifyDemo')}</p>
+      {/if}
     </div>
   </section>
 

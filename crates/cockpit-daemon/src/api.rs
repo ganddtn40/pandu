@@ -263,6 +263,7 @@ pub async fn put_settings(
 
 pub async fn seed_demo(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let sessions = seed_demo_sessions(&state)?;
+    state.agents.seed_demo().map_err(agent_error)?;
     Ok(Json(json!({
         "seeded": sessions.len(),
         "sessions": sessions,
@@ -530,6 +531,194 @@ pub async fn session_budgets(
     }
     let statuses = state.budgets.statuses(&id).map_err(store_error)?;
     Ok(Json(json!({ "statuses": statuses })))
+}
+
+// ----- Agent control ------------------------------------------------------
+//
+// The daemon never spawns an agent. The CLI owns the pseudo-terminal and
+// registers here; these endpoints only relay sanitized output, queue
+// keystrokes, and record typed agent events.
+
+fn agent_error(error: DaemonError) -> ApiError {
+    match error {
+        DaemonError::Store(_) | DaemonError::Json(_) => store_error(error),
+        other => ApiError::bad_request(other.to_string()),
+    }
+}
+
+fn agent_missing() -> ApiError {
+    ApiError::not_found("That agent session does not exist or has ended.")
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentOutputInput {
+    pub data: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInputQuery {
+    pub after: Option<u64>,
+    pub wait_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentEventQuery {
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+}
+
+pub async fn register_agent(
+    State(state): State<AppState>,
+    Json(input): Json<crate::agents::RegisterAgentInput>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let session = state.agents.register(input).map_err(agent_error)?;
+    Ok((StatusCode::CREATED, Json(json!({ "session": session }))))
+}
+
+pub async fn list_agents(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let sessions = state.agents.list().map_err(agent_error)?;
+    Ok(Json(json!({ "sessions": sessions })))
+}
+
+pub async fn get_agent(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent session id is not valid."));
+    }
+    let output = state
+        .agents
+        .output(&id)
+        .map_err(agent_error)?
+        .ok_or_else(agent_missing)?;
+    Ok(Json(json!({
+        "session": output.session,
+        "output": output.output,
+    })))
+}
+
+pub async fn agent_output(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<AgentOutputInput>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent session id is not valid."));
+    }
+    let output = state
+        .agents
+        .append_output(&id, &input.data)
+        .map_err(agent_error)?
+        .ok_or_else(agent_missing)?;
+    Ok(Json(json!({ "session": output.session })))
+}
+
+pub async fn agent_input(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<crate::agents::AgentInput>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent session id is not valid."));
+    }
+    let sequence = state
+        .agents
+        .push_input(&id, &input.data)
+        .map_err(agent_error)?
+        .ok_or_else(agent_missing)?;
+    Ok(Json(json!({ "sequence": sequence })))
+}
+
+pub async fn agent_input_poll(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<AgentInputQuery>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent session id is not valid."));
+    }
+    let wait = std::time::Duration::from_millis(query.wait_ms.unwrap_or(0).min(30_000));
+    let poll = state
+        .agents
+        .wait_for_input(&id, query.after.unwrap_or(0), wait)
+        .await
+        .map_err(agent_error)?
+        .ok_or_else(agent_missing)?;
+    Ok(Json(json!(poll)))
+}
+
+pub async fn record_agent_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<cockpit_core::agent::AgentEventInput>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent session id is not valid."));
+    }
+    let event = state
+        .agents
+        .record_event(&id, input)
+        .map_err(agent_error)?
+        .ok_or_else(agent_missing)?;
+    Ok((StatusCode::CREATED, Json(json!({ "event": event }))))
+}
+
+pub async fn end_agent(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<crate::agents::EndAgentInput>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent session id is not valid."));
+    }
+    let session = state
+        .agents
+        .end(&id, input)
+        .map_err(agent_error)?
+        .ok_or_else(agent_missing)?;
+    Ok(Json(json!({ "session": session })))
+}
+
+pub async fn list_agent_events(
+    State(state): State<AppState>,
+    Query(query): Query<AgentEventQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let status = match query.status.as_deref() {
+        Some(value) if !value.trim().is_empty() => Some(
+            cockpit_core::agent::AgentEventStatus::parse(value.trim()).ok_or_else(|| {
+                ApiError::bad_request("status must be a known agent event status")
+            })?,
+        ),
+        _ => None,
+    };
+    let limit = query.limit.unwrap_or(100).min(1_000);
+    let events = state
+        .store
+        .list_agent_events(status, limit)
+        .map_err(store_error)?;
+    let open_count = state
+        .store
+        .list_agent_events(Some(cockpit_core::agent::AgentEventStatus::Open), 1_000)
+        .map_err(store_error)?
+        .len();
+    Ok(Json(json!({ "events": events, "openCount": open_count })))
+}
+
+pub async fn acknowledge_agent_event(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The agent event id is not valid."));
+    }
+    let event = state
+        .agents
+        .acknowledge(&id)
+        .map_err(agent_error)?
+        .ok_or_else(|| ApiError::not_found("That agent event does not exist."))?;
+    Ok(Json(json!({ "event": event })))
 }
 
 // ----- Replay and secret scans -------------------------------------------
@@ -1204,6 +1393,8 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 ..GuardEvidence::default()
             }],
             metadata: Some(json!({ "demo": true })),
+            approval_nonce: None,
+            approval_expires_at: None,
         })
         .map_err(|error| {
             ApiError::new(

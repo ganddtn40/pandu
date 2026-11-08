@@ -79,6 +79,9 @@ pub enum CaptureMode {
     Proxy,
     LogWatch,
     HookOtel,
+    /// A session Cockpit launched in a local pseudo-terminal. Cockpit owns the
+    /// PTY; the daemon only relays sanitized output and keystrokes.
+    Pty,
 }
 
 impl CaptureMode {
@@ -87,6 +90,7 @@ impl CaptureMode {
             Self::Proxy => "proxy",
             Self::LogWatch => "log_watch",
             Self::HookOtel => "hook_otel",
+            Self::Pty => "pty",
         }
     }
 
@@ -95,6 +99,7 @@ impl CaptureMode {
             "proxy" => Some(Self::Proxy),
             "log_watch" => Some(Self::LogWatch),
             "hook_otel" => Some(Self::HookOtel),
+            "pty" => Some(Self::Pty),
             _ => None,
         }
     }
@@ -104,6 +109,7 @@ impl CaptureMode {
             Self::Proxy => "Recorded via proxy",
             Self::LogWatch => "Observed from logs",
             Self::HookOtel => "Observed via hook",
+            Self::Pty => "Live PTY session",
         }
     }
 }

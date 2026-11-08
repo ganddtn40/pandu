@@ -41,6 +41,9 @@ pub struct Config {
     pub log_watch_interval_ms: u64,
     pub builtin_adapters: bool,
     pub demo_mode: bool,
+    /// Desktop notifications for agent events. Disabled in tests and in the
+    /// e2e harness so a headless run never pops a toast.
+    pub notifications: bool,
     /// Workspace captured by git snapshots. Unset in tests so they never
     /// snapshot the developer's repository.
     pub workspace_path: Option<PathBuf>,
@@ -79,6 +82,12 @@ impl Config {
             .unwrap_or_else(|| home.join("cockpit.db"));
 
         let host = take(&mut env, "COCKPIT_HOST").unwrap_or_else(|| DEFAULT_HOST.to_string());
+        if !is_loopback_host(&host) {
+            return Err(DaemonError::config(format!(
+                "COCKPIT_HOST must be a loopback address in this build (got `{host}`). \
+                 Remote access is not enabled until the phone pairing phase."
+            )));
+        }
         let port = match take(&mut env, "COCKPIT_PORT") {
             Some(value) => value.parse::<u16>().map_err(|_| {
                 DaemonError::config("COCKPIT_PORT must be a number from 0 to 65535")
@@ -104,7 +113,7 @@ impl Config {
             .or_else(|| take(&mut env, "GEMINI_API_KEY"))
             .or_else(|| take(&mut env, "GOOGLE_API_KEY"));
 
-        let allowed_origins = take(&mut env, "COCKPIT_ALLOWED_ORIGINS")
+        let allowed_origins: Vec<String> = take(&mut env, "COCKPIT_ALLOWED_ORIGINS")
             .map(|value| {
                 value
                     .split(',')
@@ -114,6 +123,13 @@ impl Config {
                     .collect()
             })
             .unwrap_or_default();
+        for origin in &allowed_origins {
+            if !is_loopback_origin(origin) {
+                return Err(DaemonError::config(format!(
+                    "COCKPIT_ALLOWED_ORIGINS only accepts loopback origins in this build (got `{origin}`)."
+                )));
+            }
+        }
 
         let session_idle_ms = parse_u64(
             take(&mut env, "COCKPIT_SESSION_IDLE_MS"),
@@ -149,6 +165,14 @@ impl Config {
             "COCKPIT_LOG_WATCH_INTERVAL_MS",
         )?;
         let builtin_adapters = take(&mut env, "COCKPIT_BUILTIN_ADAPTERS")
+            .map(|value| {
+                !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                )
+            })
+            .unwrap_or(true);
+        let notifications = take(&mut env, "COCKPIT_NOTIFICATIONS")
             .map(|value| {
                 !matches!(
                     value.to_ascii_lowercase().as_str(),
@@ -197,6 +221,7 @@ impl Config {
             log_watch_interval_ms,
             builtin_adapters,
             demo_mode,
+            notifications,
             workspace_path,
             snapshots_directory,
             guard_approval_timeout_ms,
@@ -234,6 +259,7 @@ impl Config {
             log_watch_interval_ms: DEFAULT_LOG_WATCH_INTERVAL_MS,
             builtin_adapters: true,
             demo_mode: false,
+            notifications: false,
             // Tests must never snapshot the repository they run in.
             workspace_path: None,
             snapshots_directory,
@@ -262,6 +288,39 @@ fn default_home() -> PathBuf {
 
 fn strip_trailing_slashes(value: &str) -> String {
     value.trim_end_matches('/').to_string()
+}
+
+/// This build is local-only. Accept a loopback IP literal or `localhost`.
+pub fn is_loopback_host(host: &str) -> bool {
+    let trimmed = host.trim();
+    let without_brackets = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    if without_brackets.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    without_brackets
+        .parse::<std::net::IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Accept `http(s)://localhost[:port]` and loopback IP origins only.
+pub fn is_loopback_origin(origin: &str) -> bool {
+    let Some((scheme, rest)) = origin.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return false;
+    }
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let host = if let Some(bracketed) = authority.strip_prefix('[') {
+        bracketed.split(']').next().unwrap_or(bracketed)
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    is_loopback_host(host)
 }
 
 fn parse_u64(value: Option<String>, fallback: u64, name: &str) -> Result<u64> {
@@ -301,22 +360,43 @@ mod tests {
     #[test]
     fn reads_environment_overrides() {
         let config = config(&[
-            ("COCKPIT_HOST", "0.0.0.0"),
+            ("COCKPIT_HOST", "127.0.0.1"),
             ("COCKPIT_PORT", "9999"),
             ("COCKPIT_OPENAI_UPSTREAM", "http://localhost:8080/"),
             ("COCKPIT_OPENAI_API_KEY", "sk-test"),
             (
                 "COCKPIT_ALLOWED_ORIGINS",
-                "https://a.example, https://b.example",
+                "http://127.0.0.1:5174, http://localhost:4174",
             ),
             ("COCKPIT_DEMO", "yes"),
         ]);
-        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 9999);
         assert_eq!(config.openai.base_url, "http://localhost:8080");
         assert_eq!(config.openai.api_key.as_deref(), Some("sk-test"));
         assert_eq!(config.allowed_origins.len(), 2);
         assert!(config.demo_mode);
+    }
+
+    #[test]
+    fn rejects_non_loopback_hosts() {
+        for host in ["0.0.0.0", "::", "192.168.1.10", "example.com"] {
+            let result = Config::from_env([("COCKPIT_HOST".to_string(), host.to_string())]);
+            assert!(result.is_err(), "{host} should be rejected");
+        }
+        for host in ["127.0.0.1", "::1", "[::1]", "localhost"] {
+            let result = Config::from_env([("COCKPIT_HOST".to_string(), host.to_string())]);
+            assert!(result.is_ok(), "{host} should be accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_non_loopback_origins() {
+        let result = Config::from_env([(
+            "COCKPIT_ALLOWED_ORIGINS".to_string(),
+            "https://evil.example".to_string(),
+        )]);
+        assert!(result.is_err());
     }
 
     #[test]
