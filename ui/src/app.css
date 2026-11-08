@@ -5536,6 +5536,22 @@ html[data-glass-reason='reduced-transparency'] .panel {
   line-height: 1.5;
 }
 
+.remote-prompt__text {
+  margin: 4px 0 0;
+  padding: 9px 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xs, 6px);
+  background: var(--code-bg, rgba(0, 0, 0, 0.22));
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: max(var(--text-min), calc(12px * var(--font-scale)));
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .remote-device {
   display: flex;
   flex-direction: column;
@@ -6076,6 +6092,34 @@ html[data-glass-reason='reduced-transparency'] .panel {
   border-radius: var(--radius-sm);
   background: var(--warn-soft);
   color: var(--warn);
+}
+
+.remote-app__banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.remote-app__banner svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.remote-app__banner strong {
+  display: block;
+  font-size: max(var(--text-min), calc(13px * var(--font-scale)));
+}
+
+.remote-app__banner p {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: max(var(--text-min), calc(12px * var(--font-scale)));
+  line-height: 1.5;
 }
 
 .remote-app__empty {

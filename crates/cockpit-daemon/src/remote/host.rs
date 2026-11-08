@@ -366,7 +366,22 @@ pub async fn audit_export(State(state): State<AppState>) -> Result<Response, Api
 // ----- Remote prompts -----------------------------------------------------
 
 pub async fn pending_prompts(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({ "prompts": state.remote.list_prompts() }))
+    // The host must be able to read the exact text it is about to send. This
+    // response exists only on the loopback listener; the remote device never
+    // sees another device's pending prompt text.
+    let prompts: Vec<Value> = state
+        .remote
+        .list_prompts()
+        .into_iter()
+        .map(|prompt| {
+            let mut value = serde_json::to_value(&prompt).unwrap_or_else(|_| json!({}));
+            if let Some(object) = value.as_object_mut() {
+                object.insert("text".to_string(), json!(prompt.text));
+            }
+            value
+        })
+        .collect();
+    Json(json!({ "prompts": prompts }))
 }
 
 pub async fn approve_prompt(

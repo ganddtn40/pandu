@@ -116,6 +116,10 @@ pub async fn run(request: PtyRequest<'_>) -> anyhow::Result<PtyOutcome> {
         .build()
         .context("could not build the daemon client")?;
     let base = format!("http://{}", request.addr);
+    let command_line = std::iter::once(request.program)
+        .chain(request.args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
 
     let session_id = match register_session(
         &client,
@@ -124,6 +128,7 @@ pub async fn run(request: PtyRequest<'_>) -> anyhow::Result<PtyOutcome> {
         request.adapter_id,
         &cwd,
         pid,
+        &command_line,
     )
     .await
     {
@@ -315,6 +320,7 @@ pub async fn run(request: PtyRequest<'_>) -> anyhow::Result<PtyOutcome> {
     Ok(outcome)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn register_session(
     client: &reqwest::Client,
     base: &str,
@@ -322,6 +328,7 @@ async fn register_session(
     adapter_id: &str,
     cwd: &Path,
     pid: Option<u32>,
+    command_line: &str,
 ) -> anyhow::Result<String> {
     let project = cwd
         .file_name()
@@ -336,6 +343,7 @@ async fn register_session(
             "workingDir": cwd.display().to_string(),
             "adapter": adapter_id,
             "pid": pid,
+            "commandLine": command_line,
         }))
         .send()
         .await

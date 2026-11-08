@@ -164,6 +164,7 @@ pub struct PendingPrompt {
     pub expires_at: String,
     pub size_bytes: u64,
     pub content_hash: String,
+    pub auto_approve: bool,
     #[serde(skip)]
     pub text: String,
 }
@@ -601,6 +602,7 @@ impl RemoteAccess {
         session_id: &str,
         text: &str,
         ip: Option<&str>,
+        auto_approve: bool,
     ) -> PendingPrompt {
         let now = Utc::now();
         let prompt = PendingPrompt {
@@ -612,6 +614,7 @@ impl RemoteAccess {
             expires_at: (now + chrono::Duration::seconds(PROMPT_TTL_SECONDS)).to_rfc3339(),
             size_bytes: text.len() as u64,
             content_hash: hash_content(text),
+            auto_approve,
             text: text.to_string(),
         };
         {
@@ -626,7 +629,8 @@ impl RemoteAccess {
             json!({
                 "promptId": prompt.id,
                 "sessionId": prompt.session_id,
-                "requiresHostConfirmation": principal.require_host_confirmation,
+                "requiresHostConfirmation": principal.require_host_confirmation || auto_approve,
+                "autoApproveSession": auto_approve,
             }),
             Some(prompt.size_bytes),
             Some(&prompt.content_hash),
@@ -944,6 +948,31 @@ fn prompt_expired(prompt: &PendingPrompt) -> bool {
         .unwrap_or(true)
 }
 
+/// Remote prompts are a single printable line. Control characters, escape
+/// sequences, and bidi overrides are removed before the prompt is queued, and
+/// exactly one Enter is appended when it is delivered.
+pub fn sanitize_prompt_text(input: &str) -> String {
+    let cleaned = crate::agents::sanitize_output(input);
+    let mut printable = String::with_capacity(cleaned.len());
+    for character in cleaned.chars() {
+        if character == '\n' {
+            printable.push(' ');
+        } else if character.is_control() || is_bidi_control(character) {
+            continue;
+        } else {
+            printable.push(character);
+        }
+    }
+    printable.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}'
+    )
+}
+
 pub fn hash_content(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let mut output = String::with_capacity(64);
@@ -1129,5 +1158,23 @@ mod tests {
         assert_eq!(hash.len(), 64);
         assert_eq!(hash, hash_content("secret prompt"));
         assert_ne!(hash, hash_content("other prompt"));
+    }
+
+    #[test]
+    fn prompt_text_strips_controls_escapes_and_extra_enters() {
+        assert_eq!(
+            sanitize_prompt_text("hello\u{1b}[31mred\u{1b}[0m\u{7}\u{1}world\r\n"),
+            "helloredworld"
+        );
+        assert_eq!(
+            sanitize_prompt_text("line one\nline two\n\n"),
+            "line one line two"
+        );
+        assert_eq!(
+            sanitize_prompt_text("safe\u{202E}txet\u{2066} text"),
+            "safetxet text"
+        );
+        assert_eq!(sanitize_prompt_text("keep\u{1b}"), "keep");
+        assert_eq!(sanitize_prompt_text("\u{0}\u{1}\u{2}"), "");
     }
 }

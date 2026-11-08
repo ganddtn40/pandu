@@ -50,6 +50,36 @@ impl AgentSessionStatus {
     }
 }
 
+/// What the agent was last seen waiting for. Remote prompts are only allowed
+/// in `AwaitingPrompt`; every other state must be handled at the computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPromptState {
+    AwaitingPrompt,
+    Permission,
+    Choice,
+    Question,
+    Auth,
+    Unknown,
+}
+
+impl AgentPromptState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AwaitingPrompt => "awaiting_prompt",
+            Self::Permission => "permission",
+            Self::Choice => "choice",
+            Self::Question => "question",
+            Self::Auth => "auth",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn is_awaiting_prompt(self) -> bool {
+        self == Self::AwaitingPrompt
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionView {
@@ -61,6 +91,10 @@ pub struct AgentSessionView {
     pub verified: bool,
     pub status: AgentSessionStatus,
     pub needs_you: bool,
+    pub prompt_state: AgentPromptState,
+    /// The agent was started with a flag that skips its own approvals. Every
+    /// remote prompt in this session must still be confirmed by the host.
+    pub auto_approve: bool,
     pub exit_code: Option<i32>,
     pub created_at: String,
     pub updated_at: String,
@@ -101,6 +135,10 @@ pub struct RegisterAgentInput {
     pub adapter: Option<String>,
     #[serde(default)]
     pub pid: Option<u32>,
+    /// The exact command line the CLI launched, when it knows it. Used only to
+    /// detect adapter auto-approve flags so remote prompts stay host-gated.
+    #[serde(default)]
+    pub command_line: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -216,6 +254,10 @@ impl AgentControl {
 
         let now = now_iso();
         let (input_tx, _) = watch::channel(0);
+        let auto_approve = input
+            .command_line
+            .as_deref()
+            .is_some_and(detect_auto_approve);
         let view = AgentSessionView {
             session_id: session.id.clone(),
             agent_name,
@@ -225,6 +267,8 @@ impl AgentControl {
             verified,
             status: AgentSessionStatus::Running,
             needs_you: false,
+            prompt_state: AgentPromptState::Unknown,
+            auto_approve,
             exit_code: None,
             created_at: now.clone(),
             updated_at: now,
@@ -318,12 +362,14 @@ impl AgentControl {
             push_tail(&mut entry.tail, &sanitized);
             entry.view.output_sequence = entry.view.output_sequence.saturating_add(1);
             entry.view.updated_at = now_iso();
-            let view = entry.view.clone();
-            let sequence = entry.view.output_sequence;
-            let tail = entry.tail.clone();
             let verified = entry.view.verified;
             let adapter = entry.view.adapter.clone();
-            let detection = detect_prompt(&adapter, &tail, verified).and_then(|detection| {
+            let raw_detection = detect_prompt(&adapter, &entry.tail, verified);
+            entry.view.prompt_state = raw_detection
+                .as_ref()
+                .map(prompt_state_for_detection)
+                .unwrap_or(AgentPromptState::Unknown);
+            let detection = raw_detection.and_then(|detection| {
                 let key = detection_key(&detection);
                 let duplicate = entry
                     .last_detection
@@ -336,6 +382,9 @@ impl AgentControl {
                     Some(detection)
                 }
             });
+            let view = entry.view.clone();
+            let sequence = entry.view.output_sequence;
+            let tail = entry.tail.clone();
             (view, sequence, tail, detection)
         };
 
@@ -392,6 +441,14 @@ impl AgentControl {
                     json!({ "sessionId": view.session_id, "reason": reason }),
                 );
             }
+            Detection::AwaitingPrompt => {
+                self.live.publish(
+                    "agent.awaiting_prompt",
+                    Some(&view.session_id),
+                    None,
+                    json!({ "sessionId": view.session_id }),
+                );
+            }
         }
         Ok(())
     }
@@ -429,6 +486,7 @@ impl AgentControl {
                 data: data.to_string(),
             });
             entry.view.needs_you = false;
+            entry.view.prompt_state = AgentPromptState::Unknown;
             entry.view.updated_at = now_iso();
             (sequence, entry.input_tx.clone())
         };
@@ -714,6 +772,8 @@ impl AgentControl {
             verified: false,
             status: AgentSessionStatus::Running,
             needs_you: true,
+            prompt_state: AgentPromptState::Permission,
+            auto_approve: false,
             exit_code: None,
             created_at: now.clone(),
             updated_at: now,
@@ -973,16 +1033,60 @@ fn is_bidi_control(character: char) -> bool {
     )
 }
 
+/// Detect adapter flags that turn off the agent's own approval prompts. These
+/// sessions are still allowed to receive remote prompts, but the host must
+/// confirm every single one.
+pub fn detect_auto_approve(command_line: &str) -> bool {
+    let lower = command_line.to_ascii_lowercase();
+    [
+        "dangerously-skip-permissions",
+        "skip-permissions",
+        "dangerously-bypass-approvals",
+        "--yolo",
+        "--yes-always",
+        "--auto-approve",
+        "--full-auto",
+        "-a never",
+        "approval_policy=never",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Detection {
     Event(AgentEventType),
-    NeedsYou { reason: &'static str },
+    NeedsYou {
+        reason: &'static str,
+    },
+    /// The agent explicitly asked the user to type a response. This is the
+    /// only state in which a remote prompt may be sent.
+    AwaitingPrompt,
 }
 
 fn detection_key(detection: &Detection) -> String {
     match detection {
         Detection::Event(event_type) => format!("event:{}", event_type.as_str()),
         Detection::NeedsYou { reason } => format!("needs:{reason}"),
+        Detection::AwaitingPrompt => "awaiting_prompt".to_string(),
+    }
+}
+
+fn prompt_state_for_detection(detection: &Detection) -> AgentPromptState {
+    match detection {
+        Detection::Event(AgentEventType::Permission) => AgentPromptState::Permission,
+        Detection::Event(AgentEventType::Choice) => AgentPromptState::Choice,
+        Detection::Event(AgentEventType::Question) => AgentPromptState::Question,
+        Detection::Event(AgentEventType::AuthRequired) => AgentPromptState::Auth,
+        Detection::NeedsYou { reason } => match *reason {
+            "permission" => AgentPromptState::Permission,
+            "choice" => AgentPromptState::Choice,
+            "question" => AgentPromptState::Question,
+            "auth" => AgentPromptState::Auth,
+            _ => AgentPromptState::Unknown,
+        },
+        Detection::AwaitingPrompt => AgentPromptState::AwaitingPrompt,
+        Detection::Event(_) => AgentPromptState::Unknown,
     }
 }
 
@@ -1098,11 +1202,8 @@ pub fn detect_prompt(adapter: &str, tail: &str, verified: bool) -> Option<Detect
         "awaiting input",
     ];
     if STUCK.iter().any(|pattern| trimmed.contains(pattern)) {
-        return Some(if verified {
-            Detection::Event(AgentEventType::Question)
-        } else {
-            Detection::NeedsYou { reason: "question" }
-        });
+        // These are explicit "type here" prompts, not permission questions.
+        return Some(Detection::AwaitingPrompt);
     }
 
     if trimmed.ends_with('?') {
@@ -1301,6 +1402,92 @@ mod tests {
             detect_prompt("codex", tail, false),
             Some(Detection::NeedsYou { reason: "question" })
         );
+    }
+
+    #[test]
+    fn explicit_type_prompts_are_the_only_awaiting_state() {
+        assert_eq!(
+            detect_prompt("claude-code", "Type your response and press Enter", true),
+            Some(Detection::AwaitingPrompt)
+        );
+        assert_eq!(
+            detect_prompt("codex", "Waiting for your input", false),
+            Some(Detection::AwaitingPrompt)
+        );
+        assert_eq!(
+            detect_prompt("claude-code", "Do you want to proceed? [y/N]", true),
+            Some(Detection::Event(AgentEventType::Permission))
+        );
+        assert_eq!(
+            detect_prompt("claude-code", "Which migration should I run?", true),
+            Some(Detection::Event(AgentEventType::Question))
+        );
+    }
+
+    #[test]
+    fn auto_approve_flags_are_detected() {
+        assert!(detect_auto_approve("claude --dangerously-skip-permissions"));
+        assert!(detect_auto_approve("gemini --yolo"));
+        assert!(detect_auto_approve("aider --yes-always"));
+        assert!(!detect_auto_approve("claude"));
+    }
+
+    #[test]
+    fn every_detection_maps_to_the_expected_prompt_state() {
+        let states = [
+            (
+                Detection::Event(AgentEventType::Permission),
+                AgentPromptState::Permission,
+            ),
+            (
+                Detection::Event(AgentEventType::Choice),
+                AgentPromptState::Choice,
+            ),
+            (
+                Detection::Event(AgentEventType::Question),
+                AgentPromptState::Question,
+            ),
+            (
+                Detection::Event(AgentEventType::AuthRequired),
+                AgentPromptState::Auth,
+            ),
+            (
+                Detection::NeedsYou { reason: "auth" },
+                AgentPromptState::Auth,
+            ),
+            (
+                Detection::NeedsYou {
+                    reason: "permission",
+                },
+                AgentPromptState::Permission,
+            ),
+            (
+                Detection::NeedsYou { reason: "choice" },
+                AgentPromptState::Choice,
+            ),
+            (
+                Detection::NeedsYou { reason: "question" },
+                AgentPromptState::Question,
+            ),
+            (Detection::AwaitingPrompt, AgentPromptState::AwaitingPrompt),
+            (
+                Detection::Event(AgentEventType::Stuck),
+                AgentPromptState::Unknown,
+            ),
+        ];
+        for (detection, expected) in states {
+            assert_eq!(prompt_state_for_detection(&detection), expected);
+        }
+        assert!(AgentPromptState::AwaitingPrompt.is_awaiting_prompt());
+        for state in [
+            AgentPromptState::Permission,
+            AgentPromptState::Choice,
+            AgentPromptState::Question,
+            AgentPromptState::Auth,
+            AgentPromptState::Unknown,
+        ] {
+            assert!(!state.is_awaiting_prompt());
+        }
     }
 
     #[test]

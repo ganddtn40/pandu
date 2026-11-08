@@ -291,6 +291,42 @@ async fn set_scopes(
     );
 }
 
+async fn append_agent_output(client: &reqwest::Client, host: &str, session_id: &str, data: &str) {
+    let response = client
+        .post(format!("{host}/api/agents/{session_id}/output"))
+        .json(&json!({ "data": data }))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        response.status().is_success(),
+        "agent output failed: {}",
+        response.text().await.unwrap()
+    );
+}
+
+/// Detection looks at the last 800 characters, so push old output out of the
+/// window before setting the exact state the agent is waiting in.
+async fn set_agent_prompt_state(
+    client: &reqwest::Client,
+    host: &str,
+    session_id: &str,
+    output: &str,
+) {
+    append_agent_output(client, host, session_id, &".".repeat(900)).await;
+    append_agent_output(client, host, session_id, output).await;
+}
+
+async fn mark_awaiting_prompt(client: &reqwest::Client, host: &str, session_id: &str) {
+    set_agent_prompt_state(
+        client,
+        host,
+        session_id,
+        "Type your response and press Enter",
+    )
+    .await;
+}
+
 fn request_body(path: &str) -> Option<Value> {
     if path.ends_with("/decision") {
         return Some(json!({
@@ -1128,6 +1164,8 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
         .unwrap()
         .to_string();
 
+    mark_awaiting_prompt(&client, &host, &session_id).await;
+
     let secret_prompt = "remote secret prompt";
     let sent = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
@@ -1189,18 +1227,42 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
         .unwrap();
     assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-    // NUL bytes are refused.
-    let nul = client
+    // NUL, escape sequences, and control characters are stripped before the
+    // prompt is queued; exactly one Enter is appended.
+    mark_awaiting_prompt(&client, &host, &session_id).await;
+    let sanitized = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
-        .json(&json!({ "text": "hello\u{0}world" }))
+        .json(&json!({
+            "text": "hello\u{0}\u{1b}[31mred\u{1b}[0m\u{7}world\n\n"
+        }))
         .send()
         .await
         .unwrap();
-    assert_eq!(nul.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(sanitized.status(), StatusCode::OK);
+    let sanitized_body: Value = sanitized.json().await.unwrap();
+    let sequence = sanitized_body["sequence"].as_u64().unwrap();
+    let input: Value = client
+        .get(format!(
+            "{host}/api/agents/{session_id}/input?after={sequence}"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let data = input["chunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|chunk| chunk["data"].as_str())
+        .collect::<String>();
+    assert_eq!(data, "helloredworld\r");
 
-    // Six prompts per minute per device. One was already sent above.
-    for _ in 0..5 {
+    // Six prompts per minute per device. Two were already sent above.
+    for _ in 0..4 {
+        mark_awaiting_prompt(&client, &host, &session_id).await;
         let response = client
             .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
             .bearer_auth(&device.token)
@@ -1210,6 +1272,7 @@ async fn remote_prompts_are_bounded_rate_limited_and_never_audited_verbatim() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
+    mark_awaiting_prompt(&client, &host, &session_id).await;
     let limited = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
@@ -1261,6 +1324,8 @@ async fn host_confirmation_is_required_for_remote_prompts_by_default() {
         .unwrap()
         .to_string();
 
+    mark_awaiting_prompt(&client, &host, &session_id).await;
+
     let sent = client
         .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
         .bearer_auth(&device.token)
@@ -1307,6 +1372,186 @@ async fn host_confirmation_is_required_for_remote_prompts_by_default() {
         .filter_map(|chunk| chunk["data"].as_str())
         .collect::<String>();
     assert_eq!(data, "needs the host\r");
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_prompts_require_an_explicit_awaiting_state() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device(&daemon, &remote, "State phone", None).await;
+    set_scopes(&daemon, &device.id, &["view", "prompt"], false).await;
+
+    let registered: Value = client
+        .post(format!("{host}/api/agents/register"))
+        .json(&json!({
+            "agentName": "State agent",
+            "workingDir": "C:/work",
+            "adapter": "opencode",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = registered["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Every state that is not an explicit "type here" prompt must be handled
+    // at the computer. The remote device gets a conflict, never keystrokes.
+    let rejected = [
+        ("Do you want to proceed? [y/N]", "permission"),
+        ("Select an option", "choice"),
+        ("Which migration should I run?", "question"),
+        ("Please log in to continue.", "auth"),
+        ("18 tests passed, 0 failed", "unknown"),
+    ];
+    for (output, state) in rejected {
+        set_agent_prompt_state(&client, &host, &session_id, output).await;
+        let response = client
+            .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
+            .bearer_auth(&device.token)
+            .json(&json!({ "text": "remote should not type this" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::CONFLICT,
+            "{state} should be rejected"
+        );
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "prompt_not_awaiting");
+    }
+
+    // No keystrokes were queued for any rejected state.
+    let input: Value = client
+        .get(format!("{host}/api/agents/{session_id}/input"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(input["chunks"].as_array().unwrap().is_empty());
+
+    let audit: Value = client
+        .get(format!("{host}/api/remote/audit?limit=200"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let reasons: Vec<&str> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["event"] == "prompt.rejected")
+        .filter_map(|entry| entry["detail"]["reason"].as_str())
+        .collect();
+    for (_, state) in rejected {
+        assert!(reasons.contains(&state), "missing audit reason {state}");
+    }
+
+    // An explicit awaiting prompt is the only accepted state.
+    mark_awaiting_prompt(&client, &host, &session_id).await;
+    let accepted = client
+        .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
+        .bearer_auth(&device.token)
+        .json(&json!({ "text": "now it is allowed" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_approve_sessions_always_wait_for_the_host() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device(&daemon, &remote, "Auto phone", None).await;
+    // Host confirmation is off for this device, but the agent's own approvals
+    // are skipped, so the session flag must force confirmation anyway.
+    set_scopes(&daemon, &device.id, &["view", "prompt"], false).await;
+
+    let registered: Value = client
+        .post(format!("{host}/api/agents/register"))
+        .json(&json!({
+            "agentName": "Yolo agent",
+            "workingDir": "C:/work",
+            "adapter": "claude-code",
+            "commandLine": "claude --dangerously-skip-permissions",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(registered["session"]["autoApprove"], true);
+    let session_id = registered["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    mark_awaiting_prompt(&client, &host, &session_id).await;
+    let sent = client
+        .post(format!("{remote}/api/remote/agents/{session_id}/prompt"))
+        .bearer_auth(&device.token)
+        .json(&json!({ "text": "ship it" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sent.status(), StatusCode::ACCEPTED);
+
+    let prompts: Value = client
+        .get(format!("{host}/api/remote/prompts"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let prompt = &prompts["prompts"].as_array().unwrap()[0];
+    assert_eq!(prompt["autoApprove"], true);
+    assert_eq!(prompt["text"], "ship it");
+    let prompt_id = prompt["id"].as_str().unwrap().to_string();
+
+    let approved = client
+        .post(format!("{host}/api/remote/prompts/{prompt_id}/approve"))
+        .send()
+        .await
+        .unwrap();
+    assert!(approved.status().is_success());
+
+    let input: Value = client
+        .get(format!("{host}/api/agents/{session_id}/input"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let data = input["chunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|chunk| chunk["data"].as_str())
+        .collect::<String>();
+    assert_eq!(data, "ship it\r");
 
     daemon.shutdown().await.unwrap();
 }
@@ -1403,6 +1648,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         .as_str()
         .unwrap()
         .to_string();
+    mark_awaiting_prompt(&client, &host, &agent_session).await;
     let prompt_text = "audit-only prompt body";
     let sent = client
         .post(format!("{remote}/api/remote/agents/{agent_session}/prompt"))

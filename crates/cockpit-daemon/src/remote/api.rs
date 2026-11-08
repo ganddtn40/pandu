@@ -28,6 +28,7 @@ use crate::api::ApiError;
 use crate::remote::auth::Scope;
 use crate::remote::{
     MAX_PROMPT_CHARS, PendingPrompt, RemoteAuthError, RemoteMode, RemotePrincipal,
+    sanitize_prompt_text,
 };
 use crate::state::AppState;
 
@@ -479,25 +480,19 @@ async fn send_prompt(
             "The agent session id is not valid.",
         );
     }
-    if input.text.trim().is_empty() {
+    let text = sanitize_prompt_text(&input.text);
+    if text.is_empty() {
         return api_error(
             StatusCode::BAD_REQUEST,
             "empty_prompt",
-            "Write something before sending.",
+            "Write printable text before sending.",
         );
     }
-    if input.text.chars().count() > MAX_PROMPT_CHARS {
+    if text.chars().count() > MAX_PROMPT_CHARS {
         return api_error(
             StatusCode::PAYLOAD_TOO_LARGE,
             "prompt_too_large",
             format!("Remote prompts are limited to {MAX_PROMPT_CHARS} characters."),
-        );
-    }
-    if input.text.contains('\0') {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "bad_prompt",
-            "That prompt contains a NUL byte.",
         );
     }
     let Some(view) = state.agents.get(&id).ok().flatten() else {
@@ -514,6 +509,27 @@ async fn send_prompt(
             "That agent session has already ended.",
         );
     }
+    if !view.prompt_state.is_awaiting_prompt() {
+        state.remote.audit(
+            "prompt.rejected",
+            Some((&principal.device_id, &principal.device_name)),
+            Some(&client_ip(&headers)),
+            json!({
+                "sessionId": id,
+                "reason": view.prompt_state.as_str(),
+            }),
+            None,
+            None,
+        );
+        return api_error(
+            StatusCode::CONFLICT,
+            "prompt_not_awaiting",
+            format!(
+                "This session is not waiting for typed input ({}). Handle it at the computer.",
+                view.prompt_state.as_str()
+            ),
+        );
+    }
     if !state.remote.prompt_rate_ok(&principal.device_id) {
         state.remote.audit(
             "prompt.rate_limited",
@@ -526,11 +542,17 @@ async fn send_prompt(
         return rate_limited(Duration::from_secs(60));
     }
 
-    let prompt =
-        state
-            .remote
-            .queue_prompt(&principal, &id, &input.text, Some(&client_ip(&headers)));
-    if principal.require_host_confirmation {
+    let prompt = state.remote.queue_prompt(
+        &principal,
+        &id,
+        &text,
+        Some(&client_ip(&headers)),
+        view.auto_approve,
+    );
+    // An adapter started with a skip-approvals flag is exactly where a remote
+    // prompt is most dangerous, so every prompt in that session stays behind
+    // the host confirmation gate.
+    if principal.require_host_confirmation || view.auto_approve {
         state.remote.send_notification("prompt").await;
         state.live.publish(
             "remote.prompt",
@@ -599,10 +621,9 @@ async fn send_prompt(
 }
 
 pub(crate) fn push_prompt(state: &AppState, prompt: &PendingPrompt) -> Result<Option<u64>, String> {
-    let mut data = prompt.text.clone();
-    if !data.ends_with('\n') && !data.ends_with('\r') {
-        data.push('\r');
-    }
+    // Exactly one Enter, regardless of how the host edited the prompt.
+    let mut data = prompt.text.trim_end_matches(['\r', '\n']).to_string();
+    data.push('\r');
     state
         .agents
         .push_input(&prompt.session_id, &data)

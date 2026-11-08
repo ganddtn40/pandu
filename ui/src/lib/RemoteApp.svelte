@@ -600,6 +600,16 @@
             {selectedAgent.projectName} · {selectedAgent.workingDir}
           </p>
 
+          {#if selectedAgent.autoApprove}
+            <div class="remote-app__banner" role="alert">
+              <Icon name="alert" size={18} />
+              <div>
+                <strong>{t('remote.autoApproveSession')}</strong>
+                <p>{t('remote.autoApproveSessionBody')}</p>
+              </div>
+            </div>
+          {/if}
+
           <div class="remote-app__section-head">
             <h3>{t('remote.agentOutput')}</h3>
             <button class="text-link" type="button" onclick={refreshOutput} disabled={outputBusy}>
@@ -613,7 +623,7 @@
             <pre class="remote-app__output">{openOutput?.output ?? t('remote.agentsEmpty')}</pre>
           {/if}
 
-          {#if canPrompt && selectedAgent.status === 'running'}
+          {#if canPrompt && selectedAgent.status === 'running' && selectedAgent.promptState === 'awaiting_prompt'}
             <form
               class="remote-app__prompt"
               onsubmit={(event) => {
@@ -636,6 +646,11 @@
                 {t('remote.promptSend')}
               </button>
             </form>
+          {:else if canPrompt && selectedAgent.status === 'running'}
+            <p class="remote-app__note remote-app__note--warn">
+              <Icon name="alert" size={15} />
+              {t('remote.promptAwaitingOnly')}
+            </p>
           {:else if !canPrompt}
             <p class="remote-app__note">
               <Icon name="lock" size={15} />
@@ -669,6 +684,9 @@
                   </span>
                   {#if agent.needsYou}
                     <span class="status-pill status-pill--warn">{t('remote.highRisk')}</span>
+                  {/if}
+                  {#if agent.autoApprove}
+                    <span class="status-pill status-pill--danger">{t('remote.autoApproveSession')}</span>
                   {/if}
                   <span class="status-pill">{t(agentStatusKey(agent.status))}</span>
                   <Icon name="chevron-right" size={16} />

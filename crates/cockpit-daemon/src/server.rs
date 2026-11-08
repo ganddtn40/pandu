@@ -605,27 +605,6 @@ async fn sweep_sessions(state: AppState) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tunnel_urls_must_name_one_https_hostname() {
-        assert_eq!(
-            normalize_public_url("https://cockpit.example.com/").unwrap(),
-            "https://cockpit.example.com"
-        );
-        assert!(normalize_public_url("https://192.0.2.10").is_err());
-        assert!(normalize_public_url("https://localhost").is_err());
-        assert!(normalize_public_url("https://*.example.com").is_err());
-        assert!(normalize_public_url("https://user@example.com").is_err());
-        assert!(normalize_public_url("http://cockpit.example.com").is_err());
-        assert!(normalize_public_url("cockpit.example.com").is_err());
-        #[cfg(debug_assertions)]
-        assert!(normalize_public_url("http://127.0.0.1:4320").is_ok());
-    }
-}
-
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -646,5 +625,26 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tunnel_urls_must_name_one_https_hostname() {
+        assert_eq!(
+            normalize_public_url("https://cockpit.example.com/").unwrap(),
+            "https://cockpit.example.com"
+        );
+        assert!(normalize_public_url("https://192.0.2.10").is_err());
+        assert!(normalize_public_url("https://localhost").is_err());
+        assert!(normalize_public_url("https://*.example.com").is_err());
+        assert!(normalize_public_url("https://user@example.com").is_err());
+        assert!(normalize_public_url("http://cockpit.example.com").is_err());
+        assert!(normalize_public_url("cockpit.example.com").is_err());
+        #[cfg(debug_assertions)]
+        assert!(normalize_public_url("http://127.0.0.1:4320").is_ok());
     }
 }

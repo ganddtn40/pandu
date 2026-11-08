@@ -2,6 +2,13 @@ export type SessionStatus = 'active' | 'completed' | 'failed' | 'killed';
 export type SessionSource = 'proxy' | 'demo' | 'manual' | 'log_watch' | 'hook_otel';
 export type CaptureMode = 'proxy' | 'log_watch' | 'hook_otel' | 'pty';
 export type AgentSessionStatus = 'running' | 'exited' | 'killed';
+export type AgentPromptState =
+  | 'awaiting_prompt'
+  | 'permission'
+  | 'choice'
+  | 'question'
+  | 'auth'
+  | 'unknown';
 export type AgentEventType =
   | 'agent.started'
   | 'done'
@@ -328,6 +335,8 @@ export interface AgentSession {
   verified: boolean;
   status: AgentSessionStatus;
   needsYou: boolean;
+  promptState: AgentPromptState;
+  autoApprove: boolean;
   exitCode?: number;
   createdAt: string;
   updatedAt: string;
@@ -475,6 +484,8 @@ export interface RemotePendingPrompt {
   expiresAt: string;
   sizeBytes: number;
   contentHash: string;
+  autoApprove: boolean;
+  text?: string;
 }
 
 export interface RemoteSessionInfo {

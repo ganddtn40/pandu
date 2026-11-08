@@ -831,6 +831,10 @@
                       hash: prompt.contentHash.slice(0, 12),
                     })}
                   </span>
+                  {#if prompt.autoApprove}
+                    <span class="status-pill status-pill--danger">{t('remote.autoApproveSession')}</span>
+                  {/if}
+                  <pre class="remote-prompt__text">{prompt.text ?? ''}</pre>
                   <p>{t('remote.promptHidden')}</p>
                 </div>
                 <div class="button-row button-row--tight">
