@@ -1,47 +1,227 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
+  import {
+    daemonState,
+    decideGuard,
+    pendingGuards,
+    refreshDaemon,
+    resolvedGuards,
+    seedDemoData,
+  } from '../api/daemon.svelte';
+  import type { GuardEvent } from '../api/types';
+  import { statusKey, timeAgo } from '../format';
+  import { t } from '../i18n/i18n.svelte';
+  import { navigate } from '../router.svelte';
   import { toast } from '../toast-store.svelte';
+
+  let busy = $state<Record<string, boolean>>({});
+  let loadingDemo = $state(false);
+
+  const pending = $derived(pendingGuards());
+  const resolved = $derived(resolvedGuards().slice(0, 20));
+  const demo = $derived(daemonState.health?.demoMode === true);
+  const offline = $derived(daemonState.status === 'offline' && daemonState.overview === null);
+
+  function guardClass(event: GuardEvent): string {
+    if (event.status === 'approved') return 'status-pill--ok';
+    if (event.status === 'denied' || event.status === 'blocked') return 'status-pill--danger';
+    if (event.status === 'warned') return 'status-pill--warn';
+    if (event.status === 'redacted') return 'status-pill--accent';
+    return '';
+  }
+
+  function severityClass(event: GuardEvent): string {
+    if (event.severity === 'critical' || event.severity === 'high') return 'status-pill--danger';
+    if (event.severity === 'medium') return 'status-pill--warn';
+    return '';
+  }
+
+  function sessionTitle(event: GuardEvent): string {
+    return (
+      daemonState.sessions.find((session) => session.id === event.sessionId)?.title ??
+      t('inbox.noSession')
+    );
+  }
+
+  async function decide(event: GuardEvent, decision: 'approve' | 'deny'): Promise<void> {
+    if (busy[event.id]) return;
+    busy = { ...busy, [event.id]: true };
+    try {
+      await decideGuard(event.id, { decision });
+      toast(decision === 'approve' ? t('inbox.approved') : t('inbox.denied'));
+    } catch {
+      toast(t('inbox.decisionFailed'));
+    } finally {
+      busy = { ...busy, [event.id]: false };
+    }
+  }
+
+  async function loadDemo(): Promise<void> {
+    loadingDemo = true;
+    try {
+      await seedDemoData();
+      toast(t('inbox.loadedDemo'));
+    } catch {
+      toast(t('common.offline'));
+    } finally {
+      loadingDemo = false;
+    }
+  }
+
+  async function retry(): Promise<void> {
+    await refreshDaemon();
+  }
 </script>
 
 <div class="screen-head">
   <div>
-    <p class="kicker">Inbox</p>
-    <h1>Nothing needs you</h1>
-    <p class="screen-lede">
-      Approvals, questions, auth requests, finished runs, and errors land here.
-    </p>
+    <p class="kicker">{t('inbox.kicker')}</p>
+    <h1>{t('inbox.title')}</h1>
+    <p class="screen-lede">{t('inbox.lede')}</p>
   </div>
   <div class="screen-actions">
-    <span class="status-pill"><span class="dot dot--ok"></span> All clear</span>
+    <span class="status-pill" class:status-pill--warn={pending.length > 0} class:status-pill--ok={pending.length === 0}>
+      <span class="dot" class:dot--warn={pending.length > 0} class:dot--ok={pending.length === 0}></span>
+      {pending.length > 0 ? t('inbox.waiting', { count: pending.length }) : t('inbox.allClear')}
+    </span>
+    {#if demo}
+      <span class="status-pill status-pill--demo">{t('topbar.demo')}</span>
+    {/if}
   </div>
 </div>
 
-<section class="empty-state card" data-glass data-glass-layer="card" data-glass-depth="2">
-  <span class="empty-state__icon"><Icon name="inbox" size={24} /></span>
-  <h2>You are all caught up</h2>
-  <p>
-    When an agent needs permission or asks a question, it will appear here with one clear
-    action. Nothing is waiting right now.
-  </p>
-  <div class="button-row">
-    <button class="btn btn--primary" type="button" onclick={() => toast('Demo approvals arrive in Phase 5.')}>
-      Try a demo approval
+{#if offline}
+  <section class="empty-state card" data-glass data-glass-layer="card" data-glass-depth="2">
+    <span class="empty-state__icon"><Icon name="alert" size={24} /></span>
+    <h2>{t('home.offlineTitle')}</h2>
+    <p>{t('home.offlineBody')}</p>
+    <button class="btn btn--primary" type="button" onclick={retry} disabled={daemonState.loading}>
+      <Icon name="refresh" size={16} />
+      {t('home.offlineAction')}
     </button>
-    <button class="btn btn--ghost" type="button" onclick={() => toast('Notification settings arrive in Phase 6.')}>
-      Notification settings
-    </button>
-  </div>
-</section>
+  </section>
+{:else}
+  {#if pending.length > 0}
+    <div class="guard-list">
+      {#each pending as event (event.id)}
+        <article class="guard-card card" data-glass data-glass-layer="card" data-glass-depth="2">
+          <div class="guard-card__head">
+            <div class="guard-card__title">
+              <span class="status-pill {severityClass(event)}">{event.severity}</span>
+              <h2>{event.title}</h2>
+            </div>
+            <span class="status-pill status-pill--warn">
+              <span class="dot dot--warn"></span>
+              {t('common.pending')}
+            </span>
+          </div>
 
-<div class="info-grid">
-  <section class="card info-card">
-    <span class="info-card__icon"><Icon name="shield" size={18} /></span>
-    <h3>Approvals stay explicit</h3>
-    <p>Approve or deny from the phone. Cockpit never guesses on a risky action.</p>
-  </section>
-  <section class="card info-card">
-    <span class="info-card__icon"><Icon name="clock" size={18} /></span>
-    <h3>Deep links, not noise</h3>
-    <p>Every notification opens the exact flight and step that needs you.</p>
-  </section>
-</div>
+          <p class="guard-card__description">{event.description}</p>
+
+          <dl class="guard-card__meta">
+            <div><dt>{t('flights.agent')}</dt><dd>{sessionTitle(event)}</dd></div>
+            <div><dt>{t('inbox.rule')}</dt><dd><code>{event.ruleId}</code></dd></div>
+            <div><dt>{t('inbox.requestedAt')}</dt><dd>{timeAgo(event.requestedAt, t)}</dd></div>
+          </dl>
+
+          {#if event.command}
+            <div class="guard-command">
+              <span>{t('inbox.command')}</span>
+              <pre><code>{event.command}</code></pre>
+            </div>
+          {/if}
+
+          <div class="guard-evidence">
+            <span class="guard-evidence__label">{t('inbox.evidence')}</span>
+            {#if event.evidence.length > 0}
+              <ul>
+                {#each event.evidence as evidence}
+                  <li>
+                    {#if evidence.field}<code>{evidence.field}</code>{/if}
+                    {#if evidence.excerpt}<span>{evidence.excerpt}</span>{/if}
+                    {#if evidence.path}<span>{evidence.path}{#if evidence.line}:{evidence.line}{/if}</span>{/if}
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p>{t('inbox.evidenceEmpty')}</p>
+            {/if}
+          </div>
+
+          {#if demo && event.metadata?.demo}
+            <p class="guard-card__demo">{t('inbox.demoHint')}</p>
+          {/if}
+
+          <div class="guard-card__actions">
+            <button
+              class="btn btn--primary"
+              type="button"
+              onclick={() => decide(event, 'approve')}
+              disabled={busy[event.id]}
+            >
+              <Icon name="check" size={16} />
+              {t('inbox.approve')}
+            </button>
+            <button
+              class="btn btn--ghost"
+              type="button"
+              onclick={() => decide(event, 'deny')}
+              disabled={busy[event.id]}
+            >
+              <Icon name="x" size={16} />
+              {t('inbox.deny')}
+            </button>
+            <button
+              class="text-link"
+              type="button"
+              onclick={() => navigate(`/flights?session=${encodeURIComponent(event.sessionId)}`)}
+            >
+              {t('inbox.openFlight')}
+              <Icon name="arrow-right" size={14} />
+            </button>
+          </div>
+        </article>
+      {/each}
+    </div>
+  {:else}
+    <section class="empty-state card" data-glass data-glass-layer="card" data-glass-depth="2">
+      <span class="empty-state__icon"><Icon name="inbox" size={24} /></span>
+      <h2>{t('inbox.emptyTitle')}</h2>
+      <p>{t('inbox.emptyBody')}</p>
+      <div class="button-row">
+        {#if demo}
+          <button class="btn btn--primary" type="button" onclick={loadDemo} disabled={loadingDemo}>
+            <Icon name="play" size={16} />
+            {t('inbox.loadDemo')}
+          </button>
+        {/if}
+        <button class="btn btn--ghost" type="button" onclick={() => navigate('/flights')}>
+          <Icon name="plane" size={16} />
+          {t('nav.flights')}
+        </button>
+      </div>
+    </section>
+  {/if}
+
+  {#if resolved.length > 0}
+    <section class="resolved-section">
+      <h2 class="section-title">{t('inbox.resolved')}</h2>
+      <div class="resolved-list">
+        {#each resolved as event (event.id)}
+          <article class="resolved-row card">
+            <div class="resolved-row__main">
+              <span class="status-pill {guardClass(event)}">{t(statusKey(event.status))}</span>
+              <div>
+                <strong>{event.title}</strong>
+                <small>{sessionTitle(event)} · {timeAgo(event.resolvedAt ?? event.requestedAt, t)}</small>
+              </div>
+            </div>
+            {#if event.resolvedBy}
+              <span class="resolved-row__by">{t('inbox.resolvedBy', { name: event.resolvedBy })}</span>
+            {/if}
+          </article>
+        {/each}
+      </div>
+    </section>
+  {/if}
+{/if}

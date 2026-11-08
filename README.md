@@ -7,10 +7,10 @@ and asks permission before risky actions. Everything stays on your machine. No
 account, no cloud, no telemetry.
 
 > **Status:** the 0.2.0 rewrite is in progress on the `rewrite` branch. Phases
-> 0–4B are complete: the Rust core, proxy, adapters, guards, snapshots, and the
-> design v2 UI shell all build and pass their gates. The shipped 0.1.0
+> 0–5 are complete: the Rust core, proxy, adapters, guards, snapshots, the
+> design v2 UI, and the five tabs wired to real daemon data. The shipped 0.1.0
 > TypeScript/Node implementation is preserved under `legacy/` as the behavior
-> spec. Phase 5 wires the five tabs to the daemon.
+> spec. Next: agent control and notifications (Phase 6).
 
 ## What v0.2.0 will be
 
@@ -57,6 +57,10 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
   and never execute code. Wallpaper images stay on the device.
 - Home widgets are rearrangeable and hideable: drag on desktop, long-press on
   phone.
+- Demo mode is explicit: a `Demo` badge appears in the top bar, sessions and
+  approvals carry a `Demo` chip, and live data is never mixed with seeded rows
+  silently. Demo data is only offered when the daemon runs with
+  `COCKPIT_DEMO=1`.
 
 The full contract is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -104,8 +108,11 @@ pnpm exec playwright test
 ```
 
 The UI preview is available at `http://127.0.0.1:5174` with `pnpm dev`, or
-`http://127.0.0.1:4174` with `pnpm preview` after a build. The UI does not call
-the daemon yet; Phase 5 connects them.
+`http://127.0.0.1:4174` with `pnpm preview` after a build. Start the daemon with
+`cockpit serve` (or `cockpit demo` for seeded data); the UI calls
+`http://127.0.0.1:4319` on dev/preview ports and the same origin otherwise.
+Playwright starts its own disposable demo and live daemons, so it never touches
+your local database.
 
 ## Read more
 

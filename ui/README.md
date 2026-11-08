@@ -3,9 +3,9 @@
 Svelte 5 + TypeScript + Vite. No heavy UI or animation libraries. The glass
 renderer is custom WebGL2 code in `src/glass`.
 
-> **Status:** Phase 4B (Design v2) is complete and stops for visual approval.
-> The five tabs render with sample data; Phase 5 wires them to the daemon,
-> finishes onboarding, and adds the i18n catalogs.
+> **Status:** Phases 4B and 5 are complete. The five tabs read real daemon data
+> over HTTP and WebSocket, first run opens a three-step tour, and the i18n
+> catalogs are in place (English complete, drafts fall back per key).
 
 ## Design direction
 
@@ -26,6 +26,47 @@ Design v2 is a graphite bento dashboard, not a pure-glass demo:
 Banned: amber-on-black, monospace uppercase labels, serif display fonts, hero
 marketing headlines, grid/radar decoration, sharp corners, and more than one
 accent colour per theme.
+
+## Daemon data
+
+`src/lib/api/` is a typed client plus a reactive store:
+
+- `client.ts` resolves the daemon base URL (`window.__cockpitDaemonUrl`, then
+  `http://127.0.0.1:4319` on dev/preview ports, else same origin) and wraps
+  every route the UI uses, including `/api/snapshots/{id}`.
+- `daemon.svelte.ts` polls sessions, guards, adapters, and settings, keeps a
+  WebSocket to `/api/live` with reconnect, and exposes `liveEvents`,
+  `pendingGuards()`, and guard decisions.
+- `types.ts` mirrors the daemon JSON, including replay summaries, stream
+  chunks, snapshot details, and file changes.
+
+Screens never invent data. Empty, loading, offline, and error states are
+explicit. Demo rows appear only when `health.demoMode` is true, and every demo
+surface is labeled with a `Demo` badge or chip.
+
+- **Home** — live flight, today's spend, token ring, guard count, adapters.
+- **Inbox** — pending approvals with evidence and Approve/Deny, plus resolved
+  decisions.
+- **Flights** — list with status filters and search, `?session=<id>` deep links,
+  recorded output, live chunks that arrive after load, timeline scrubber and
+  replay, step details, and lazy snapshot diffs.
+- **Market** — an honest "not open yet" state with the trust policy; the
+  registry ships later.
+- **Settings** — appearance, language, adapters with install state and
+  copyable run commands, demo seeding, privacy, platform support, daemon info,
+  and the tour replay.
+
+First run redirects to `/welcome` until `cockpit.onboarded` is set; Settings can
+replay the tour. `/glass-preview` is development-only and resolves to Home in a
+production build.
+
+## i18n
+
+`src/lib/i18n/catalog.ts` holds the catalogs and the pure `translate` helper;
+`i18n.svelte.ts` re-exports it and adds the reactive `t()`. English is the
+source of truth. Draft languages fall back per key, so a missing translation
+never renders a blank label. Placeholders use `{name}` and are interpolated
+only when the variable exists.
 
 ## Appearance
 
@@ -56,8 +97,9 @@ full-screen WebGL2 pass:
 - Inner shadow, accent tint, theme-aware scrim and vignette
 - Surface layer filtering: matte draws no shapes, hybrid draws floats only,
   glass draws cards and floats
-- ResizeObserver + rAF geometry sync, on-demand rendering, 16-shape cap,
-  60 fps desktop / 30 fps mobile, paused when hidden
+- ResizeObserver + rAF geometry sync, on-demand rendering, 16-shape cap on
+  desktop and 12 on phones/low-end devices, 60 fps desktop / 30 fps mobile,
+  paused when hidden
 
 Fallbacks: no WebGL2 or `?glass=off` → CSS `backdrop-filter`; matte surface or
 Performance mode → CSS matte surfaces with WebGL paused; `prefers-reduced-
@@ -69,8 +111,8 @@ over an opaque `--sheet-bg`; the canvas sits below their scrims.
 
 ## Budgets
 
-- JavaScript < 150 KB gzip (current build: ~150.0 KB, 49.6 KB gzip)
-- CSS: ~50 KB, 9.7 KB gzip
+- JavaScript < 150 KB gzip (current build: 228.6 KB, 72.6 KB gzip)
+- CSS: 73.0 KB, 12.5 KB gzip
 - No layout shift from font loading
 - 44 px minimum touch targets
 - Contrast ≥ 4.5:1 for text over every surface and accent pair
@@ -88,9 +130,11 @@ pnpm test
 pnpm exec playwright test
 ```
 
-Screenshots from the visual suite land in `../docs/screenshots/phase4b/`.
-`pnpm test` currently runs 10 files / 95 tests. The Playwright suite runs 23
+Screenshots from the visual suite land in `../docs/screenshots/phase5/`.
+`pnpm test` currently runs 13 files / 110 tests. The Playwright suite runs 38
 tests across desktop (1440×900) and phone (390×844, plus 360×640) in Dark,
-Light, and Frost, covering surfaces, fallbacks, appearance persistence, theme
-import/export/share, wallpaper storage, widget editing, focus rings, and touch
-targets.
+Light, and Frost, covering real daemon data, demo labels, first-run onboarding,
+Inbox decisions, flight replay and deep links, lazy snapshot diffs, live
+WebSocket output, appearance persistence, theme import/export/share, wallpaper
+storage, widget editing, glass budgets, focus rings, and touch targets. It
+starts disposable demo (`4321`) and live (`4322`) daemons itself.

@@ -1193,7 +1193,7 @@ impl GuardService {
         Ok(refreshed)
     }
 
-    fn record_event(&self, input: NewGuardEvent) -> GuardResult<GuardEvent> {
+    pub(crate) fn record_event(&self, input: NewGuardEvent) -> GuardResult<GuardEvent> {
         let event = self.store.insert_guard_event(input)?;
         self.live.publish(
             "guard.triggered",

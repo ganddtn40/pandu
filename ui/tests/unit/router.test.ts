@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, normalizePath, routeLabel } from '../../src/lib/router';
+import { ROUTES, normalizePath, resolveRoute, routeLabel } from '../../src/lib/router';
 
 describe('normalizePath', () => {
   it('keeps every declared route', () => {
@@ -32,6 +32,34 @@ describe('normalizePath', () => {
     for (const route of primary) {
       expect(ROUTES).toContain(route);
     }
+  });
+});
+
+describe('resolveRoute', () => {
+  it('keeps the query so flight deep links survive navigation', () => {
+    expect(resolveRoute('/flights?session=abc')).toEqual({
+      path: '/flights',
+      search: '?session=abc',
+    });
+  });
+
+  it('resolves aliases and unknown paths to a known route', () => {
+    expect(resolveRoute('/approvals?status=pending')).toEqual({
+      path: '/inbox',
+      search: '?status=pending',
+    });
+    expect(resolveRoute('/nope?x=1')).toEqual({ path: '/', search: '?x=1' });
+  });
+
+  it('hides developer-only routes in production and keeps them in development', () => {
+    expect(resolveRoute('/glass-preview')).toEqual({
+      path: '/glass-preview',
+      search: '',
+    });
+    expect(resolveRoute('/glass-preview?surface=glass', { production: true })).toEqual({
+      path: '/',
+      search: '',
+    });
   });
 });
 

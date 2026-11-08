@@ -1,34 +1,30 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
-  import { toast } from '../toast-store.svelte';
+  import { t } from '../i18n/i18n.svelte';
 </script>
 
 <div class="screen-head">
   <div>
-    <p class="kicker">Market</p>
-    <h1>Skills and MCP servers</h1>
-    <p class="screen-lede">
-      A reviewed catalogue with pinned commits, permissions, and a diff before anything is written.
-    </p>
+    <p class="kicker">{t('market.kicker')}</p>
+    <h1>{t('market.title')}</h1>
+    <p class="screen-lede">{t('market.lede')}</p>
   </div>
   <div class="screen-actions">
-    <span class="status-pill"><span class="dot dot--ok"></span> Opens in Phase 8</span>
+    <span class="status-pill"><span class="dot"></span> {t('common.notAvailable')}</span>
   </div>
 </div>
 
 <section class="empty-state card" data-glass data-glass-layer="card" data-glass-depth="2">
   <span class="empty-state__icon"><Icon name="market" size={24} /></span>
-  <h2>The market is not open yet</h2>
-  <p>
-    The registry ships with the app in Phase 8. Every card will show a trust tier and the
-    exact files an install will write. Nothing installs without your confirmation.
-  </p>
-  <div class="trust-row" aria-label="Trust tiers">
-    <span class="status-pill status-pill--ok"><Icon name="check" size={13} /> Official</span>
-    <span class="status-pill"><Icon name="shield" size={13} /> Community-reviewed</span>
-    <span class="status-pill status-pill--warn"><Icon name="alert" size={13} /> Unreviewed</span>
+  <h2>{t('market.notOpen')}</h2>
+  <p>{t('market.notOpenBody')}</p>
+  <div class="trust-row" aria-label={t('market.policy')}>
+    <span class="status-pill status-pill--ok"><Icon name="check" size={13} /> {t('market.trustOfficial')}</span>
+    <span class="status-pill"><Icon name="shield" size={13} /> {t('market.trustReviewed')}</span>
+    <span class="status-pill status-pill--warn"><Icon name="alert" size={13} /> {t('market.trustUnreviewed')}</span>
   </div>
-  <button class="btn btn--ghost" type="button" onclick={() => toast('The registry arrives in Phase 8.')}>
-    Read the trust policy
-  </button>
+  <details class="market-policy">
+    <summary>{t('market.policy')}</summary>
+    <p>{t('market.policyBody')}</p>
+  </details>
 </section>

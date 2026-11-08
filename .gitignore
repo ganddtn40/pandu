@@ -33,6 +33,7 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+/ui/.tmp/
 
 # Generated logo exports (SVGs are the source)
 /design/logo/png/

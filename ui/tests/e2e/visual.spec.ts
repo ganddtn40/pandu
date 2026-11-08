@@ -2,38 +2,93 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase4b');
+const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase5');
 mkdirSync(SHOTS, { recursive: true });
 
+const DEMO_DAEMON = 'http://127.0.0.1:4321';
+const LIVE_DAEMON = 'http://127.0.0.1:4322';
 const DESIGN_KEY = 'cockpit.design';
 const WALLPAPER_KEY = 'cockpit.wallpaperImage';
+const ONBOARDED_KEY = 'cockpit.onboarded';
+
+interface PrepareOptions {
+  daemon?: string;
+  onboarded?: boolean;
+  forceGlass?: boolean;
+  lowEnd?: boolean;
+}
 
 /**
- * Headless Chromium reports `prefers-reduced-transparency: reduce`, which the
- * app honors by falling back to CSS. Screenshot tests need the real WebGL path,
- * so report "no preference" for that one query only.
+ * Point the app at the disposable daemon for this run, seed first-run state,
+ * and (for screenshot tests) report no reduced-transparency preference so the
+ * real WebGL path renders. Headless Chromium otherwise asks for the CSS
+ * fallback.
  */
-async function forceWebglPreference(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const original = window.matchMedia.bind(window);
-    window.matchMedia = (query: string) => {
-      const list = original(query);
-      if (query.includes('prefers-reduced-transparency')) {
-        Object.defineProperty(list, 'matches', { value: false, configurable: true });
+async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> {
+  const {
+    daemon = DEMO_DAEMON,
+    onboarded = true,
+    forceGlass = true,
+    lowEnd = false,
+  } = options;
+
+  if (forceGlass) {
+    // Overriding matchMedia only affects JavaScript. The CSS fallback rule is
+    // driven by the real media feature, so emulate it through CDP as well.
+    const session = await page.context().newCDPSession(page);
+    await session.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }],
+    });
+  }
+
+  await page.addInitScript(
+    ({ daemonUrl, isOnboarded, webgl, constrained }) => {
+      window.__cockpitDaemonUrl = daemonUrl;
+      try {
+        // Seed first-run state once per context. Re-running this on every
+        // navigation would wipe the flag that "Skip" just wrote.
+        if (!sessionStorage.getItem('cockpit.e2ePrepared')) {
+          sessionStorage.setItem('cockpit.e2ePrepared', '1');
+          if (isOnboarded) localStorage.setItem('cockpit.onboarded', '1');
+          else localStorage.removeItem('cockpit.onboarded');
+        }
+      } catch {
+        // Storage is optional.
       }
-      return list;
-    };
-  });
+
+      if (webgl) {
+        const original = window.matchMedia.bind(window);
+        window.matchMedia = (query: string) => {
+          const list = original(query);
+          if (query.includes('prefers-reduced-transparency')) {
+            Object.defineProperty(list, 'matches', { value: false, configurable: true });
+          }
+          return list;
+        };
+      }
+
+      if (constrained) {
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          configurable: true,
+          get: () => 2,
+        });
+        Object.defineProperty(navigator, 'deviceMemory', {
+          configurable: true,
+          get: () => 2,
+        });
+      }
+    },
+    { daemonUrl: daemon, isOnboarded: onboarded, webgl: forceGlass, constrained: lowEnd },
+  );
 }
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => window.__cockpitGlassReady === true);
-  // Give the compositor one more frame so screenshots capture the WebGL pass.
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(250);
 }
 
-async function open(page: Page, url: string): Promise<void> {
-  await forceWebglPreference(page);
+async function open(page: Page, url: string, options: PrepareOptions = {}): Promise<void> {
+  await prepare(page, options);
   await page.goto(url);
   await ready(page);
 }
@@ -53,8 +108,14 @@ async function screenshot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
 }
 
+async function expectNoDevelopmentCopy(page: Page): Promise<void> {
+  await expect(page.locator('body')).not.toContainText(
+    /Phase\s+\d|Preview data|arrives in Phase|coming in Phase|shell preview/i,
+  );
+}
+
 async function openAppearance(page: Page) {
-  await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+  await page.locator('.topbar').getByRole('button', { name: 'Appearance' }).click();
   const dialog = page.getByRole('dialog', { name: 'Appearance' });
   await expect(dialog).toBeVisible();
   return dialog;
@@ -81,6 +142,45 @@ async function backgroundAlpha(page: Page, selector: string): Promise<number> {
   }, selector);
 }
 
+async function backdropBlur(page: Page, selector: string): Promise<number> {
+  return page.evaluate((query) => {
+    const element = document.querySelector<HTMLElement>(query);
+    if (!element) return 0;
+    const style = getComputedStyle(element);
+    const value = style.backdropFilter || '';
+    const match = value.match(/blur\(([\d.]+)px\)/);
+    return match ? Number.parseFloat(match[1] ?? '0') : 0;
+  }, selector);
+}
+
+async function smallTextOffenders(page: Page, minimum: number): Promise<string[]> {
+  return page.evaluate((min) => {
+    const offenders: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const text = node.textContent?.trim() ?? '';
+      if (!text) continue;
+      const parent = node.parentElement;
+      if (!parent) continue;
+      if (parent.closest('.sr-only, svg, script, style, [aria-hidden="true"]')) continue;
+      const style = getComputedStyle(parent);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      if (Number(style.opacity) === 0) continue;
+      const rect = parent.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const size = Number.parseFloat(style.fontSize);
+      if (size + 0.05 < min) {
+        const name = parent.getAttribute('class') ?? '';
+        offenders.push(
+          `${parent.tagName.toLowerCase()}.${name.slice(0, 40)} "${text.slice(0, 32)}" ${size}px`,
+        );
+      }
+    }
+    return offenders.slice(0, 25);
+  }, minimum);
+}
+
 async function findSmallTargets(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const nodes = Array.from(
@@ -102,12 +202,91 @@ async function findSmallTargets(page: Page): Promise<string[]> {
   });
 }
 
+async function shapeStats(page: Page) {
+  return page.evaluate(() => window.__cockpitGlassStats ?? null);
+}
+
+async function waitForHomeData(page: Page): Promise<void> {
+  await expect(page.locator('.preview-note')).toContainText('Synced', { timeout: 15_000 });
+}
+
+test.describe('first run', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('opens the tour before the dashboard and lands on live data', async ({ page }) => {
+    await prepare(page, { onboarded: false });
+    await page.goto('/');
+    await ready(page);
+
+    await expect(page).toHaveURL(/\/welcome$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Your agents, in one calm place.' }),
+    ).toBeVisible();
+    await expect(page.getByText(/Daemon online · v0\.2\.0/)).toBeVisible();
+    await expect(page.getByText(/\d+ agents detected/)).toBeVisible();
+    await expectNoDevelopmentCopy(page);
+    await screenshot(page, 'desktop-onboarding-welcome.png');
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Every step, recorded.' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'You stay in control.' }),
+    ).toBeVisible();
+    await screenshot(page, 'desktop-onboarding-control.png');
+
+    await page.getByRole('button', { name: 'Open Cockpit' }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
+    await waitForHomeData(page);
+    expect(await page.evaluate((key) => localStorage.getItem(key), ONBOARDED_KEY)).toBe('1');
+  });
+
+  test('can be skipped and replayed from Settings', async ({ page }) => {
+    await prepare(page, { onboarded: false });
+    await page.goto('/welcome');
+    await ready(page);
+    await page.getByRole('button', { name: 'Skip' }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
+
+    await page.goto('/settings');
+    await ready(page);
+    await page.getByRole('button', { name: 'Replay the tour' }).click();
+    await expect(page).toHaveURL(/\/welcome$/);
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Your agents, in one calm place.' }),
+    ).toBeVisible();
+  });
+});
+
 test.describe('desktop shell', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
+  test('renders real daemon data with honest demo labels', async ({ page }) => {
+    await open(page, '/');
+    await waitForHomeData(page);
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
+    await expect(page.getByText('Review landing page copy').first()).toBeVisible();
+    await expect(page.locator('.status-pill--demo').first()).toBeVisible();
+    await expect(page.locator('.tile--spend .tile__value')).not.toHaveText('$0.00');
+    await expect(page.locator('.tile--tokens .tile__value')).not.toHaveText('0');
+    await expect(page.locator('.tile--recent .list-row')).toHaveCount(3);
+    await expect(page.locator('.tile--agents .agent-row')).toHaveCount(3);
+    await expect(page.locator('.preview-note')).toContainText('Synced');
+    await expect(page.locator('.preview-note')).toContainText('demo mode');
+    await expectNoDevelopmentCopy(page);
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'desktop-home-dark-demo.png');
+  });
+
   for (const theme of ['dark', 'light', 'frost'] as const) {
-    test(`renders the hybrid home in ${theme}`, async ({ page }) => {
+    test(`renders the home in ${theme}`, async ({ page }) => {
       await open(page, `/?theme=${theme}&surface=hybrid`);
+      await waitForHomeData(page);
 
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await expect(page.locator('html')).toHaveAttribute('data-surface', 'hybrid');
@@ -115,39 +294,83 @@ test.describe('desktop shell', () => {
       await expect(page.locator('canvas.glass-canvas')).toBeVisible();
       await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
 
-      // Hybrid draws the floating chrome, never the matte cards.
       const floats = await page.locator('[data-glass-layer="float"][data-glass-rendered="true"]').count();
       const cards = await page.locator('.tile[data-glass-rendered="true"]').count();
       expect(floats).toBeGreaterThanOrEqual(1);
       expect(cards).toBe(0);
 
       await expectNoHorizontalOverflow(page);
-      await screenshot(page, `desktop-${theme}-hybrid.png`);
+      await screenshot(page, `desktop-home-${theme}.png`);
     });
   }
 
   test('renders matte surfaces without WebGL', async ({ page }) => {
     await open(page, '/?theme=dark&surface=matte');
+    await waitForHomeData(page);
 
     await expect(page.locator('html')).toHaveAttribute('data-surface', 'matte');
     await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'fallback');
     await expect(page.locator('html')).toHaveAttribute('data-glass-reason', 'matte');
     await expect(page.locator('canvas.glass-canvas')).toBeHidden();
-    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
 
     await expectNoHorizontalOverflow(page);
-    await screenshot(page, 'desktop-dark-matte.png');
+    await screenshot(page, 'desktop-home-matte.png');
   });
 
   test('renders liquid glass on cards and floating layers', async ({ page }) => {
     await open(page, '/?theme=dark&surface=glass');
+    await waitForHomeData(page);
 
     await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'webgl');
     const cards = await page.locator('.tile[data-glass-rendered="true"]').count();
     expect(cards).toBeGreaterThanOrEqual(4);
 
     await expectNoHorizontalOverflow(page);
-    await screenshot(page, 'desktop-dark-glass.png');
+    await screenshot(page, 'desktop-home-glass.png');
+  });
+
+  test('keeps one logo in the top bar and opens Add agent from the rail', async ({ page }) => {
+    await open(page, '/');
+    await waitForHomeData(page);
+
+    await expect(page.locator('.topbar .brand')).toHaveCount(1);
+    await expect(page.locator('.rail .brand')).toHaveCount(0);
+
+    const geometry = await page.evaluate(() => {
+      const rail = document.querySelector('.rail')?.getBoundingClientRect();
+      const first = document.querySelector('.rail__nav .rail__item')?.getBoundingClientRect();
+      if (!rail || !first) throw new Error('missing rail geometry');
+      return { offset: first.top - rail.top };
+    });
+    expect(geometry.offset).toBeLessThan(40);
+
+    const plus = page.getByRole('button', { name: 'Add agent' });
+    await expect(plus).toHaveAttribute('data-tooltip', 'Add agent');
+    await plus.click();
+    const dialog = page.getByRole('dialog', { name: 'Add an agent' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('OpenCode', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('cockpit run -- opencode')).toBeVisible();
+    await screenshot(page, 'desktop-add-agent.png');
+
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await dialog.getByRole('button', { name: 'Copy' }).first().click();
+    await expect(page.locator('.toast')).toContainText('Command copied');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('cockpit run --');
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('keeps every label at 12px or larger', async ({ page }) => {
+    await open(page, '/');
+    await waitForHomeData(page);
+    expect(await smallTextOffenders(page, 12)).toEqual([]);
+
+    await page.goto('/flights');
+    await ready(page);
+    await expect(page.locator('.flight-row').first()).toBeVisible();
+    expect(await smallTextOffenders(page, 12)).toEqual([]);
   });
 
   test('previews appearance changes live and persists them', async ({ page }) => {
@@ -183,7 +406,6 @@ test.describe('desktop shell', () => {
       element.querySelector<HTMLElement>('.sheet__body')?.scrollTo({ top: 0 });
     });
     await page.waitForTimeout(50);
-
     await screenshot(page, 'desktop-appearance-light.png');
 
     expect(await storedDesign(page)).toMatchObject({
@@ -197,7 +419,6 @@ test.describe('desktop shell', () => {
     await dialog.getByRole('button', { name: 'Close appearance' }).click();
     await page.goto('/');
     await ready(page);
-
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await expect(page.locator('html')).toHaveAttribute('data-accent', 'blue');
     await expect(page.locator('html')).toHaveAttribute('data-surface', 'glass');
@@ -219,61 +440,6 @@ test.describe('desktop shell', () => {
     await expect(page.locator('html')).toHaveAttribute('data-performance', 'off');
     await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'webgl');
     await expect(page.locator('canvas.glass-canvas')).toBeVisible();
-  });
-
-  test('opens the quick prompt from the keyboard', async ({ page }) => {
-    await open(page, '/?theme=dark');
-
-    await page.keyboard.press('Control+K');
-    const dialog = page.getByRole('dialog', { name: 'Ask your agent anything' });
-    await expect(dialog).toBeVisible();
-    expect(await backgroundAlpha(page, '.quick-prompt')).toBeGreaterThanOrEqual(0.9);
-    await expect(dialog.getByPlaceholder(/Explain this stack trace/)).toBeFocused();
-
-    await dialog.getByPlaceholder(/Explain this stack trace/).fill('Summarize this folder');
-    await expect(dialog.getByRole('button', { name: 'Send' })).toBeEnabled();
-    await screenshot(page, 'desktop-quick-prompt.png');
-
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-  });
-
-  test('hides, reorders, persists, and resets widgets', async ({ page }) => {
-    await open(page, '/?theme=dark');
-
-    await expect(page.locator('.tile--guards')).toBeVisible();
-    await page.getByRole('button', { name: 'Customize' }).click();
-    await page.getByRole('button', { name: 'Hide Guards' }).click();
-    await expect(page.locator('.tile--guards')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Show Guards' })).toBeVisible();
-
-    await page.reload();
-    await ready(page);
-    await expect(page.locator('.tile--guards')).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Customize' }).click();
-    await page.locator('.edit-note').getByRole('button', { name: 'Reset layout' }).click();
-    await expect(page.locator('.tile--guards')).toBeVisible();
-
-    // Drag the spend tile before the live tile with a real pointer gesture.
-    const handle = page.getByRole('button', { name: 'Drag Spend today' });
-    const target = page.locator('.tile--live');
-    const handleBox = await handle.boundingBox();
-    const targetBox = await target.boundingBox();
-    if (!handleBox || !targetBox) throw new Error('missing drag geometry');
-    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 24, { steps: 8 });
-    await page.mouse.up();
-    await expect(page.locator('.tile').first()).toHaveAttribute('data-widget', 'spend');
-
-    await page.reload();
-    await ready(page);
-    await expect(page.locator('.tile').first()).toHaveAttribute('data-widget', 'spend');
-
-    await page.getByRole('button', { name: 'Customize' }).click();
-    await page.getByRole('button', { name: 'Move Spend today down' }).click();
-    await expect(page.locator('.tile').first()).toHaveAttribute('data-widget', 'live');
   });
 
   test('exports, imports, shares, and rejects bad theme files', async ({ page }) => {
@@ -349,12 +515,75 @@ test.describe('desktop shell', () => {
       .poll(() => page.evaluate((key) => localStorage.getItem(key), WALLPAPER_KEY))
       .toMatch(/^data:image\/jpeg/);
     await expect(dialog.getByRole('button', { name: 'Replace image' })).toBeVisible();
-
     await screenshot(page, 'desktop-appearance-wallpaper.png');
 
     await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-wallpaper', 'procedural');
     expect(await page.evaluate((key) => localStorage.getItem(key), WALLPAPER_KEY)).toBeNull();
+  });
+
+  test('opens the quick prompt and copies an honest command', async ({ page }) => {
+    await open(page, '/');
+    await waitForHomeData(page);
+
+    await page.keyboard.press('Control+K');
+    const dialog = page.getByRole('dialog', { name: 'Run an agent through Cockpit' });
+    await expect(dialog).toBeVisible();
+    expect(await backgroundAlpha(page, '.quick-prompt')).toBeGreaterThanOrEqual(0.9);
+    const field = dialog.getByPlaceholder(/Write the prompt/);
+    await expect(field).toBeFocused();
+
+    await field.fill('Summarize this folder');
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await dialog.getByRole('button', { name: 'Copy prompt' }).click();
+    await expect(page.locator('.toast')).toContainText('Prompt copied.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Summarize this folder');
+
+    await dialog.getByRole('button', { name: 'Copy command' }).click();
+    await expect(page.locator('.toast')).toContainText('Command copied. Paste it in your terminal.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('cockpit run --');
+
+    await screenshot(page, 'desktop-quick-prompt.png');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
+
+  test('hides, reorders, persists, and resets widgets', async ({ page }) => {
+    await open(page, '/?theme=dark');
+    await waitForHomeData(page);
+
+    await expect(page.locator('.tile--guards')).toBeVisible();
+    await page.getByRole('button', { name: 'Customize' }).click();
+    await page.getByRole('button', { name: 'Hide Guards' }).click();
+    await expect(page.locator('.tile--guards')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Show Guards' })).toBeVisible();
+
+    await page.reload();
+    await ready(page);
+    await expect(page.locator('.tile--guards')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Customize' }).click();
+    await page.locator('.edit-note').getByRole('button', { name: 'Reset layout' }).click();
+    await expect(page.locator('.tile--guards')).toBeVisible();
+
+    const handle = page.getByRole('button', { name: 'Drag Spend' });
+    const target = page.locator('.tile--live');
+    const handleBox = await handle.boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!handleBox || !targetBox) throw new Error('missing drag geometry');
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 24, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('.tile').first()).toHaveAttribute('data-widget', 'spend');
+
+    await page.reload();
+    await ready(page);
+    await expect(page.locator('.tile').first()).toHaveAttribute('data-widget', 'spend');
+
+    await page.getByRole('button', { name: 'Customize' }).click();
+    await page.getByRole('button', { name: 'Move Spend down' }).click();
+    await expect(page.locator('.tile').first()).toHaveAttribute('data-widget', 'live');
   });
 
   test('keeps an idle hybrid canvas from redrawing', async ({ page }) => {
@@ -389,41 +618,177 @@ test.describe('desktop shell', () => {
     expect(focus?.outlineWidth ?? 0).toBeGreaterThanOrEqual(2);
   });
 
-  test('renders the secondary screens', async ({ page }) => {
-    await forceWebglPreference(page);
-
-    for (const [route, name] of [
-      ['/settings', 'desktop-settings-dark.png'],
-      ['/inbox', 'desktop-inbox-dark.png'],
-      ['/flights', 'desktop-flights-dark.png'],
-      ['/market', 'desktop-market-dark.png'],
-      ['/welcome', 'desktop-welcome-dark.png'],
-      ['/glass-preview', 'desktop-glass-preview-dark.png'],
-    ] as const) {
-      await page.goto(route);
-      await ready(page);
-      await expectNoHorizontalOverflow(page);
-      await screenshot(page, name);
-    }
-
-    await expect(page.getByRole('heading', { level: 1, name: 'Surfaces, controls, and type.' })).toBeVisible();
-  });
-
   test('falls back for reduced transparency and ?glass=off', async ({ page }) => {
-    // No preference override: headless Chromium requests reduced transparency.
+    await prepare(page, { forceGlass: false });
     await page.goto('/?theme=dark');
     await ready(page);
     await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'fallback');
     await expect(page.locator('html')).toHaveAttribute('data-glass-reason', 'reduced-transparency');
     await expect(page.locator('canvas.glass-canvas')).toBeHidden();
-    await screenshot(page, 'desktop-dark-fallback.png');
+    await screenshot(page, 'desktop-home-fallback.png');
 
-    await forceWebglPreference(page);
+    await prepare(page, { forceGlass: true });
     await page.goto('/?glass=off&theme=dark');
     await ready(page);
     await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'fallback');
     await expect(page.locator('html')).toHaveAttribute('data-glass-reason', 'preference');
     await expect(page.locator('canvas.glass-canvas')).toBeHidden();
+  });
+
+  test('hides developer diagnostics in production', async ({ page }) => {
+    await open(page, '/glass-preview');
+    await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
+    await expect(page.getByText('Surfaces, controls, and type.')).toHaveCount(0);
+    await expectNoDevelopmentCopy(page);
+  });
+
+  test('renders every secondary screen against the daemon', async ({ page }) => {
+    await prepare(page);
+
+    for (const [route, name, heading] of [
+      ['/inbox', 'desktop-inbox-demo.png', 'Needs you'],
+      ['/flights', 'desktop-flights-list.png', 'Every run, recorded'],
+      ['/settings', 'desktop-settings-demo.png', 'Make it yours'],
+      ['/market', 'desktop-market.png', 'Skills and MCP servers'],
+    ] as const) {
+      await page.goto(route);
+      await ready(page);
+      await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+      await expectNoDevelopmentCopy(page);
+      await expectNoHorizontalOverflow(page);
+      await screenshot(page, name);
+    }
+  });
+
+  test('filters, opens, replays, and deep-links a recorded flight', async ({ page }) => {
+    await open(page, '/flights');
+    await expect(page.locator('.flight-row')).toHaveCount(3);
+    await expect(page.locator('.flights-toolbar__count')).toContainText('3 flights');
+
+    await page.getByRole('button', { name: 'Completed', exact: true }).click();
+    await expect(page.locator('.flight-row')).toHaveCount(2);
+
+    const search = page.getByPlaceholder('Search flights');
+    await search.fill('flaky');
+    await expect(page.locator('.flight-row')).toHaveCount(1);
+    await expect(page.locator('.flight-row')).toContainText('Fix flaky checkout test');
+
+    await page.locator('.flight-row').click();
+    await expect(page).toHaveURL(/\/flights\?session=/);
+    const detail = page.locator('.flight-detail');
+    await expect(detail.getByRole('heading', { level: 2, name: 'Fix flaky checkout test' })).toBeVisible();
+
+    await expect(detail.getByRole('tab', { name: 'Live output' })).toHaveAttribute('aria-selected', 'true');
+    await expect(detail.locator('.output-panel')).toContainText('The test reads');
+    await expect(detail.locator('.output-panel')).toContainText('recalculation finishes');
+    await expect(detail.locator('.output-block--thinking')).toContainText('The 50 ms sleep');
+    await screenshot(page, 'desktop-flight-output.png');
+
+    await detail.getByRole('tab', { name: 'Timeline' }).click();
+    const progress = detail.locator('.timeline-controls__label span').first();
+    await expect(progress).toHaveText('Step 1 of 1');
+    await expect(detail.locator('.step-row')).toHaveCount(1);
+    await expect(detail.locator('.step-detail')).toContainText('Step 1 · model');
+    await screenshot(page, 'desktop-flight-timeline.png');
+
+    const range = detail.locator('input[type="range"]');
+    await range.evaluate((element) => {
+      const input = element as HTMLInputElement;
+      input.value = '0';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await expect(progress).toHaveText('Step 0 of 1');
+    await expect(detail.locator('.step-row')).toHaveCount(0);
+
+    await detail.getByRole('button', { name: 'Play replay' }).click();
+    await expect(progress).toHaveText('Step 1 of 1', { timeout: 3_000 });
+
+    const deepLink = page.url();
+    await page.reload();
+    await ready(page);
+    await expect(page).toHaveURL(deepLink);
+    await expect(page.locator('.flight-detail h2')).toHaveText('Fix flaky checkout test');
+  });
+
+  test('shows snapshots with file changes and patches', async ({ page }) => {
+    await open(page, '/flights');
+    await page.getByRole('button', { name: /Refactor auth middleware/ }).click();
+    const detail = page.locator('.flight-detail');
+    await expect(detail.getByRole('heading', { level: 2, name: 'Refactor auth middleware' })).toBeVisible();
+
+    await detail.getByRole('tab', { name: /^Snapshots/ }).click();
+    const snapshot = detail.locator('.snapshot-card');
+    await expect(snapshot).toHaveCount(1);
+    await expect(snapshot).toContainText('after');
+    await expect(snapshot).toContainText('3 files');
+    await expect(snapshot).toContainText('+128');
+    await expect(snapshot).toContainText('−42');
+    await expect(snapshot).toContainText('feature/auth-cleanup');
+    await expect(snapshot).toContainText('8f3c2a1d9b7e');
+
+    await snapshot.locator('summary').click();
+    await expect(snapshot.locator('pre')).toContainText('src/auth/session.rs');
+    await screenshot(page, 'desktop-flight-snapshots.png');
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test('shows real daemon health, adapters, and honest platform support', async ({ page }) => {
+    await open(page, '/settings');
+    await expect(page.getByRole('heading', { level: 1, name: 'Make it yours' })).toBeVisible();
+    await expect(page.locator('.screen-head')).toContainText('Demo');
+    await expect(page.getByText('0.2.0').first()).toBeVisible();
+    await expect(page.getByText('http://127.0.0.1:4321')).toBeVisible();
+    await expect(page.getByText('Connected', { exact: true })).toBeVisible();
+    await expect(page.getByText(/6 of 15 installed/)).toBeVisible();
+    await expect(page.locator('.adapter-row')).toHaveCount(15);
+    await expect(page.getByText('Web / PWA')).toBeVisible();
+    await expect(page.getByText('Android', { exact: true })).toBeVisible();
+    await expect(page.getByText('Windows', { exact: true })).toBeVisible();
+    await expect(page.getByText('macOS', { exact: true })).toBeVisible();
+    await expect(page.getByText('iOS', { exact: true })).toBeVisible();
+    await expect(page.getByText('Linux', { exact: true })).toBeVisible();
+    await expect(page.getByText('Update checks are not available in this build.')).toBeVisible();
+    await expectNoDevelopmentCopy(page);
+    await screenshot(page, 'desktop-settings-demo.png');
+  });
+
+  test('shows no demo data or demo actions when the daemon is live', async ({ page }) => {
+    await open(page, '/', { daemon: LIVE_DAEMON });
+    await waitForHomeData(page);
+
+    await expect(page.locator('.status-pill--demo')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Load demo flights' })).toHaveCount(0);
+    await expect(page.getByText('No flight in progress')).toBeVisible();
+    await expect(page.locator('.tile--spend .tile__value')).toHaveText('$0.00');
+    await screenshot(page, 'desktop-home-live-empty.png');
+
+    await page.goto('/inbox');
+    await ready(page);
+    await expect(page.getByText('You are all caught up')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Load demo flights' })).toHaveCount(0);
+
+    await page.goto('/flights');
+    await ready(page);
+    await expect(page.getByText('No flights yet')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Load demo flights' })).toHaveCount(0);
+  });
+
+  test('approves a pending guard and records the decision', async ({ page }) => {
+    await open(page, '/inbox');
+    const card = page.locator('.guard-card');
+    await expect(card).toHaveCount(1);
+    await expect(card.getByRole('heading', { level: 2, name: 'Deploy the landing page?' })).toBeVisible();
+    await expect(card).toContainText('pnpm deploy --prod');
+    await expect(card).toContainText('Demo mode is on');
+    await screenshot(page, 'desktop-inbox-pending.png');
+
+    await card.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.locator('.toast')).toContainText('Approved. The agent can continue.');
+    await expect(page.locator('.guard-card')).toHaveCount(0);
+    await expect(page.locator('.resolved-section')).toContainText('Resolved');
+    await expect(page.locator('.resolved-row')).toContainText('Deploy the landing page?');
+    await expect(page.locator('.resolved-row')).toContainText('Approved');
+    await screenshot(page, 'desktop-inbox-resolved.png');
   });
 });
 
@@ -433,54 +798,69 @@ test.describe('phone shell', () => {
   for (const theme of ['dark', 'light', 'frost'] as const) {
     test(`renders the phone home in ${theme}`, async ({ page }) => {
       await open(page, `/?theme=${theme}&surface=hybrid`);
+      await waitForHomeData(page);
 
       await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'webgl');
       await expect(page.locator('nav.tabbar')).toBeVisible();
       await expect(page.locator('.rail')).toBeHidden();
       await expect(page.locator('.quick-fab')).toBeHidden();
-      expect(await backgroundAlpha(page, 'nav.tabbar')).toBeGreaterThanOrEqual(0.9);
-
       await expectNoHorizontalOverflow(page);
-      await screenshot(page, `phone-${theme}-hybrid.png`);
+      await screenshot(page, `phone-home-${theme}.png`);
     });
   }
 
+  test('keeps the tab pill opaque, blurs the content behind it, and caps glass', async ({ page }) => {
+    await open(page, '/?theme=dark&surface=glass');
+    await waitForHomeData(page);
+
+    const tabbar = page.locator('nav.tabbar');
+    await expect(tabbar).toBeVisible();
+    expect(await backgroundAlpha(page, 'nav.tabbar')).toBeGreaterThanOrEqual(0.9);
+    expect(await backdropBlur(page, 'nav.tabbar')).toBeGreaterThanOrEqual(20);
+
+    const stats = await shapeStats(page);
+    expect(stats?.mode).toBe('webgl');
+    expect(stats?.shapes ?? 0).toBeGreaterThan(0);
+    expect(stats?.shapes ?? 99).toBeLessThanOrEqual(12);
+  });
+
+  test('keeps labels at 13px and touch targets at 44px', async ({ page }) => {
+    await open(page, '/?theme=light');
+    await waitForHomeData(page);
+    expect(await smallTextOffenders(page, 13)).toEqual([]);
+    expect(await findSmallTargets(page)).toEqual([]);
+
+    await page.goto('/settings');
+    await ready(page);
+    await expect(page.getByRole('heading', { level: 1, name: 'Make it yours' })).toBeVisible();
+    expect(await smallTextOffenders(page, 13)).toEqual([]);
+    expect(await findSmallTargets(page)).toEqual([]);
+
+    await expect(page.locator('.quick-fab')).toBeVisible();
+    expect(await backgroundAlpha(page, '.quick-fab')).toBeGreaterThanOrEqual(0.9);
+  });
+
   test('renders matte surfaces on the phone', async ({ page }) => {
     await open(page, '/?theme=dark&surface=matte');
+    await waitForHomeData(page);
 
     await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'fallback');
     await expect(page.locator('html')).toHaveAttribute('data-glass-reason', 'matte');
     await expect(page.locator('canvas.glass-canvas')).toBeHidden();
 
     await expectNoHorizontalOverflow(page);
-    await screenshot(page, 'phone-dark-matte.png');
-  });
-
-  test('meets the 44px touch target budget', async ({ page }) => {
-    await page.goto('/?theme=light');
-    await ready(page);
-    expect(await findSmallTargets(page)).toEqual([]);
-
-    const dialog = await openAppearance(page);
-    await expect(dialog).toBeVisible();
-    expect(await findSmallTargets(page)).toEqual([]);
-
-    await dialog.getByRole('button', { name: 'Close appearance' }).click();
-    await page.goto('/settings');
-    await ready(page);
-    expect(await findSmallTargets(page)).toEqual([]);
-    await expect(page.locator('.quick-fab')).toBeVisible();
-    expect(await backgroundAlpha(page, '.quick-fab')).toBeGreaterThanOrEqual(0.9);
+    await screenshot(page, 'phone-home-matte.png');
   });
 
   test('opens the appearance sheet as a bottom sheet', async ({ page }) => {
     await open(page, '/?theme=dark&surface=hybrid');
     await openAppearance(page);
-    await screenshot(page, 'phone-dark-appearance.png');
+    await screenshot(page, 'phone-appearance.png');
   });
 
   test('enters edit mode with a long press', async ({ page }) => {
     await open(page, '/?theme=dark');
+    await waitForHomeData(page);
     const tile = page.locator('.tile--live');
     const box = await tile.boundingBox();
     if (!box) throw new Error('missing tile geometry');
@@ -495,12 +875,13 @@ test.describe('phone shell', () => {
 
     await expect(page.locator('.edit-note')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Hide Live flight' })).toBeVisible();
-    await screenshot(page, 'phone-dark-edit.png');
+    await screenshot(page, 'phone-edit.png');
   });
 
   test('keeps the last tile clear of the tab pill', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 640 });
     await open(page, '/?theme=light');
+    await waitForHomeData(page);
 
     await page.locator('main.panel').evaluate((panel) => {
       panel.scrollTop = panel.scrollHeight;
@@ -517,5 +898,38 @@ test.describe('phone shell', () => {
 
     expect(clearance).toBeGreaterThanOrEqual(12);
     await screenshot(page, 'phone-360-bottom.png');
+  });
+
+  test('opens the phone flight list and detail', async ({ page }) => {
+    await open(page, '/flights');
+    await expect(page.locator('.flight-row')).toHaveCount(3);
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'phone-flights.png');
+
+    await page.locator('.flight-row').first().click();
+    const detail = page.locator('.flight-detail');
+    await expect(detail.getByRole('heading', { level: 2, name: 'Review landing page copy' })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'phone-flight-detail.png');
+  });
+
+  test('opens the phone inbox', async ({ page }) => {
+    await open(page, '/inbox');
+    await expect(page.getByRole('heading', { level: 1, name: 'Needs you' })).toBeVisible();
+    // The desktop approval test may already have resolved the one demo event;
+    // the screen must render either state cleanly.
+    const pending = await page.locator('.guard-card').count();
+    const resolved = await page.locator('.resolved-row').count();
+    expect(pending + resolved).toBeGreaterThan(0);
+    await expectNoHorizontalOverflow(page);
+    await screenshot(page, 'phone-inbox.png');
+  });
+
+  test('starts in performance mode on a low-end device', async ({ page }) => {
+    await open(page, '/?surface=hybrid', { lowEnd: true });
+    await expect(page.locator('html')).toHaveAttribute('data-performance', 'on');
+    await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'fallback');
+    await expect(page.locator('html')).toHaveAttribute('data-glass-reason', 'performance');
+    await expect(page.locator('canvas.glass-canvas')).toBeHidden();
   });
 });

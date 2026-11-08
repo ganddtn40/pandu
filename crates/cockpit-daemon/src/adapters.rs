@@ -108,6 +108,8 @@ pub struct AdapterStatus {
     pub installed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub executable: Option<String>,
+    /// The bare command a user can wrap with `cockpit run --`.
+    pub command: String,
     pub verified: bool,
     pub capture: Vec<CaptureMode>,
 }
@@ -119,6 +121,7 @@ pub fn status_for(adapter: &Adapter) -> AdapterStatus {
         name: adapter.name.clone(),
         installed: executable.is_some(),
         executable: executable.map(|path| path.display().to_string()),
+        command: adapter.detect.command.clone(),
         verified: adapter.verified,
         capture: adapter.capture.clone(),
     }

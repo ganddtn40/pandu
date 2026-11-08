@@ -16,21 +16,23 @@ come back without reopening old decisions.
 
 - [x] Five-tab IA: Home, Inbox, Flights, Market, Settings
 - [x] Global quick prompt (`Ctrl/Cmd+K`, Home action, phone action button)
-- [ ] Home wired to the daemon: live flight, today's spend, token ring, guard
+- [x] Home wired to the daemon: live flight, today's spend, token ring, guard
       state with pending count
-- [ ] Inbox: approvals and alerts with large Approve/Deny cards and countdown
-- [ ] Flights: list and detail, timeline scrubber, step inspector, per-step git
-      diff, cost, one trust badge, `Fork from here`
-- [ ] Market: adapter and theme discovery, then the registry
-- [ ] Settings: Add an agent wizard, language, privacy, `Report a bug`,
+- [x] Inbox: approvals and alerts with large Approve/Deny cards and countdown
+- [x] Flights: list and detail, timeline scrubber, step inspector, per-step git
+      diff, cost, live output, replay, deep links
+- [ ] Flights: one trust badge and `Fork from here` (replay forks are deferred)
+- [ ] Market: adapter and theme discovery, then the registry (Phase 8)
+- [x] Settings: Add an agent flow, language, privacy, platform support,
       about/updates
-- [ ] First-run wizard: pick agent → copy one command → watch the flight appear
-- [ ] `Try demo` on every empty state
+- [ ] Settings: `Report a bug` diagnostics bundle
+- [x] First-run tour: three steps, skip, replay from Settings
+- [x] Demo seeding from Home, Flights, and Settings, always labeled `Demo`
 - [ ] Honest per-flight capture label: `Recorded via proxy`, `Observed from
       logs`, or `Observed via hook`
 
-The Phase 4B shell previews all five tabs with sample data. Wiring them to the
-daemon is Phase 5.
+Phase 5 wires the five tabs to real daemon data. The Market registry remains a
+later phase; the screen says so instead of showing fake listings.
 
 ### Design v2
 
@@ -49,8 +51,8 @@ daemon is Phase 5.
 - [x] Bento widgets: drag on desktop, long-press on phone, hide and reset
 - [x] New logo suite, wordmark, mono mark, and favicon
 - [x] Contrast, style-ban, theme, wallpaper, widget, and visual gates
-- [ ] Per-screen empty/loading/error states wired to real data (Phase 5)
-- [ ] Final visual approval by the user (hard stop before Phase 5)
+- [x] Per-screen empty/loading/error states wired to real data
+- [x] Final visual approval by the user (Phase 4B)
 
 The full token, surface, theme, and accessibility contract is in
 [`DESIGN.md`](DESIGN.md).
@@ -86,10 +88,12 @@ The full token, surface, theme, and accessibility contract is in
 - [x] Svelte 5 + TypeScript + Vite
 - [x] Design v2 shell, appearance engine, bento components, and quick prompt
 - [x] Custom WebGL2 glass engine with CSS fallback, matte fallback, reduced
-      transparency, reduced motion, Performance mode, and a 16-shape cap
+      transparency, reduced motion, Performance mode, a 16-shape desktop cap,
+      and a 12-shape cap on phones and low-end devices
 - [x] Playwright gates for the shell and design system
-- [ ] Playwright e2e for the five tabs against a live daemon
-- [ ] 14 language catalogs, RTL, missing-key CI gate
+- [x] Playwright e2e for the five tabs against disposable demo and live daemons
+- [x] i18n scaffolding: English complete, drafts fall back per key
+- [ ] 14 complete language catalogs, RTL, missing-key CI gate
 
 ### Install and release
 
@@ -123,12 +127,12 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo test --workspace`
 - [x] `pnpm check`
-- [x] `pnpm test` (10 files / 95 tests)
-- [x] Playwright design and visual suite (23 tests)
+- [x] `pnpm test` (13 files / 110 tests)
+- [x] Playwright design, visual, and daemon e2e suite (38 tests)
 - [x] Text contrast ≥ 4.5:1 across every theme, surface, and accent pair
 - [x] 44 px minimum touch targets on phone
 - [x] Zero idle canvas redraws and visible focus rings
-- [x] UI JavaScript < 150 KB gzip (currently ~49.6 KB gzip)
+- [x] UI JavaScript < 150 KB gzip (currently ~72.6 KB gzip)
 - [ ] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction
@@ -143,8 +147,8 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 
 | Phase | Focus |
 | --- | --- |
-| 4B | Design v2 complete; user visual approval (hard stop) |
-| 5 | Five tabs wired to the daemon, onboarding, i18n catalogs |
+| 4B | Design v2 complete; user visual approval (hard stop) — complete |
+| 5 | Five tabs wired to the daemon, onboarding, i18n catalogs — complete |
 | 6 | Agent control and notifications |
 | 7 | Remote access security |
 | 8 | Market registry |

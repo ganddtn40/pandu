@@ -16,10 +16,24 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  webServer: {
-    command: 'pnpm preview',
-    url: 'http://127.0.0.1:4174',
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: 'pnpm preview',
+      url: 'http://127.0.0.1:4174',
+      reuseExistingServer: true,
+      timeout: 120_000,
+    },
+    {
+      command: 'node tests/e2e/daemon-server.mjs demo 4321',
+      url: 'http://127.0.0.1:4321/api/health',
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command: 'node tests/e2e/daemon-server.mjs live 4322',
+      url: 'http://127.0.0.1:4322/api/health',
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+  ],
 });

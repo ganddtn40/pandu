@@ -5,6 +5,9 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use cockpit_core::guard::{
+    GuardAction, GuardEventStatus, GuardEvidence, GuardRuleKind, GuardSeverity,
+};
 use cockpit_core::ids::{create_id, is_id};
 use cockpit_core::model::{
     CaptureMode, CapturedRequest, FinishReason, Session, SessionSource, SessionStatus, StepKind,
@@ -12,6 +15,7 @@ use cockpit_core::model::{
 };
 use cockpit_core::provider::{AgentInfo, DetectedFrom, ProviderProtocol};
 use cockpit_core::redact::{CaptureLocation, RedactionRow};
+use cockpit_core::replay::{FileChangeType, SnapshotKind};
 use cockpit_core::usage::TokenUsage;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -19,7 +23,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::error::DaemonError;
 use crate::state::AppState;
-use crate::store::{BeginStep, CompleteStep, NewSession, now_iso};
+use crate::store::{BeginStep, CompleteStep, NewFileChange, NewSession, NewSnapshot, now_iso};
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -844,6 +848,58 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         .end_session(&first.id, SessionStatus::Completed)
         .map_err(store_error)?;
 
+    // A recorded git snapshot so the replay screen has real file changes to
+    // inspect instead of an empty tab.
+    state
+        .store
+        .insert_snapshot(NewSnapshot {
+            session_id: first.id.clone(),
+            step_id: Some(second_step.id.clone()),
+            kind: SnapshotKind::After,
+            commit_sha: Some("8f3c2a1d9b7e4f60a1c2d3e4f5a6b7c8d9e0f1a2".to_string()),
+            parent_commit_sha: Some("1b7d6f5e4c3a29180f7e6d5c4b3a29180f7e6d5c".to_string()),
+            branch: Some("feature/auth-cleanup".to_string()),
+            worktree_path: Some("~/projects/checkout-service".to_string()),
+            patch: Some(
+                "diff --git a/src/auth/session.rs b/src/auth/session.rs\nnew file mode 100644\n+pub struct Session {\n+    pub token: String,\n+}\n+\n+pub fn validate(token: &str) -> bool {\n+    !token.is_empty()\n+}\ndiff --git a/src/auth/token.rs b/src/auth/token.rs\nnew file mode 100644\n+pub fn refresh(token: &str) -> String {\n+    token.to_string()\n+}\n"
+                    .to_string(),
+            ),
+            files_changed: 3,
+            insertions: 128,
+            deletions: 42,
+            created_at: None,
+            file_changes: vec![
+                NewFileChange {
+                    path: "src/auth/session.rs".to_string(),
+                    old_path: None,
+                    change_type: FileChangeType::Added,
+                    additions: 86,
+                    deletions: 0,
+                    diff: Some("+pub struct Session { ... }".to_string()),
+                    ai_authored: Some(true),
+                },
+                NewFileChange {
+                    path: "src/auth/token.rs".to_string(),
+                    old_path: None,
+                    change_type: FileChangeType::Added,
+                    additions: 32,
+                    deletions: 0,
+                    diff: Some("+pub fn refresh(token: &str) -> String { ... }".to_string()),
+                    ai_authored: Some(true),
+                },
+                NewFileChange {
+                    path: "src/auth/mod.rs".to_string(),
+                    old_path: None,
+                    change_type: FileChangeType::Modified,
+                    additions: 10,
+                    deletions: 42,
+                    diff: Some("-mod middleware;\n+mod session;\n+mod token;".to_string()),
+                    ai_authored: Some(true),
+                },
+            ],
+        })
+        .map_err(store_error)?;
+
     if let Some(session) = state.store.get_session(&first.id).map_err(store_error)? {
         publish_demo_started(state, &session);
         sessions.push(session);
@@ -946,16 +1002,51 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 id: create_id(),
                 step_id: step.id.clone(),
                 seq: 0,
-                kind: StreamChunkKind::Text,
-                data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"The test reads\"}}"
+                kind: StreamChunkKind::Thinking,
+                data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"The 50 ms sleep is the smell. The assertion races the recalculation task.\"}}"
                     .to_string(),
-                delta_text: Some("The test reads".to_string()),
+                delta_text: Some(
+                    "The 50 ms sleep is the smell. The assertion races the recalculation task."
+                        .to_string(),
+                ),
                 received_at: now_iso(),
             },
             StreamChunk {
                 id: create_id(),
                 step_id: step.id.clone(),
                 seq: 1,
+                kind: StreamChunkKind::Text,
+                data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"The test reads `cart.total` before the async \"}}"
+                    .to_string(),
+                delta_text: Some("The test reads `cart.total` before the async ".to_string()),
+                received_at: now_iso(),
+            },
+            StreamChunk {
+                id: create_id(),
+                step_id: step.id.clone(),
+                seq: 2,
+                kind: StreamChunkKind::Text,
+                data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"recalculation finishes. Await `recalculate()` \"}}"
+                    .to_string(),
+                delta_text: Some(
+                    "recalculation finishes. Await `recalculate()` ".to_string(),
+                ),
+                received_at: now_iso(),
+            },
+            StreamChunk {
+                id: create_id(),
+                step_id: step.id.clone(),
+                seq: 3,
+                kind: StreamChunkKind::Text,
+                data: "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"in the fixture instead of sleeping.\"}}"
+                    .to_string(),
+                delta_text: Some("in the fixture instead of sleeping.".to_string()),
+                received_at: now_iso(),
+            },
+            StreamChunk {
+                id: create_id(),
+                step_id: step.id.clone(),
+                seq: 4,
                 kind: StreamChunkKind::Done,
                 data: "event: message_stop\ndata: {\"type\":\"message_stop\"}".to_string(),
                 delta_text: None,
@@ -1042,6 +1133,36 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         publish_demo_started(state, &session);
         sessions.push(session);
     }
+
+    // A pending approval so the Inbox has something real to act on in demo
+    // mode. This is a stored guard event, not UI-only sample data.
+    state
+        .guards
+        .record_event(crate::store::NewGuardEvent {
+            session_id: third.id.clone(),
+            step_id: Some(step.id.clone()),
+            rule_id: "builtin-dangerous-command".to_string(),
+            kind: GuardRuleKind::DangerousCommand,
+            action: GuardAction::Pause,
+            severity: GuardSeverity::High,
+            status: GuardEventStatus::Pending,
+            title: "Deploy the landing page?".to_string(),
+            description: "Gemini wants to publish the site to production. This command is recorded and waits for your answer.".to_string(),
+            command: Some("pnpm deploy --prod".to_string()),
+            evidence: vec![GuardEvidence {
+                field: Some("command".to_string()),
+                excerpt: Some("pnpm deploy --prod".to_string()),
+                ..GuardEvidence::default()
+            }],
+            metadata: Some(json!({ "demo": true })),
+        })
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "demo_seed_failed",
+                error.to_string(),
+            )
+        })?;
 
     state
         .store

@@ -1,6 +1,6 @@
 # Cockpit 0.2.0 — Rewrite decision record
 
-Status: Phase 4B complete — awaiting visual approval
+Status: Phase 5 complete
 Branch: `rewrite`
 Baseline: `main` at `1d65df2` (`feat: release Cockpit 0.1.0`)
 
@@ -123,8 +123,8 @@ Per step, snapshot the workspace with a temporary `GIT_INDEX_FILE`:
 Hard limits stay: 500 files, 300,000 characters per file diff, 2,000,000
 characters per patch, and a 30-second git timeout. The user's index, HEAD,
 branches, and reflog are never touched. No git binary or no repository means
-snapshots are skipped with a logged warning, not a failed flight; Phase 5
-surfaces that warning in the UI.
+snapshots are skipped with a logged warning, not a failed flight; the UI shows
+an honest empty state instead of claiming a snapshot exists.
 
 ### 2.5 Pairing and remote access worth keeping
 
@@ -544,7 +544,74 @@ never exported. The full token and component contract is in
 - Phase 4B stops here for user visual approval before Phase 5 wires the screens
   to the daemon.
 
+### Phase 4B review fixes
 
+- One logo, in the top bar only. The rail starts with the nav icons and then a
+  `+` that opens Add agent (tooltip plus `aria-label="Add agent"`).
+- Minimum text is 12 px, or 13 px at 720 px and below. Sub-13 px declarations
+  are wrapped in `max(var(--text-min), calc(Npx * var(--font-scale)))`, so the
+  font-size preference can grow text but never shrink it below the floor.
+- The phone tab pill uses an opaque `--sheet-bg` layer under CSS glass, with a
+  stronger scrim and blur, so content never shows through the labels.
+- The dark wallpaper is neutral graphite: smoky blue-gray pools with no warm
+  tint, and the base surfaces stay within a narrow channel spread. Accent is a
+  subtle glow, not a background wash.
+- Development copy is gone from user-facing screens. Real daemon data replaced
+  sample rows; demo mode is the only source of seeded data and always shows a
+  `Demo` badge or chip. `/glass-preview` resolves to Home in production builds.
+- The glass engine caps shapes at 12 on phones and low-end devices (16 on
+  desktop). Low-end devices and battery saver auto-enable Performance mode on
+  first run; the user can still turn it off.
+- The mark was checked at 16, 24, and 32 px. `Logo.svelte` switches to a
+  simplified mark below 28 px, and `public/logo-small.svg` is the flat favicon
+  variant with no gradients.
+
+### Phase 5 implementation notes (real data)
+
+- `ui/src/lib/api/` adds a typed daemon client and a reactive store. The client
+  resolves the base URL from `window.__cockpitDaemonUrl`, then
+  `http://127.0.0.1:4319` on dev/preview ports, then the page origin. The store
+  polls sessions, guards, adapters, and settings, and keeps a reconnecting
+  WebSocket to `/api/live`. `liveEvents` and `pendingGuards()` drive the shell
+  badges and flight output.
+- Home, Inbox, Flights, Market, and Settings all read daemon data. Every screen
+  has explicit loading, empty, offline, and error states. Demo rows are shown
+  only when `/api/health` reports `demoMode`, and they carry a `Demo` chip.
+- First run redirects to `/welcome` until `cockpit.onboarded` is set. The tour
+  has three steps, can be skipped, and can be replayed from Settings. The
+  redirect uses the router (`navigate('/welcome', { replace: true })`) because
+  the router module initializes from the URL during import.
+- Add agent lists the real adapters from `/api/adapters`, shows installed and
+  missing state, and copies `cockpit run -- <agent>` with a toast. The quick
+  prompt cannot send prompts through the daemon yet, so it copies the command
+  or prompt and says so instead of pretending to send.
+- Flights supports status filters, search, `?session=<id>` deep links, recorded
+  stream output, live chunks received after load, a replay scrubber and play
+  control, lazy step details, and lazy snapshot details. The replay route
+  returns snapshot summaries; the patch and per-file changes are fetched from
+  `/api/snapshots/{id}` the first time a snapshot is expanded.
+- Inbox approves or denies through
+  `/api/guards/events/{id}/decision` and moves the event to the resolved list.
+  The demo seed includes one pending approval so the flow is testable offline.
+- i18n lives in `ui/src/lib/i18n/catalog.ts`: English is complete, draft
+  catalogs fall back per key, and `{name}` placeholders interpolate only when
+  the variable exists. The reactive `t()` reads the language from the design
+  store.
+- Production builds hide `/glass-preview`; development keeps it as the
+  rendering lab. Diagnostics stay out of user-facing screens.
+- Playwright starts disposable daemons itself: demo on port 4321 and live on
+  4322, each with a fresh `ui/.tmp/e2e-*` home. The suite never touches the
+  developer's database.
+- `pnpm check` is clean. Vitest runs 13 files / 110 tests, including router
+  query/dev-only behavior, device caps and auto Performance mode, i18n
+  fallback, no-development-copy, small logo, and neutral graphite. Playwright
+  runs 38 tests (desktop and phone) against the real daemon, covering demo
+  labels, onboarding, approvals, replay, deep links, lazy snapshots, live
+  WebSocket output, appearance, theme JSON, widgets, glass budgets, focus rings,
+  and touch targets. The build is 228.6 KB JavaScript (72.6 KB gzip) and
+  73.0 KB CSS (12.5 KB gzip). Screenshots are in `docs/screenshots/phase5/`.
+- Phase 5 stops here for review before Phase 6 (agent control and
+  notifications).
 
 At Phase 0, this machine had Node `v24.21.0` and pnpm `12.9.1`, but no `cargo`,
 `rustc`, or `rustup`. Phase 1 installed a repo-local stable toolchain under the
