@@ -27,3 +27,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 portable-pty = "0.9"
 crossterm = "0.29"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rusqlite = { workspace = true }

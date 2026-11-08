@@ -53,6 +53,8 @@ enum Command {
     Report(ReportArgs),
     /// Issue a pairing code for the phone companion.
     Pair(PairArgs),
+    /// Inspect and verify the local audit log.
+    Audit(AuditArgs),
 }
 
 #[derive(Debug, Args, Default, Clone)]
@@ -181,6 +183,31 @@ struct PairArgs {
     json: bool,
 }
 
+#[derive(Debug, Args)]
+struct AuditArgs {
+    #[command(subcommand)]
+    action: AuditAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditAction {
+    /// Verify every audit entry against its hash and the previous entry.
+    Verify(AuditVerifyArgs),
+}
+
+#[derive(Debug, Args, Default)]
+struct AuditVerifyArgs {
+    /// Directory for the database and Cockpit state.
+    #[arg(long)]
+    home: Option<PathBuf>,
+    /// SQLite database path. Defaults to <home>/cockpit.db.
+    #[arg(long)]
+    database: Option<PathBuf>,
+    /// Print JSON instead of a human-readable summary.
+    #[arg(long)]
+    json: bool,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -216,6 +243,12 @@ fn main() -> anyhow::Result<()> {
             let config = apply_local_args(config, None, args.host.clone(), args.port);
             runtime()?.block_on(pair(config, args))
         }
+        Command::Audit(args) => match args.action {
+            AuditAction::Verify(args) => {
+                let config = apply_local_args(config, args.home, None, None);
+                audit_verify(config, args.database, args.json)
+            }
+        },
     }
 }
 
@@ -251,6 +284,55 @@ fn apply_local_args(
         config.port = port;
     }
     config
+}
+
+// ---------------------------------------------------------------------------
+// audit
+// ---------------------------------------------------------------------------
+
+fn audit_verify(config: Config, database: Option<PathBuf>, as_json: bool) -> anyhow::Result<()> {
+    let path = database.unwrap_or(config.database_path);
+    verify_audit_database(&path, as_json)
+}
+
+fn verify_audit_database(path: &Path, as_json: bool) -> anyhow::Result<()> {
+    let store = Store::open(path).with_context(|| format!("could not open {}", path.display()))?;
+    let report = store
+        .verify_remote_audit_chain()
+        .context("could not verify the audit log")?;
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "database": path.display().to_string(),
+                "entries": report.entries,
+                "valid": report.valid,
+                "brokenAt": report.broken_at.as_deref(),
+                "reason": report.reason.as_deref(),
+            }))?
+        );
+    } else if report.valid {
+        println!(
+            "Audit log verified: {} entries, hash chain intact ({}).",
+            report.entries,
+            path.display()
+        );
+    } else {
+        println!(
+            "Audit log FAILED verification at entry {} ({}).",
+            report.broken_at.as_deref().unwrap_or("unknown"),
+            path.display()
+        );
+        if let Some(reason) = &report.reason {
+            println!("{reason}.");
+        }
+    }
+
+    if !report.valid {
+        bail!("the audit log hash chain is broken");
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,5 +1128,37 @@ mod tests {
             "example"
         );
         assert!(find_adapter(&registry, "missing").is_none());
+    }
+
+    #[test]
+    fn audit_verify_accepts_an_intact_chain_and_rejects_tampering() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("cockpit.db");
+        let store = Store::open(&database).unwrap();
+        store
+            .insert_remote_audit(&cockpit_daemon::store::NewRemoteAudit {
+                id: "entry-1".to_string(),
+                at: cockpit_daemon::store::now_iso(),
+                event: "remote.enabled".to_string(),
+                device_id: None,
+                device_name: None,
+                ip: None,
+                detail: "{}".to_string(),
+                size_bytes: None,
+                content_hash: None,
+            })
+            .unwrap();
+        drop(store);
+
+        assert!(verify_audit_database(&database, true).is_ok());
+
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute("UPDATE remote_audit SET event = 'remote.disabled'", [])
+            .unwrap();
+        drop(connection);
+
+        let error = verify_audit_database(&database, true).unwrap_err();
+        assert!(error.to_string().contains("hash chain is broken"));
     }
 }

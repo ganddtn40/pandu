@@ -338,6 +338,20 @@ The log is viewable and exportable as JSON from **Settings → Remote access**.
 It is host-only; a paired device cannot read it. It never contains tokens,
 passwords, prompt text, or terminal output.
 
+Each entry also stores the previous entry's hash and its own SHA-256 hash, so the
+log forms a chain. Verify it from the computer at any time:
+
+```powershell
+cockpit audit verify
+cockpit audit verify --json
+cockpit audit verify --database C:\path\to\cockpit.db
+```
+
+The command prints the number of entries and exits with a non-zero status at the
+first entry that no longer matches its hash or its predecessor. The chain detects
+accidental or casual edits; it cannot stop a process that can rewrite the whole
+database, so keep an exported copy if you need an external record.
+
 ![Audit log](screenshots/phase7/06-host-audit.png)
 
 ## Phone notifications (ntfy)
@@ -530,4 +544,6 @@ version:
   unless called from loopback or with a valid device token.
 - Rate limits, exponential lockout, a connection cap, and a body-size limit
   apply to the remote listener.
-- The audit log records sensitive transitions without secrets or prompt text.
+- The audit log records sensitive transitions without secrets or prompt text,
+  and every entry is chained to the previous entry's hash. Run
+  `cockpit audit verify` to check it.

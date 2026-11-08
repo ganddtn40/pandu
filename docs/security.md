@@ -298,7 +298,12 @@ token, or read the audit log.
   lock/reset, every remote prompt (size/hash only), remote on/off,
   revoke-on-disable, and notification changes are appended to a host-only audit
   log. The log is exportable as JSON and never contains tokens, passwords, PINs,
-  prompt text, or terminal output.
+  prompt text, or terminal output. Each entry stores the previous entry's hash
+  and a SHA-256 hash over length-prefixed fields, including the raw detail JSON.
+  `cockpit audit verify` walks the chain in append order and exits non-zero at
+  the first entry whose contents or predecessor no longer match. The chain is
+  tamper-evident, not tamper-proof: a process that can write the database can
+  also recompute it.
 - **Panic.** Stops the listener, bumps the revocation epoch, revokes every
   device, and clears pending prompts.
 
@@ -325,6 +330,10 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `host_confirmation_is_required_for_remote_prompts_by_default`,
 `authentication_prompts_must_be_completed_at_the_computer`,
 `audit_log_records_sensitive_transitions_and_exports`,
+`store::tests::audit_hash_chain_verifies_and_detects_tampering`,
+`store::tests::audit_hash_chain_detects_a_removed_link`,
+`store::tests::legacy_audit_rows_are_sealed_once_on_open`,
+`audit_verify_accepts_an_intact_chain_and_rejects_tampering`,
 `malformed_requests_are_rejected_without_a_crash`,
 `panic_stops_the_listener_and_revokes_every_device`, and
 `remote_access_refuses_unauthenticated_configurations`. Unit tests:
@@ -511,9 +520,10 @@ listed so a reviewer can decide whether a later phase must close them.
    not exist in this build. Themes are validated JSON and are never executed.
 10. **Same-user malware wins.** A process running as the user can read the
     database, attach to the daemon, inspect the terminal, or read the remote
-    device token from the browser's local storage. The audit log is append-only
-    at the application layer, not cryptographically tamper-evident; same-user
-    malware can alter or delete it. Cockpit is not an anti-malware boundary.
+    device token from the browser's local storage. The audit log is a hash chain,
+    so accidental or casual edits are detected, but same-user malware can rewrite
+    the whole chain or delete it. Keep exported copies if you need a record
+    outside the machine. Cockpit is not an anti-malware boundary.
 11. **Remote rate limits are in-memory and device identity is self-asserted.**
     Lockouts and connection budgets reset when the daemon restarts, and there is
     no distributed brute-force protection. Device names are supplied by the

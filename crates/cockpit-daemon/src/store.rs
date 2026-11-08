@@ -18,9 +18,10 @@ use cockpit_core::provider::{AgentInfo, DetectedFrom, ProviderProtocol};
 use cockpit_core::redact::{CaptureLocation, RedactionRow};
 use cockpit_core::replay::{FileChangeType, ReplayFileChange, ReplaySnapshot, SnapshotKind};
 use cockpit_core::usage::TokenUsage;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::error::{DaemonError, Result};
 
@@ -543,6 +544,127 @@ fn add_column_if_missing(
     Ok(())
 }
 
+/// Seal audit rows written before the hash chain existed.
+///
+/// The whole table is hashed in rowid (insertion) order inside one immediate
+/// transaction. The `audit_chain` marker is written in the same transaction, so
+/// a crash leaves either the old unsealed state or a complete chain. Re-running
+/// the migration is deterministic, but it only runs while the marker is absent.
+fn backfill_remote_audit_hashes(connection: &mut Connection) -> Result<()> {
+    let marked: Option<String> = connection
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = 'audit_chain'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if marked.as_deref() == Some("1") {
+        return Ok(());
+    }
+
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let entries = {
+        let mut statement = transaction.prepare(
+            "SELECT id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash
+             FROM remote_audit ORDER BY rowid ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(AuditHashFields {
+                id: row.get(0)?,
+                at: row.get(1)?,
+                event: row.get(2)?,
+                device_id: row.get(3)?,
+                device_name: row.get(4)?,
+                ip: row.get(5)?,
+                detail: row.get(6)?,
+                size_bytes: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+                content_hash: row.get(8)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    let mut previous: Option<String> = None;
+    for entry in entries {
+        let entry_hash = audit_entry_hash(previous.as_deref(), &entry);
+        transaction.execute(
+            "UPDATE remote_audit SET prev_hash = ?1, entry_hash = ?2 WHERE id = ?3",
+            params![previous, entry_hash, entry.id],
+        )?;
+        previous = Some(entry_hash);
+    }
+    transaction.execute(
+        "INSERT INTO schema_meta (key, value) VALUES ('audit_chain', '1')
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// The exact fields covered by an audit entry's hash.
+///
+/// `detail` is the raw JSON string stored in the database, not a re-serialized
+/// value, so reformatting or reordering the JSON is tampering too.
+struct AuditHashFields {
+    id: String,
+    at: String,
+    event: String,
+    device_id: Option<String>,
+    device_name: Option<String>,
+    ip: Option<String>,
+    detail: String,
+    size_bytes: Option<u64>,
+    content_hash: Option<String>,
+}
+
+/// SHA-256 over a fixed domain tag and length-prefixed fields.
+///
+/// Length prefixes make the encoding unambiguous: moving bytes between fields
+/// or embedding separators cannot produce the same digest.
+fn audit_entry_hash(prev_hash: Option<&str>, entry: &AuditHashFields) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"cockpit-remote-audit-v1");
+    hash_optional_field(&mut hasher, prev_hash);
+    hash_optional_field(&mut hasher, Some(entry.id.as_str()));
+    hash_optional_field(&mut hasher, Some(entry.at.as_str()));
+    hash_optional_field(&mut hasher, Some(entry.event.as_str()));
+    hash_optional_field(&mut hasher, entry.device_id.as_deref());
+    hash_optional_field(&mut hasher, entry.device_name.as_deref());
+    hash_optional_field(&mut hasher, entry.ip.as_deref());
+    hash_optional_field(&mut hasher, Some(entry.detail.as_str()));
+    match entry.size_bytes {
+        Some(value) => {
+            hasher.update([1u8]);
+            hasher.update(value.to_be_bytes());
+        }
+        None => hasher.update([0u8]),
+    }
+    hash_optional_field(&mut hasher, entry.content_hash.as_deref());
+    hex_string(&hasher.finalize())
+}
+
+fn hash_optional_field(hasher: &mut Sha256, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            hasher.update([1u8]);
+            hasher.update((value.len() as u64).to_be_bytes());
+            hasher.update(value.as_bytes());
+        }
+        None => hasher.update([0u8]),
+    }
+}
+
+fn hex_string(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -554,7 +676,7 @@ impl Store {
             }
         }
 
-        let connection = Connection::open(path)?;
+        let mut connection = Connection::open(path)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         connection.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -596,6 +718,13 @@ impl Store {
                 )?;
             }
         }
+
+        // Audit rows written before the hash chain existed have no hashes.
+        // Seal them once, in insertion order, before the store accepts new
+        // writes. The marker makes the migration one-shot: a later edit that
+        // deletes a hash is evidence, not something the next open silently
+        // repairs.
+        backfill_remote_audit_hashes(&mut connection)?;
 
         Ok(Self {
             connection: Mutex::new(connection),
@@ -2595,11 +2724,35 @@ impl Store {
     }
 
     pub fn insert_remote_audit(&self, row: &NewRemoteAudit) -> Result<()> {
-        let connection = self.lock()?;
-        connection.execute(
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Chain to the most recently appended entry. The immediate transaction
+        // keeps a concurrent writer from inserting between this read and write.
+        let previous: Option<String> = transaction
+            .query_row(
+                "SELECT entry_hash FROM remote_audit
+                 WHERE entry_hash IS NOT NULL
+                 ORDER BY rowid DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let fields = AuditHashFields {
+            id: row.id.clone(),
+            at: row.at.clone(),
+            event: row.event.clone(),
+            device_id: row.device_id.clone(),
+            device_name: row.device_name.clone(),
+            ip: row.ip.clone(),
+            detail: row.detail.clone(),
+            size_bytes: row.size_bytes,
+            content_hash: row.content_hash.clone(),
+        };
+        let entry_hash = audit_entry_hash(previous.as_deref(), &fields);
+        transaction.execute(
             "INSERT INTO remote_audit
-                (id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash, prev_hash, entry_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 row.id,
                 row.at,
@@ -2610,15 +2763,19 @@ impl Store {
                 row.detail,
                 row.size_bytes,
                 row.content_hash,
+                previous,
+                entry_hash,
             ],
         )?;
+        transaction.commit()?;
         Ok(())
     }
 
     pub fn list_remote_audit(&self, limit: u32, offset: u32) -> Result<Vec<RemoteAuditRow>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare(
-            "SELECT id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash
+            "SELECT id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash,
+                    prev_hash, entry_hash
              FROM remote_audit ORDER BY at DESC, id DESC LIMIT ?1 OFFSET ?2",
         )?;
         let rows = statement.query_map(params![limit, offset], row_to_remote_audit)?;
@@ -2636,6 +2793,66 @@ impl Store {
                 row.get::<_, i64>(0)
             })? as u64,
         )
+    }
+
+    /// Walk the audit log in append order and prove every entry still matches
+    /// its hash and names its predecessor.
+    pub fn verify_remote_audit_chain(&self) -> Result<AuditChainReport> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, at, event, device_id, device_name, ip, detail, size_bytes, content_hash,
+                    prev_hash, entry_hash
+             FROM remote_audit ORDER BY rowid ASC",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut expected_previous: Option<String> = None;
+        let mut entries: u64 = 0;
+
+        while let Some(row) = rows.next()? {
+            entries += 1;
+            let fields = AuditHashFields {
+                id: row.get(0)?,
+                at: row.get(1)?,
+                event: row.get(2)?,
+                device_id: row.get(3)?,
+                device_name: row.get(4)?,
+                ip: row.get(5)?,
+                detail: row.get(6)?,
+                size_bytes: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
+                content_hash: row.get(8)?,
+            };
+            let stored_previous: Option<String> = row.get(9)?;
+            let stored_hash: Option<String> = row.get(10)?;
+
+            if stored_previous != expected_previous {
+                return Ok(AuditChainReport {
+                    entries,
+                    valid: false,
+                    broken_at: Some(fields.id),
+                    reason: Some(
+                        "the previous hash does not match the preceding entry".to_string(),
+                    ),
+                });
+            }
+
+            let computed = audit_entry_hash(expected_previous.as_deref(), &fields);
+            if stored_hash.as_deref() != Some(computed.as_str()) {
+                return Ok(AuditChainReport {
+                    entries,
+                    valid: false,
+                    broken_at: Some(fields.id),
+                    reason: Some("the entry hash does not match its contents".to_string()),
+                });
+            }
+            expected_previous = Some(computed);
+        }
+
+        Ok(AuditChainReport {
+            entries,
+            valid: true,
+            broken_at: None,
+            reason: None,
+        })
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
@@ -2707,6 +2924,22 @@ pub struct RemoteAuditRow {
     pub size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_hash: Option<String>,
+}
+
+/// Result of walking the audit hash chain.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditChainReport {
+    pub entries: u64,
+    pub valid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broken_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 fn row_to_remote_device(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteDeviceRow> {
@@ -2742,6 +2975,8 @@ fn row_to_remote_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteAuditR
         detail: serde_json::from_str(&detail).unwrap_or(Value::Null),
         size_bytes: row.get::<_, Option<i64>>(7)?.map(|value| value as u64),
         content_hash: row.get(8)?,
+        prev_hash: row.get(9)?,
+        entry_hash: row.get(10)?,
     })
 }
 
@@ -3330,5 +3565,139 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("0.1.0"));
+    }
+
+    fn audit_entry(store: &Store, event: &str, detail: &str) -> RemoteAuditRow {
+        let id = uuid::Uuid::new_v4().to_string();
+        store
+            .insert_remote_audit(&NewRemoteAudit {
+                id: id.clone(),
+                at: now_iso(),
+                event: event.to_string(),
+                device_id: Some("device-1".to_string()),
+                device_name: Some("Phone".to_string()),
+                ip: Some("203.0.113.7".to_string()),
+                detail: detail.to_string(),
+                size_bytes: Some(12),
+                content_hash: Some("abc123".to_string()),
+            })
+            .unwrap();
+        store
+            .list_remote_audit(100, 0)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == id)
+            .unwrap()
+    }
+
+    #[test]
+    fn audit_hash_chain_verifies_and_detects_tampering() {
+        let store = store();
+        let first = audit_entry(&store, "remote.enabled", "{}");
+        let second = audit_entry(&store, "prompt.sent", "{\"sessionId\":\"s\"}");
+
+        assert!(first.prev_hash.is_none());
+        assert!(
+            first
+                .entry_hash
+                .as_deref()
+                .is_some_and(|hash| hash.len() == 64)
+        );
+        assert_eq!(second.prev_hash, first.entry_hash);
+
+        let report = store.verify_remote_audit_chain().unwrap();
+        assert!(report.valid, "{report:?}");
+        assert_eq!(report.entries, 2);
+        assert!(report.broken_at.is_none());
+
+        // Editing a stored field without recomputing the hash is detected.
+        store
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE remote_audit SET detail = ?1 WHERE id = ?2",
+                params!["{\"sessionId\":\"tampered\"}", second.id],
+            )
+            .unwrap();
+        let report = store.verify_remote_audit_chain().unwrap();
+        assert!(!report.valid);
+        assert_eq!(report.broken_at.as_deref(), Some(second.id.as_str()));
+        assert_eq!(
+            report.reason.as_deref(),
+            Some("the entry hash does not match its contents")
+        );
+    }
+
+    #[test]
+    fn audit_hash_chain_detects_a_removed_link() {
+        let store = store();
+        audit_entry(&store, "remote.enabled", "{}");
+        let second = audit_entry(&store, "remote.disabled", "{}");
+
+        store
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE remote_audit SET prev_hash = NULL WHERE id = ?1",
+                params![second.id],
+            )
+            .unwrap();
+        let report = store.verify_remote_audit_chain().unwrap();
+        assert!(!report.valid);
+        assert_eq!(report.broken_at.as_deref(), Some(second.id.as_str()));
+        assert_eq!(
+            report.reason.as_deref(),
+            Some("the previous hash does not match the preceding entry")
+        );
+    }
+
+    #[test]
+    fn legacy_audit_rows_are_sealed_once_on_open() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cockpit.db");
+        let first_id = {
+            let store = Store::open(&path).unwrap();
+            let first = audit_entry(&store, "remote.enabled", "{}");
+            audit_entry(&store, "remote.disabled", "{}");
+            let connection = store.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE remote_audit SET prev_hash = NULL, entry_hash = NULL",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute("DELETE FROM schema_meta WHERE key = 'audit_chain'", [])
+                .unwrap();
+            first.id
+        };
+
+        let reopened = Store::open(&path).unwrap();
+        let report = reopened.verify_remote_audit_chain().unwrap();
+        assert!(report.valid, "{report:?}");
+        assert_eq!(report.entries, 2);
+        assert!(
+            reopened
+                .list_remote_audit(10, 0)
+                .unwrap()
+                .iter()
+                .all(|row| row
+                    .entry_hash
+                    .as_deref()
+                    .is_some_and(|hash| hash.len() == 64))
+        );
+
+        // Once sealed, reopening must not repair a later edit.
+        reopened
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE remote_audit SET event = 'tampered' WHERE id = ?1",
+                params![first_id],
+            )
+            .unwrap();
+        drop(reopened);
+        let reopened = Store::open(&path).unwrap();
+        assert!(!reopened.verify_remote_audit_chain().unwrap().valid);
     }
 }

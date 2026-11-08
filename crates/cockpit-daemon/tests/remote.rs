@@ -15,7 +15,7 @@ use axum::Router;
 use cockpit_core::guard::{GuardAction, GuardEventStatus, GuardRuleKind, GuardSeverity};
 use cockpit_core::model::{CaptureMode, SessionSource, SessionStatus};
 use cockpit_daemon::remote::{RemoteAccess, RemoteMode};
-use cockpit_daemon::store::{NewGuardEvent, NewSession};
+use cockpit_daemon::store::{NewGuardEvent, NewSession, Store};
 use cockpit_daemon::{Config, ServerHandle};
 use futures_util::StreamExt;
 use http::StatusCode;
@@ -2597,6 +2597,46 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         .unwrap();
     assert_eq!(sent.status(), StatusCode::OK);
 
+    // Pushing the prompt reset the session to Unknown, so a second prompt is
+    // refused and audited as rejected rather than silently typed into a state
+    // the device does not own.
+    let rejected = client
+        .post(format!("{remote}/api/remote/agents/{agent_session}/prompt"))
+        .bearer_auth(&device.token)
+        .json(&json!({ "text": "must not reach the agent" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::CONFLICT);
+
+    // Host-confirmed prompts can be denied on the computer.
+    set_scopes(&daemon, &device.id, &["view", "respond", "prompt"], true).await;
+    mark_awaiting_prompt(&client, &daemon, &agent_session).await;
+    let pending_prompt = client
+        .post(format!("{remote}/api/remote/agents/{agent_session}/prompt"))
+        .bearer_auth(&device.token)
+        .json(&json!({ "text": "needs the host" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pending_prompt.status(), StatusCode::ACCEPTED);
+    let pending: Value = client
+        .get(format!("{host}/api/remote/prompts"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let prompt_id = pending["prompts"][0]["id"].as_str().unwrap().to_string();
+    let denied_prompt = client
+        .post(format!("{host}/api/remote/prompts/{prompt_id}/deny"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(denied_prompt.status().is_success());
+
     let (approve_id, approve_session) =
         insert_pending_event(&daemon, "Approve me", GuardSeverity::Low, "audit-approve");
     let approved = client
@@ -2688,6 +2728,14 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         .unwrap();
     assert!(disabled.status().is_success());
 
+    let panicked = client
+        .post(format!("{host}/api/remote/panic"))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert!(panicked.status().is_success());
+
     let audit: Value = client
         .get(format!("{host}/api/remote/audit?limit=1000"))
         .send()
@@ -2710,12 +2758,15 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         "pair.claimed",
         "device.scopes",
         "prompt.sent",
+        "prompt.rejected",
+        "prompt.denied",
         "approval.approve",
         "approval.deny",
         "pair.deny",
         "auth.failure",
         "device.revoke",
         "remote.disabled",
+        "remote.panic",
     ] {
         assert!(
             events.iter().any(|event| event == expected),
@@ -2723,6 +2774,23 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
         );
     }
     assert_eq!(audit["total"].as_u64().unwrap(), events.len() as u64);
+
+    // Every returned row names its predecessor and its own hash.
+    let entries = audit["entries"].as_array().unwrap();
+    for entry in entries {
+        assert!(
+            entry["entryHash"]
+                .as_str()
+                .is_some_and(|hash| hash.len() == 64)
+        );
+    }
+
+    // The chain verifies in append order even though the API lists newest
+    // first.
+    let store = Store::open(home.path().join("cockpit.db")).unwrap();
+    let report = store.verify_remote_audit_chain().unwrap();
+    assert!(report.valid, "{report:?}");
+    assert_eq!(report.entries, events.len() as u64);
 
     // The export is the same append-only log, and neither the audit list nor
     // the export ever contains a token or prompt contents.
