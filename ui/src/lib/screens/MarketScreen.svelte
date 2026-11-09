@@ -84,6 +84,7 @@
   let uninstallOutcome = $state<UninstallOutcome | null>(null);
 
   const offline = $derived(catalog?.offline === true);
+  const devOverride = $derived(catalog?.source === 'environment');
   const settings = $derived(catalog?.settings ?? { autoRefresh: false, lastRefresh: null });
   const allAgents = $derived(catalog?.agents ?? []);
   const allCategories = $derived(catalog?.categories ?? []);
@@ -575,6 +576,12 @@
   </div>
   <div class="screen-actions">
     {#if catalog}
+      {#if devOverride}
+        <span class="status-pill status-pill--warn" data-testid="market-dev-override">
+          <span class="dot dot--warn"></span>
+          {t('market.devOverride')}
+        </span>
+      {/if}
       <span class="status-pill" class:status-pill--warn={offline}>
         <span class="dot" class:dot--ok={!offline} class:dot--warn={offline}></span>
         {offline ? t('market.offlineShort') : sourceLabel(catalog.source)}

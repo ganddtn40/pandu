@@ -19,9 +19,9 @@ use cockpit_daemon::market::config_edit::{self, ConfigFormat};
 use cockpit_daemon::market::install::{self, InstallManifest, InstallState, validate_manifest};
 use cockpit_daemon::market::service::{MarketService, RegistrySource};
 use cockpit_daemon::market::{
-    InstallScope, LoadedRegistry, MarketKind, MarketSource, RevokedEntry, SignedIndex,
-    SignedRevocation, SkillAgentTarget, TrustTier, parse_entry_text, parse_registry,
-    sanitize_markdown,
+    ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE, InstallScope, LoadedRegistry, MarketKind, MarketSource,
+    RevokedEntry, SignedIndex, SignedRevocation, SkillAgentTarget, TrustTier, parse_entry_text,
+    parse_registry, sanitize_markdown,
 };
 use serde_json::{Value, json};
 
@@ -95,8 +95,8 @@ fn tar_gz(entries: &[(&str, &[u8], tar::EntryType)]) -> Vec<u8> {
 
 fn signed_index() -> (SignedIndex, Vec<u8>, Vec<u8>) {
     let dir = registry_dir();
-    let index_bytes = std::fs::read(dir.join("index.json")).unwrap();
-    let revoked_bytes = std::fs::read(dir.join("revoked.json")).unwrap();
+    let index_bytes = std::fs::read(dir.join(ACTIVE_INDEX_FILE)).unwrap();
+    let revoked_bytes = std::fs::read(dir.join(ACTIVE_REVOKED_FILE)).unwrap();
     let index: SignedIndex = serde_json::from_slice(&index_bytes).unwrap();
     (index, index_bytes, revoked_bytes)
 }
@@ -684,10 +684,10 @@ async fn offline_catalog_uses_the_verified_cache_and_fails_closed() {
 
     // A tampered cache must not silently fall back to anything else.
     let mut index: Value =
-        serde_json::from_slice(&std::fs::read(cache.join("index.json")).unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read(cache.join(ACTIVE_INDEX_FILE)).unwrap()).unwrap();
     index["signature"] = json!("AAAA");
     std::fs::write(
-        cache.join("index.json"),
+        cache.join(ACTIVE_INDEX_FILE),
         serde_json::to_vec(&index).unwrap(),
     )
     .unwrap();

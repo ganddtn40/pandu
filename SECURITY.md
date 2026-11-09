@@ -105,7 +105,9 @@ scheduled registry update.
 
 ### If the signing key is compromised
 
-The private key is kept offline and never committed. If it is exposed:
+The private key is kept offline and never committed. The full key model,
+rotation overlap, and step-by-step compromise procedure is in
+[`docs/registry/KEYS.md`](docs/registry/KEYS.md). If it is exposed:
 
 1. Stop publishing with the old key.
 2. Generate a new Ed25519 key, embed the new public key in a Cockpit release,

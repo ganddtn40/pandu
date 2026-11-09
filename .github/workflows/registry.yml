@@ -2,7 +2,8 @@ name: Registry
 
 # The registry is a security boundary. Pull requests are checked without the
 # signing key; pushes to a protected branch verify the signed index that
-# Cockpit actually loads. A contributor never needs the private key.
+# Cockpit actually loads. A contributor never needs the private key. The signed
+# job uses a release binary because debug builds embed the test trust root.
 
 on:
   pull_request:
@@ -67,7 +68,7 @@ jobs:
 
       - name: Verify signatures, index hashes, and pinned sources
         run: |
-          cargo run --locked -p cockpit-cli -- market check \
+          cargo run --release --locked -p cockpit-cli -- market check \
             --dir registry --online --links
 
       - name: Run market registry tests
@@ -87,5 +88,13 @@ jobs:
           test -s docs/security.md
           test -s docs/market.md
           test -s docs/registry/CONTRIBUTING.md
+          test -s docs/registry/KEYS.md
           test -s .github/CODEOWNERS
           test -s registry/schema/entry.schema.json
+
+      - name: Reject key files in the registry
+        run: |
+          if find registry -type f \( -name '*.pem' -o -name '*.key' \) | grep -q .; then
+            echo "A private key file was committed under registry/."
+            exit 1
+          fi

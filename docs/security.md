@@ -390,6 +390,13 @@ untrusted input, not as a package manager. The full user-facing model is in
   key id must match. Every entry file must match the SHA-256 in the signed
   index. Duplicate ids, an unknown path, or an index/YAML disagreement is
   refused. A failed refresh never replaces the previous verified cache.
+- **Two trust roots.** Debug and test builds embed only the test public key and
+  load `index.test.json` / `revoked.test.json`. Release builds embed only the
+  production public key and load `index.json` / `revoked.json`. A release build
+  refuses to open the market if it detects the test key or an unrecognised key.
+  Registry URL and directory overrides are ignored outside debug builds, and a
+  URL override can never change the embedded key. The key model is in
+  `docs/registry/KEYS.md`.
 - **Pinned sources.** A skill entry names exactly
   `https://github.com/<owner>/<repo>` and a full 40-character lowercase commit
   SHA. Cockpit downloads `codeload.github.com/<owner>/<repo>/tar.gz/<sha>`,

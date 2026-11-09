@@ -231,16 +231,19 @@ failed refresh never replaces the cache.
 
 The production source order is:
 
-1. `COCKPIT_MARKET_REGISTRY` (an explicit local registry directory);
-2. `$COCKPIT_HOME/market/registry` (the verified cache);
-3. the embedded bundled registry.
+1. `$COCKPIT_HOME/market/registry` (the verified cache);
+2. the embedded bundled production registry.
 
-Debug builds also look at the repository's `registry/` directory. Example
-fixtures are included only in debug builds and are hidden in production.
+Debug builds additionally check `COCKPIT_MARKET_REGISTRY` (an explicit local
+registry directory) and the repository's `registry/` directory, and load the
+test-signed `index.test.json` / `revoked.test.json` variant. Release builds
+ignore `COCKPIT_MARKET_REGISTRY` and `COCKPIT_MARKET_REGISTRY_URL`; the override
+is a development convenience only. When a debug build uses it, the UI shows a
+**Dev registry override** chip.
 
-The default refresh URL is
-`https://raw.githubusercontent.com/ganddtn40/cockpit/main/registry`. It can be
-overridden with `COCKPIT_MARKET_REGISTRY_URL`, but only with a GitHub HTTPS URL.
+Example fixtures are included only in debug builds and are hidden in
+production. The default refresh URL is
+`https://raw.githubusercontent.com/ganddtn40/cockpit/main/registry`.
 `COCKPIT_MARKET_OFFLINE=1` is a debug/test switch that forces offline mode.
 
 ## Registry
@@ -251,14 +254,16 @@ network only on user action or the opt-in daily check.
 
 ```text
 registry/
-  index.json                  signed; binds every entry by SHA-256
-  revoked.json                signed revocation list
+  index.json                  production signed index; binds every entry by SHA-256
+  revoked.json                production signed revocation list
+  index.test.json             test-signed index for debug builds and tests
+  revoked.test.json           test-signed revocation list
   schema/entry.schema.json    JSON Schema for one entry
   skills/<id>.yaml            skill entries
   mcp/<id>.yaml               MCP entries
   fixtures/<id>/              local trees for example entries only
   hash.mjs                    normalized content-hash helper
-  sign.mjs                    rebuilds and signs the index
+  sign.mjs                    rebuilds and signs either registry variant
 ```
 
 Each entry declares:
@@ -282,29 +287,36 @@ and `signature`. Each index entry binds `kind`, `id`, `path`, `sha256`, and
 ### Maintainer commands
 
 ```powershell
-# Validate a signed registry offline.
-cargo run -p cockpit-cli -- market check --dir registry
+# Validate a signed registry offline. Use a release build for production.
+cargo run --release -p cockpit-cli -- market check --dir registry
 
 # Also download pinned sources and verify content hashes.
-cargo run -p cockpit-cli -- market check --dir registry --online
+cargo run --release -p cockpit-cli -- market check --dir registry --online
 
 # Also check source and homepage links.
-cargo run -p cockpit-cli -- market check --dir registry --online --links
+cargo run --release -p cockpit-cli -- market check --dir registry --online --links
 
 # Validate loose YAML files on a contributor PR, before signing.
 cargo run -p cockpit-cli -- market check --dir registry --staged --online --links
 
-# Rebuild index.json from the YAML files and sign both JSON files.
+# Rebuild the production index from the YAML files and sign both JSON files.
 node registry/sign.mjs --key C:\secure\private.pem --build --dir registry
 
-# Sign existing files; refuses a key that does not match the embedded key.
-cargo run -p cockpit-cli -- market sign --key C:\secure\private.pem --dir registry
+# Rebuild and sign the test variant used by debug builds and e2e tests.
+node registry/sign.mjs --key C:\secure\test-private.pem --variant test --build --dir registry
+
+# Sign existing production files; refuses a key that does not match the embedded key.
+cargo run --release -p cockpit-cli -- market sign --key C:\secure\private.pem --dir registry
 ```
 
-The private key stays offline. The public key is embedded in
-`crates/cockpit-daemon/src/market/mod.rs`. `cockpit market keygen` generates a
-keypair for a fork or a new registry; the public half must be embedded in a
-build before that build can trust the registry.
+The private key stays offline. Debug and release builds embed different public
+keys: debug builds trust only the test key and load the `.test.json` files;
+release builds trust only the production key and load `index.json` /
+`revoked.json`. A release build refuses to open the market if it detects a test
+key. The keys, offline generation, rotation, and compromise procedure are
+documented in [`docs/registry/KEYS.md`](registry/KEYS.md). `cockpit market
+keygen` generates a keypair for a fork or a new registry; the public half must
+be embedded in a build before that build can trust the registry.
 
 Registry CI validates the schema, the SPDX allowlist, the pinned SHA, the
 content hash at the pinned commit, size limits, duplicate ids, links, and static

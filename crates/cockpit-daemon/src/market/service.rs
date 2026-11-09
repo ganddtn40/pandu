@@ -22,9 +22,11 @@ use super::install::{
 use super::registry_check::fetch_tree;
 use super::targets::{self, TargetContext};
 use super::{
-    INDEX_FILE, InstallScope, LoadedRegistry, MAX_ENTRY_BYTES, MarketEntry, MarketError,
-    MarketKind, MarketPermission, REVOKED_FILE, Reviewer, SignedIndex, SignedRevocation, TrustTier,
-    load_registry_dir, parse_registry, sanitize_markdown, verify_index, verify_revocation,
+    ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE, InstallScope, LoadedRegistry, MAX_ENTRY_BYTES,
+    MarketEntry, MarketError, MarketKind, MarketPermission, REGISTRY_KEY_ID,
+    REGISTRY_PUBLIC_KEY_BASE64, Reviewer, SignedIndex, SignedRevocation, TrustTier,
+    load_registry_dir, parse_registry, sanitize_markdown, trust_root_error, verify_index,
+    verify_revocation,
 };
 use cockpit_core::ids::create_id;
 
@@ -33,7 +35,13 @@ pub const DEFAULT_REGISTRY_URL: &str =
     "https://raw.githubusercontent.com/ganddtn40/cockpit/main/registry";
 pub const DAILY_REFRESH_SECS: i64 = 24 * 60 * 60;
 
+#[cfg(debug_assertions)]
+const BUNDLED_INDEX: &str = include_str!("../../../../registry/index.test.json");
+#[cfg(not(debug_assertions))]
 const BUNDLED_INDEX: &str = include_str!("../../../../registry/index.json");
+#[cfg(debug_assertions)]
+const BUNDLED_REVOKED: &str = include_str!("../../../../registry/revoked.test.json");
+#[cfg(not(debug_assertions))]
 const BUNDLED_REVOKED: &str = include_str!("../../../../registry/revoked.json");
 const BUNDLED_ENTRIES: &[(&str, &str)] = &[
     (
@@ -168,6 +176,7 @@ pub struct MarketService {
     forced_offline: bool,
     local_source: Option<PathBuf>,
     registry_url: String,
+    trust_error: Option<String>,
     state: Mutex<State>,
 }
 
@@ -188,10 +197,17 @@ impl MarketService {
         } else {
             None
         };
-        let registry_url = std::env::var("COCKPIT_MARKET_REGISTRY_URL")
-            .ok()
-            .filter(|value| validate_registry_url(value).is_ok())
-            .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
+        let registry_url = debug_only(
+            cfg!(debug_assertions),
+            std::env::var("COCKPIT_MARKET_REGISTRY_URL").ok(),
+        )
+        .filter(|value| validate_registry_url(value).is_ok())
+        .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
+        let trust_error = trust_root_error(
+            REGISTRY_PUBLIC_KEY_BASE64,
+            REGISTRY_KEY_ID,
+            cfg!(debug_assertions),
+        );
         let settings = load_settings(&home);
         let mut warnings = Vec::new();
         if let Err(error) = install::recover_installs(&home, &user_home, workspace.as_deref()) {
@@ -209,6 +225,7 @@ impl MarketService {
             forced_offline,
             local_source,
             registry_url,
+            trust_error,
             state: Mutex::new(State {
                 registry: None,
                 source: RegistrySource::Bundled,
@@ -253,6 +270,7 @@ impl MarketService {
             forced_offline: true,
             local_source,
             registry_url: DEFAULT_REGISTRY_URL.to_string(),
+            trust_error: None,
             state: Mutex::new(State {
                 registry: registry.map(Arc::new),
                 source: RegistrySource::Cache,
@@ -281,6 +299,9 @@ impl MarketService {
         &self,
         allow_network: bool,
     ) -> Result<Arc<LoadedRegistry>, MarketError> {
+        if let Some(error) = &self.trust_error {
+            return Err(MarketError::Signature(error.clone()));
+        }
         {
             let state = self.state.lock().expect("market state");
             if let Some(registry) = &state.registry {
@@ -310,7 +331,10 @@ impl MarketService {
     fn load_best_registry(
         &self,
     ) -> Result<(Arc<LoadedRegistry>, RegistrySource, Vec<String>), MarketError> {
-        if let Some(dir) = std::env::var_os("COCKPIT_MARKET_REGISTRY").map(PathBuf::from) {
+        if let Some(dir) = debug_only(
+            cfg!(debug_assertions),
+            std::env::var_os("COCKPIT_MARKET_REGISTRY").map(PathBuf::from),
+        ) {
             let registry = load_registry_dir(&dir, self.include_examples)?;
             return Ok((
                 Arc::new(registry),
@@ -320,7 +344,7 @@ impl MarketService {
         }
         let cache = self.home.join("market").join("registry");
         recover_cache(&self.home);
-        if cache.join(INDEX_FILE).exists() {
+        if cache.join(ACTIVE_INDEX_FILE).exists() {
             let registry = load_registry_dir(&cache, self.include_examples)?;
             return Ok((Arc::new(registry), RegistrySource::Cache, Vec::new()));
         }
@@ -352,6 +376,9 @@ impl MarketService {
     }
 
     async fn refresh_inner(&self) -> Result<(), MarketError> {
+        if let Some(error) = &self.trust_error {
+            return Err(MarketError::Signature(error.clone()));
+        }
         if self.forced_offline {
             return Err(MarketError::Network(
                 "Cockpit is in offline mode. Disable COCKPIT_MARKET_OFFLINE to refresh.".into(),
@@ -361,13 +388,13 @@ impl MarketService {
         let base = self.registry_url.trim_end_matches('/');
         let index_bytes = fetch_limited(
             &self.client,
-            &format!("{base}/{INDEX_FILE}"),
+            &format!("{base}/{ACTIVE_INDEX_FILE}"),
             4 * 1024 * 1024,
         )
         .await?;
         let revoked_bytes = fetch_limited(
             &self.client,
-            &format!("{base}/{REVOKED_FILE}"),
+            &format!("{base}/{ACTIVE_REVOKED_FILE}"),
             2 * 1024 * 1024,
         )
         .await?;
@@ -872,6 +899,14 @@ async fn fetch_limited(
     Ok(bytes)
 }
 
+/// Environment overrides are a development convenience. A release build must
+/// ignore them so a user or attacker cannot point the app at a different
+/// registry URL or directory; the embedded key still verifies every byte, and
+/// this gate removes the override entirely outside debug builds.
+fn debug_only<T>(enabled: bool, value: Option<T>) -> Option<T> {
+    if enabled { value } else { None }
+}
+
 fn refresh_due(settings: &MarketSettings) -> bool {
     let Some(last) = &settings.last_refresh else {
         return true;
@@ -890,7 +925,7 @@ fn refresh_due(settings: &MarketSettings) -> bool {
 fn repo_registry_dir() -> Option<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../registry");
     let dir = dir.canonicalize().ok()?;
-    dir.join(INDEX_FILE).is_file().then_some(dir)
+    dir.join(ACTIVE_INDEX_FILE).is_file().then_some(dir)
 }
 
 fn load_settings(home: &Path) -> MarketSettings {
@@ -961,8 +996,8 @@ fn write_registry_cache(
     for (path, bytes) in entries {
         write(&temp.join(path), bytes)?;
     }
-    write(&temp.join(REVOKED_FILE), revoked_bytes)?;
-    write(&temp.join(INDEX_FILE), index_bytes)?;
+    write(&temp.join(ACTIVE_REVOKED_FILE), revoked_bytes)?;
+    write(&temp.join(ACTIVE_INDEX_FILE), index_bytes)?;
 
     let cache = market.join("registry");
     let old = market.join(format!(".registry-old-{suffix}"));
@@ -990,7 +1025,7 @@ fn write_registry_cache(
 fn recover_cache(home: &Path) {
     let market = home.join("market");
     let cache = market.join("registry");
-    if cache.join(INDEX_FILE).exists() {
+    if cache.join(ACTIVE_INDEX_FILE).exists() {
         return;
     }
     let Ok(entries) = std::fs::read_dir(&market) else {
@@ -1038,6 +1073,27 @@ mod tests {
         for entry in &registry.entries {
             assert!(entry.example);
         }
+        assert_eq!(registry.index.key_id, REGISTRY_KEY_ID);
+    }
+
+    #[test]
+    fn environment_overrides_are_debug_only() {
+        assert_eq!(debug_only(false, Some("https://example.invalid")), None);
+        assert_eq!(
+            debug_only(true, Some("https://example.invalid")),
+            Some("https://example.invalid")
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn debug_builds_reject_the_production_registry_signature() {
+        let index: SignedIndex =
+            serde_json::from_str(include_str!("../../../../registry/index.json")).unwrap();
+        assert!(matches!(
+            verify_index(&index),
+            Err(MarketError::Signature(_))
+        ));
     }
 
     #[test]

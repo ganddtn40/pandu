@@ -4,11 +4,15 @@
 // Usage:
 //   node registry/sign.mjs --key /secure/path/private.pem
 //   node registry/sign.mjs --key /secure/path/private.pem --build
+//   node registry/sign.mjs --key /secure/path/test-private.pem --variant test --build
 //
-// `--build` rebuilds index.json from skills/*.yaml and mcp/*.yaml first. The
-// private key is never written to the repository. The public key printed at
-// the end must match REGISTRY_PUBLIC_KEY_BASE64 in
-// crates/cockpit-daemon/src/market/mod.rs.
+// `--build` rebuilds the index from skills/*.yaml and mcp/*.yaml first.
+// `--variant production` (the default) writes and signs `index.json` and
+// `revoked.json` with keyId `cockpit-market-2026`. `--variant test` writes and
+// signs `index.test.json` and `revoked.test.json` with keyId
+// `cockpit-market-test-2026` for debug builds and tests. The private key is
+// never written to the repository. The public key printed at the end must
+// match the corresponding constant in crates/cockpit-daemon/src/market/mod.rs.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -28,6 +32,14 @@ const keyPath = args[keyIndex + 1];
 const build = args.includes('--build');
 const dirIndex = args.indexOf('--dir');
 const dir = dirIndex === -1 ? 'registry' : args[dirIndex + 1];
+const variantIndex = args.indexOf('--variant');
+const variant = variantIndex === -1 ? 'production' : args[variantIndex + 1];
+if (variant !== 'production' && variant !== 'test') {
+  fail('--variant must be production or test');
+}
+const keyId = variant === 'test' ? 'cockpit-market-test-2026' : 'cockpit-market-2026';
+const indexFile = variant === 'test' ? 'index.test.json' : 'index.json';
+const revokedFile = variant === 'test' ? 'revoked.test.json' : 'revoked.json';
 
 const privateKey = crypto.createPrivateKey(fs.readFileSync(keyPath));
 const publicKeyObject = crypto.createPublicKey(privateKey);
@@ -77,8 +89,8 @@ function entryField(text, field) {
 }
 
 function buildIndex() {
-  const indexFile = path.join(dir, 'index.json');
-  const existing = fs.existsSync(indexFile) ? readJson(indexFile) : {};
+  const indexPath = path.join(dir, indexFile);
+  const existing = fs.existsSync(indexPath) ? readJson(indexPath) : {};
   const entries = [];
   for (const [folder, kind] of [
     ['skills', 'skill'],
@@ -105,10 +117,10 @@ function buildIndex() {
     }
   }
   const generatedAt = existing.generatedAt ?? new Date().toISOString();
-  writeJson(indexFile, {
+  writeJson(indexPath, {
     schemaVersion: 1,
     generatedAt,
-    keyId: 'cockpit-market-2026',
+    keyId,
     entries,
     signature: '',
   });
@@ -118,17 +130,25 @@ if (build) {
   buildIndex();
 }
 
+if (variant === 'test' && !fs.existsSync(path.join(dir, revokedFile))) {
+  const production = path.join(dir, 'revoked.json');
+  if (!fs.existsSync(production)) {
+    fail(`${production} does not exist`);
+  }
+  writeJson(path.join(dir, revokedFile), { ...readJson(production), keyId, signature: '' });
+}
+
 for (const [file, label] of [
-  ['index.json', 'index'],
-  ['revoked.json', 'revocation list'],
+  [indexFile, 'index'],
+  [revokedFile, 'revocation list'],
 ]) {
   const filePath = path.join(dir, file);
   if (!fs.existsSync(filePath)) {
     fail(`${filePath} does not exist`);
   }
   const document = readJson(filePath);
-  if (document.keyId !== 'cockpit-market-2026') {
-    fail(`${label} uses keyId ${document.keyId}`);
+  if (document.keyId !== keyId) {
+    fail(`${label} uses keyId ${document.keyId}; expected ${keyId}`);
   }
   document.signature = sign(payloadOf(document));
   if (!crypto.verify(null, Buffer.from(canonical(payloadOf(document)), 'utf8'), publicKeyObject, Buffer.from(document.signature, 'base64'))) {

@@ -30,6 +30,7 @@ async function openMarket(page: Page, daemon = MARKET_DAEMON): Promise<void> {
   }, daemon);
   await page.goto('/market');
   await expect(page.getByRole('heading', { name: 'Skills and MCP servers' })).toBeVisible();
+  await expect(page.getByTestId('market-dev-override')).toHaveText('Dev registry override');
   await expect(page.getByTestId(`market-card-${SKILL_ID}`)).toBeVisible();
 }
 

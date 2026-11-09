@@ -26,8 +26,23 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 pub const MARKET_SCHEMA_VERSION: u32 = 1;
+/// Production registry files. Release builds load and verify these.
 pub const INDEX_FILE: &str = "index.json";
 pub const REVOKED_FILE: &str = "revoked.json";
+/// Test registry files. Debug and test builds load and verify these. They are
+/// signed with the test key, which never appears in a release build.
+pub const TEST_INDEX_FILE: &str = "index.test.json";
+pub const TEST_REVOKED_FILE: &str = "revoked.test.json";
+
+#[cfg(debug_assertions)]
+pub const ACTIVE_INDEX_FILE: &str = TEST_INDEX_FILE;
+#[cfg(not(debug_assertions))]
+pub const ACTIVE_INDEX_FILE: &str = INDEX_FILE;
+
+#[cfg(debug_assertions)]
+pub const ACTIVE_REVOKED_FILE: &str = TEST_REVOKED_FILE;
+#[cfg(not(debug_assertions))]
+pub const ACTIVE_REVOKED_FILE: &str = REVOKED_FILE;
 pub const MAX_ENTRY_BYTES: usize = 256 * 1024;
 pub const MAX_README_BYTES: usize = 100 * 1024;
 pub const MAX_ARCHIVE_BYTES: u64 = 20 * 1024 * 1024;
@@ -35,10 +50,53 @@ pub const MAX_EXTRACTED_BYTES: u64 = 40 * 1024 * 1024;
 pub const MAX_ARCHIVE_FILES: usize = 1_000;
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Ed25519 public key for the Cockpit registry. The matching private key is
-/// kept offline by maintainers and is never part of this repository.
-pub const REGISTRY_PUBLIC_KEY_BASE64: &str = "iE0AJlU1Nd+iTodC0vgTYx7aMFCETJisOnFEIsP6hMc=";
-pub const REGISTRY_KEY_ID: &str = "cockpit-market-2026";
+/// Ed25519 public key for the production Cockpit registry. The matching
+/// private key is kept offline by maintainers and is never part of this
+/// repository or a debug build.
+pub const PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64: &str =
+    "iE0AJlU1Nd+iTodC0vgTYx7aMFCETJisOnFEIsP6hMc=";
+pub const PRODUCTION_REGISTRY_KEY_ID: &str = "cockpit-market-2026";
+
+/// Ed25519 public key for the test registry. It only signs the `.test.json`
+/// registry variants used by debug builds, tests, and the e2e fixtures. The
+/// matching private key is a test key and is not accepted by a release build.
+pub const TEST_REGISTRY_PUBLIC_KEY_BASE64: &str = "6Zxqlnu7Ci8srz7rzhSxmrnCyyWMZYKNWPMTtXxZloY=";
+pub const TEST_REGISTRY_KEY_ID: &str = "cockpit-market-test-2026";
+
+#[cfg(debug_assertions)]
+pub const REGISTRY_PUBLIC_KEY_BASE64: &str = TEST_REGISTRY_PUBLIC_KEY_BASE64;
+#[cfg(not(debug_assertions))]
+pub const REGISTRY_PUBLIC_KEY_BASE64: &str = PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64;
+
+#[cfg(debug_assertions)]
+pub const REGISTRY_KEY_ID: &str = TEST_REGISTRY_KEY_ID;
+#[cfg(not(debug_assertions))]
+pub const REGISTRY_KEY_ID: &str = PRODUCTION_REGISTRY_KEY_ID;
+
+/// Refuse to start a release build whose trust root is the test key. The
+/// function takes the key and the build mode explicitly so tests can prove
+/// that a release configuration rejects a test key without building one.
+pub fn trust_root_error(public_key: &str, key_id: &str, debug: bool) -> Option<String> {
+    let is_test = public_key == TEST_REGISTRY_PUBLIC_KEY_BASE64 || key_id == TEST_REGISTRY_KEY_ID;
+    if is_test && !debug {
+        return Some(
+            "This release build embedded the test registry key. Cockpit refuses to open the \
+             market with a test trust root."
+                .into(),
+        );
+    }
+    if !is_test
+        && (public_key != PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64
+            || key_id != PRODUCTION_REGISTRY_KEY_ID)
+    {
+        return Some(
+            "This build does not embed a recognised Cockpit registry key. Cockpit refuses to \
+             open the market."
+                .into(),
+        );
+    }
+    None
+}
 
 pub const SPDX_ALLOWLIST: &[&str] = &[
     "0BSD",
@@ -1009,10 +1067,10 @@ pub fn load_registry_dir(
     dir: &Path,
     include_examples: bool,
 ) -> Result<LoadedRegistry, MarketError> {
-    let index_bytes = std::fs::read(dir.join(INDEX_FILE)).map_err(|error| {
+    let index_bytes = std::fs::read(dir.join(ACTIVE_INDEX_FILE)).map_err(|error| {
         MarketError::Registry(format!("Could not read the registry index: {error}"))
     })?;
-    let revoked_bytes = std::fs::read(dir.join(REVOKED_FILE)).map_err(|error| {
+    let revoked_bytes = std::fs::read(dir.join(ACTIVE_REVOKED_FILE)).map_err(|error| {
         MarketError::Registry(format!("Could not read the revocation list: {error}"))
     })?;
     parse_registry(&index_bytes, &revoked_bytes, include_examples, |path| {
@@ -1225,5 +1283,46 @@ mod tests {
         }
         assert!(!is_windows_reserved("console.md"));
         assert!(!is_windows_reserved("COM10"));
+    }
+
+    #[test]
+    fn production_and_test_trust_roots_are_distinct() {
+        assert_ne!(
+            PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64,
+            TEST_REGISTRY_PUBLIC_KEY_BASE64
+        );
+        assert_ne!(PRODUCTION_REGISTRY_KEY_ID, TEST_REGISTRY_KEY_ID);
+    }
+
+    #[test]
+    fn release_builds_refuse_a_test_trust_root() {
+        let error = trust_root_error(TEST_REGISTRY_PUBLIC_KEY_BASE64, TEST_REGISTRY_KEY_ID, false)
+            .expect("a release build must reject the test key");
+        assert!(error.contains("test registry key"), "{error}");
+        assert!(
+            trust_root_error(
+                PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64,
+                PRODUCTION_REGISTRY_KEY_ID,
+                false
+            )
+            .is_none()
+        );
+        assert!(
+            trust_root_error(TEST_REGISTRY_PUBLIC_KEY_BASE64, TEST_REGISTRY_KEY_ID, true).is_none()
+        );
+        assert!(
+            trust_root_error("not-a-real-key", "cockpit-market-2026", false)
+                .expect("unknown keys are refused")
+                .contains("recognised")
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn debug_builds_verify_with_the_test_key() {
+        assert_eq!(REGISTRY_PUBLIC_KEY_BASE64, TEST_REGISTRY_PUBLIC_KEY_BASE64);
+        assert_eq!(REGISTRY_KEY_ID, TEST_REGISTRY_KEY_ID);
+        assert_eq!(ACTIVE_INDEX_FILE, TEST_INDEX_FILE);
+        assert_eq!(ACTIVE_REVOKED_FILE, TEST_REVOKED_FILE);
     }
 }

@@ -220,7 +220,9 @@ struct MarketArgs {
 enum MarketAction {
     /// Generate an Ed25519 keypair for signing the registry.
     Keygen(MarketKeygenArgs),
-    /// Sign index.json and revoked.json in a registry directory.
+    /// Sign the active registry variant in a directory. Debug builds sign
+    /// index.test.json/revoked.test.json with the test key; release builds sign
+    /// index.json/revoked.json with the production key.
     Sign(MarketSignArgs),
     /// Validate a registry directory, its signatures, hashes, and files.
     Check(MarketCheckArgs),
@@ -375,6 +377,7 @@ fn market_keygen(args: MarketKeygenArgs) -> anyhow::Result<()> {
 }
 
 fn market_sign(args: MarketSignArgs) -> anyhow::Result<()> {
+    use cockpit_daemon::market::{ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE};
     let key = cockpit_daemon::market::signing::load_signing_key(&args.key)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let public = cockpit_daemon::market::signing::public_key_base64(&key);
@@ -388,7 +391,7 @@ fn market_sign(args: MarketSignArgs) -> anyhow::Result<()> {
     cockpit_daemon::market::signing::sign_registry_dir(&args.dir, &key)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     println!(
-        "signed {}/index.json and {}/revoked.json with {public}",
+        "signed {}/{ACTIVE_INDEX_FILE} and {}/{ACTIVE_REVOKED_FILE} with {public}",
         args.dir.display(),
         args.dir.display()
     );

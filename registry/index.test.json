@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-09T12:45:17.927Z",
+  "keyId": "cockpit-market-test-2026",
+  "entries": [
+    {
+      "kind": "skill",
+      "id": "example-changelog-writer",
+      "path": "skills/example-changelog-writer.yaml",
+      "sha256": "bc25cfff2501a5c544482c9c6e2189c2364b436019554b059a57e8ee11d65836",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "skill",
+      "id": "example-commit-messages",
+      "path": "skills/example-commit-messages.yaml",
+      "sha256": "f90d8b7d02556117b594d405189495ed29307e11bc9307556f405aa4db1133be",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "mcp",
+      "id": "example-weather",
+      "path": "mcp/example-weather.yaml",
+      "sha256": "f70ff02beae6077e5a1e1daf935b63b10a5dc96cfdae5bbabb569c61d003777e",
+      "version": "1.0.0"
+    }
+  ],
+  "signature": "GmziCVUIH7RFDMnQLa2klZC+txLf9HOWr7Vyv34T8haQyHUiHOYKPf7sw5f3NwsJ/Nrv5MSog65muHrCCh1NCg=="
+}

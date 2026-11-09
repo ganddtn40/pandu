@@ -25,14 +25,16 @@ This guide is for contributors and reviewers. The runtime model is in
 
 ```text
 registry/
-  index.json                  signed index; binds every entry by SHA-256
-  revoked.json                signed revocation list
+  index.json                  production signed index; binds every entry by SHA-256
+  revoked.json                production signed revocation list
+  index.test.json             test-signed index for debug builds and tests
+  revoked.test.json           test-signed revocation list
   schema/entry.schema.json    JSON Schema for one entry
   skills/<id>.yaml            skill entries
   mcp/<id>.yaml               MCP server entries
   fixtures/<id>/              local trees for `example: true` entries only
   hash.mjs                    prints the normalized content hash
-  sign.mjs                    rebuilds and signs the index and revocation list
+  sign.mjs                    rebuilds and signs either registry variant
 ```
 
 The registry is designed to move to its own GitHub repository. Keep paths
@@ -244,11 +246,15 @@ cargo run -p cockpit-cli -- market check --dir registry --staged --online --link
 ```
 
 CI runs the staged check on pull requests and the signed check on `main` and
-`rewrite`.
+`rewrite`. The signed check builds a release binary because release builds
+embed the production trust root; debug builds embed the test key and verify the
+`.test.json` variant instead.
 
 ## Review and signing
 
-A maintainer, not the contributor, updates the signed index:
+A maintainer, not the contributor, updates the signed index. The full key
+model, offline generation, rotation, and compromise procedure is in
+[`KEYS.md`](KEYS.md).
 
 1. Review the entry and the source tree using the checklist below.
 2. Rebuild and sign the index from the YAML files:
@@ -263,24 +269,34 @@ A maintainer, not the contributor, updates the signed index:
 
 3. If you only edited `revoked.json`, or the index was rebuilt by another
    trusted step, sign the existing files with the Rust tool. It refuses a key
-   whose public half does not match the embedded key:
+   whose public half does not match the embedded key. Run it from a release
+   build when signing production; a debug build signs the test variant with the
+   test key:
 
    ```powershell
-   cargo run -p cockpit-cli -- market sign --key C:\secure\private.pem --dir registry
+   cargo run --release -p cockpit-cli -- market sign --key C:\secure\private.pem --dir registry
    ```
 
-4. Run the signed check again:
+4. Run the signed check again from a release build:
 
    ```powershell
-   cargo run -p cockpit-cli -- market check --dir registry --online --links
+   cargo run --release -p cockpit-cli -- market check --dir registry --online --links
    ```
 
-5. Commit the entry, `index.json`, and `revoked.json` together. A YAML change
-   without a new index hash is rejected by every client.
+5. If a YAML file changed, also regenerate and commit the test variant so
+   debug builds and e2e tests load the same entries:
+
+   ```powershell
+   node registry/sign.mjs --key C:\secure\test-private.pem --variant test --build --dir registry
+   ```
+
+6. Commit the entry, `index.json`, `revoked.json`, `index.test.json`, and
+   `revoked.test.json` together. A YAML change without a new index hash is
+   rejected by every client.
 
 The private key is never committed, never placed in CI secrets for pull
 requests, and never printed. If it is exposed, follow the key-compromise
-process in [`SECURITY.md`](../../SECURITY.md).
+process in [`KEYS.md`](KEYS.md) and [`SECURITY.md`](../../SECURITY.md).
 
 ## Reviewer checklist
 

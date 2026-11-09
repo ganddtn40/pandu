@@ -13,8 +13,8 @@ use rand::rngs::OsRng;
 use serde_json::Value;
 
 use super::{
-    INDEX_FILE, MarketError, REVOKED_FILE, SignedIndex, SignedRevocation, canonical_json,
-    verify_signature,
+    ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE, MarketError, SignedIndex, SignedRevocation,
+    canonical_json, verify_signature,
 };
 
 pub const KEY_HEADER: &str = "-----BEGIN COCKPIT MARKET SIGNING KEY-----";
@@ -118,11 +118,13 @@ pub fn verify_with_public_key(
     .map_err(|_| MarketError::Signature("The signature is invalid.".into()))
 }
 
-/// Sign `index.json` and `revoked.json` in a registry directory in place.
-/// The JSON is rewritten with the signature included, using the same camelCase
-/// shape the daemon deserializes.
+/// Sign the active registry variant in a directory in place. Debug builds sign
+/// `index.test.json` / `revoked.test.json` with the test key; release builds
+/// sign `index.json` / `revoked.json` with the production key. The JSON is
+/// rewritten with the signature included, using the same camelCase shape the
+/// daemon deserializes.
 pub fn sign_registry_dir(dir: &Path, key: &SigningKey) -> Result<(), MarketError> {
-    let index_path = dir.join(INDEX_FILE);
+    let index_path = dir.join(ACTIVE_INDEX_FILE);
     let index_bytes = std::fs::read(&index_path).map_err(|error| {
         MarketError::Registry(format!("Could not read {}: {error}", index_path.display()))
     })?;
@@ -131,7 +133,7 @@ pub fn sign_registry_dir(dir: &Path, key: &SigningKey) -> Result<(), MarketError
     sign_index(&mut index, key);
     write_json(&index_path, &index)?;
 
-    let revoked_path = dir.join(REVOKED_FILE);
+    let revoked_path = dir.join(ACTIVE_REVOKED_FILE);
     let revoked_bytes = std::fs::read(&revoked_path).map_err(|error| {
         MarketError::Registry(format!(
             "Could not read {}: {error}",

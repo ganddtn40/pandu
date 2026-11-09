@@ -446,6 +446,7 @@ const en = {
   'market.sourceBundled': 'Bundled examples',
   'market.sourceRepo': 'Repository',
   'market.sourceEnvironment': 'Environment override',
+  'market.devOverride': 'Dev registry override',
   'market.hostOnly': 'Installs happen on this computer only. Paired devices never reach the market.',
   'market.warnings': 'Warnings',
   'market.scope': 'Scope',
