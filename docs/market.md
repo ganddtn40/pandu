@@ -60,11 +60,14 @@ Market is a tab in the main UI.
 Catalogue controls:
 
 - **Search** is instant and client-side. It matches the name, descriptions,
-  categories, and agent ids.
+  categories, tags, and agent ids.
 - **Agents** is a multi-select chip row. Selecting two agents shows entries that
   support either one; the detail sheet then lets the user choose the target.
-- **Categories** and **Trust tier** are single-select. **Installed only** hides
-  everything that is not installed.
+- **Categories** is a single-select over the controlled vocabulary (`coding`,
+  `testing`, `security`, `docs`, `devops`, `data`, `design`, `productivity`,
+  `other`). Free-form labels are shown as tags and are searchable, but they are
+  never filter categories. **Trust tier** is also single-select. **Installed
+  only** hides everything that is not installed.
 - **Sort** is Trust (default), Name, or Installed first. Unreviewed entries sort
   last.
 - **Refresh registry** downloads the signed index, revocation list, and every

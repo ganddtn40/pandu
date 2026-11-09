@@ -36,8 +36,28 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 8,
+      "items": {
+        "enum": [
+          "coding",
+          "testing",
+          "security",
+          "docs",
+          "devops",
+          "data",
+          "design",
+          "productivity",
+          "other"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Controlled vocabulary. Free-form labels belong in tags."
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 12,
+      "uniqueItems": true,
       "items": { "type": "string", "minLength": 1, "maxLength": 40 },
-      "uniqueItems": true
+      "description": "Free-form labels shown as tags. Never used as filter categories."
     },
     "agents": {
       "type": "array",

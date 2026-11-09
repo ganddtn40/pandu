@@ -19,9 +19,9 @@ use cockpit_daemon::market::config_edit::{self, ConfigFormat};
 use cockpit_daemon::market::install::{self, InstallManifest, InstallState, validate_manifest};
 use cockpit_daemon::market::service::{MarketService, RegistrySource};
 use cockpit_daemon::market::{
-    ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE, InstallScope, LoadedRegistry, MarketKind, MarketSource,
-    RevokedEntry, SignedIndex, SignedRevocation, SkillAgentTarget, TrustTier, parse_entry_text,
-    parse_registry, sanitize_markdown,
+    ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE, InstallScope, LoadedRegistry, MARKET_CATEGORIES,
+    MarketKind, MarketSource, RevokedEntry, SignedIndex, SignedRevocation, SkillAgentTarget,
+    TrustTier, parse_entry_text, parse_registry, sanitize_markdown,
 };
 use serde_json::{Value, json};
 
@@ -152,6 +152,20 @@ async fn signed_registry_lists_only_verified_entries() {
     assert_eq!(catalog.counts.mcp, 1);
     assert_eq!(catalog.counts.installed, 0);
     assert!(catalog.entries.iter().all(|entry| entry.example));
+    assert_eq!(catalog.categories, vec!["coding", "docs", "data"]);
+    assert!(
+        catalog
+            .categories
+            .iter()
+            .all(|category| MARKET_CATEGORIES.contains(&category.as_str()))
+    );
+    let commit = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.id == "example-commit-messages")
+        .unwrap();
+    assert_eq!(commit.categories, vec!["coding"]);
+    assert_eq!(commit.tags, vec!["git", "writing"]);
     assert!(
         catalog
             .entries

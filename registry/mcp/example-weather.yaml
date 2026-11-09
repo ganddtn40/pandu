@@ -10,8 +10,9 @@ long_description: >-
   The package name is illustrative and is not published. Cockpit writes the
   agent configuration only; the agent runs the command when it starts.
 categories:
-  - weather
   - data
+tags:
+  - weather
 agents:
   - claude-code
   - codex

@@ -564,6 +564,7 @@ export interface MarketCard {
   shortDescription: string;
   longDescription: string;
   categories: string[];
+  tags: string[];
   agents: string[];
   license: string;
   trust: TrustTier;

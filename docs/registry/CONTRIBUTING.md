@@ -51,7 +51,8 @@ The schema is authoritative. The highlights:
 | `version` | Your project's version string, at most 40 characters. Changing it is an update. |
 | `short_description` | At most 240 characters. Say what it does, not why it is amazing. |
 | `long_description` | At most 2,000 characters. Include limits and what the entry does **not** do. |
-| `categories` | 1-8 short strings. |
+| `categories` | 1-8 values from the controlled vocabulary: `coding`, `testing`, `security`, `docs`, `devops`, `data`, `design`, `productivity`, `other`. These drive the catalogue filter. |
+| `tags` | Optional free-form labels for search and display: at most 12, 1-40 characters each. Tags never become filter categories. |
 | `agents` | At least one supported agent id. Do not list an agent you have not tested. |
 | `source.repo` | Exactly `https://github.com/<owner>/<repo>`. |
 | `source.commit` | Full lowercase 40-character commit SHA. |
@@ -100,7 +101,8 @@ short_description: Turn merged changes into a player-facing changelog.
 long_description: >-
   Groups merged changes into Added, Changed, Fixed, and Removed. Writes text
   only; it never publishes a release or tags a build.
-categories: [writing, release]
+categories: [docs]
+tags: [writing, release]
 agents: [claude-code, opencode]
 source:
   repo: https://github.com/your-name/changelog-writer
@@ -143,7 +145,8 @@ version: 1.0.0
 short_description: A read-only MCP server for current conditions.
 long_description: >-
   Returns current conditions and a short forecast. Requires a local API key.
-categories: [weather, data]
+categories: [data]
+tags: [weather]
 agents: [claude-code, codex, opencode]
 source:
   repo: https://github.com/your-name/weather-mcp

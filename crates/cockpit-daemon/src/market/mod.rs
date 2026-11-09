@@ -111,6 +111,21 @@ pub const SPDX_ALLOWLIST: &[&str] = &[
     "Unlicense",
 ];
 
+/// The controlled category vocabulary. Entries may only use these values;
+/// free-form labels belong in `tags`. Keep this list in sync with
+/// `registry/schema/entry.schema.json` and the market UI.
+pub const MARKET_CATEGORIES: &[&str] = &[
+    "coding",
+    "testing",
+    "security",
+    "docs",
+    "devops",
+    "data",
+    "design",
+    "productivity",
+    "other",
+];
+
 pub const MARKET_AGENTS: &[&str] = &[
     "claude-code",
     "codex",
@@ -338,6 +353,8 @@ pub struct MarketEntry {
     #[serde(alias = "long_description")]
     pub long_description: String,
     pub categories: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub agents: Vec<String>,
     pub source: MarketSource,
     pub license: String,
@@ -379,8 +396,37 @@ impl MarketEntry {
                 self.id
             )));
         }
+        let mut seen_categories = BTreeSet::new();
         for category in &self.categories {
-            validate_text("category", category, 1, 40)?;
+            if !MARKET_CATEGORIES.contains(&category.as_str()) {
+                return Err(MarketError::Entry(format!(
+                    "entry {} uses category `{category}`, which is not in the controlled vocabulary ({}); put free-form labels in tags",
+                    self.id,
+                    MARKET_CATEGORIES.join(", ")
+                )));
+            }
+            if !seen_categories.insert(category) {
+                return Err(MarketError::Entry(format!(
+                    "entry {} lists category `{category}` twice",
+                    self.id
+                )));
+            }
+        }
+        if self.tags.len() > 12 {
+            return Err(MarketError::Entry(format!(
+                "entry {} must list at most 12 tags",
+                self.id
+            )));
+        }
+        let mut seen_tags = BTreeSet::new();
+        for tag in &self.tags {
+            validate_text("tag", tag, 1, 40)?;
+            if !seen_tags.insert(tag) {
+                return Err(MarketError::Entry(format!(
+                    "entry {} lists tag `{tag}` twice",
+                    self.id
+                )));
+            }
         }
         if self.agents.is_empty() {
             return Err(MarketError::Entry(format!(
@@ -1324,5 +1370,82 @@ mod tests {
         assert_eq!(REGISTRY_KEY_ID, TEST_REGISTRY_KEY_ID);
         assert_eq!(ACTIVE_INDEX_FILE, TEST_INDEX_FILE);
         assert_eq!(ACTIVE_REVOKED_FILE, TEST_REVOKED_FILE);
+    }
+
+    fn entry_value() -> Value {
+        json!({
+            "schema_version": 1,
+            "id": "demo",
+            "name": "Demo",
+            "kind": "skill",
+            "version": "1.0.0",
+            "short_description": "Short",
+            "long_description": "Long",
+            "categories": ["coding"],
+            "agents": ["claude-code"],
+            "source": {
+                "repo": "https://github.com/example/demo",
+                "commit": "1".repeat(40),
+                "content_sha256": "2".repeat(64)
+            },
+            "license": "MIT",
+            "trust": "unreviewed",
+            "skills": { "install": [{ "agent": "claude-code", "scopes": ["user"] }] },
+            "readme": "readme"
+        })
+    }
+
+    #[test]
+    fn categories_are_a_controlled_vocabulary() {
+        let mut entry: MarketEntry = serde_json::from_value(entry_value()).unwrap();
+        assert!(entry.validate().is_ok());
+
+        entry.categories = vec!["writing".into()];
+        let error = entry.validate().unwrap_err().to_string();
+        assert!(error.contains("controlled vocabulary"), "{error}");
+        assert!(error.contains("tags"), "{error}");
+
+        let mut duplicate = entry_value();
+        duplicate["categories"] = json!(["docs", "docs"]);
+        let entry: MarketEntry = serde_json::from_value(duplicate).unwrap();
+        assert!(entry.validate().unwrap_err().to_string().contains("twice"));
+    }
+
+    #[test]
+    fn free_form_tags_are_labels_not_filter_categories() {
+        let mut entry: MarketEntry = serde_json::from_value(entry_value()).unwrap();
+        entry.tags = vec!["release notes".into(), "git".into()];
+        assert!(entry.validate().is_ok());
+
+        entry.tags = vec!["git".into(), "git".into()];
+        assert!(entry.validate().unwrap_err().to_string().contains("tag"));
+
+        entry.tags = vec!["".into()];
+        assert!(entry.validate().is_err());
+
+        entry.tags = (0..13).map(|index| format!("tag-{index}")).collect();
+        assert!(
+            entry
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("12 tags")
+        );
+    }
+
+    #[test]
+    fn schema_category_vocabulary_matches_the_market() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../registry/schema/entry.schema.json"
+        ))
+        .expect("registry schema");
+        let values = schema["properties"]["categories"]["items"]["enum"]
+            .as_array()
+            .expect("categories enum")
+            .iter()
+            .map(|value| value.as_str().expect("category string"))
+            .collect::<Vec<_>>();
+        assert_eq!(values.as_slice(), MARKET_CATEGORIES);
+        assert_eq!(schema["properties"]["tags"]["maxItems"], 12);
     }
 }

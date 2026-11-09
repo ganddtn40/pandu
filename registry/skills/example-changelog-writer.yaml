@@ -10,6 +10,8 @@ long_description: >-
   for the audience when a release could be read by players, modders, or server
   operators. It never publishes anything itself.
 categories:
+  - docs
+tags:
   - writing
   - release
 agents:

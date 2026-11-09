@@ -70,12 +70,20 @@ test('catalogue, instant search, filters and detail', async ({ page }) => {
     'aria-pressed',
     'true',
   );
-  await page.getByLabel('Categories').selectOption('git');
+  const categories = page.getByLabel('Categories');
+  await expect(categories.locator('option')).toHaveText([
+    'All categories',
+    'coding',
+    'docs',
+    'data',
+  ]);
+  await categories.selectOption('coding');
   await expect(page.getByTestId(`market-card-${OTHER_SKILL_ID}`)).toBeVisible();
   await expect(page.getByTestId(`market-card-${SKILL_ID}`)).toHaveCount(0);
+  await expect(page.getByTestId(`market-card-${OTHER_SKILL_ID}`).getByText('#git')).toBeVisible();
   await shot(page, 'market-filters.png');
 
-  await page.getByLabel('Categories').selectOption('all');
+  await categories.selectOption('all');
   await page.getByTestId(`market-card-${OTHER_SKILL_ID}`).click();
   const sheet = page.getByTestId('market-sheet');
   await expect(

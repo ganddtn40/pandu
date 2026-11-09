@@ -11,6 +11,8 @@ long_description: >-
   a real marketplace listing; it exists so the schema, CI checks, preview, and
   install pipeline can be exercised without inventing a real author or project.
 categories:
+  - coding
+tags:
   - git
   - writing
 agents:

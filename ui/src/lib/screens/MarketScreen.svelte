@@ -32,6 +32,17 @@
 
   const ROW_HEIGHT = 140;
   const ROW_GAP = 10;
+  const CATEGORY_VOCABULARY = [
+    'coding',
+    'testing',
+    'security',
+    'docs',
+    'devops',
+    'data',
+    'design',
+    'productivity',
+    'other',
+  ] as const;
   const TRUST_ORDER: Record<TrustTier, number> = {
     official: 0,
     'community-reviewed': 1,
@@ -88,7 +99,9 @@
   const devOverride = $derived(catalog?.source === 'environment');
   const settings = $derived(catalog?.settings ?? { autoRefresh: false, lastRefresh: null });
   const allAgents = $derived(catalog?.agents ?? []);
-  const allCategories = $derived(catalog?.categories ?? []);
+  const allCategories = $derived(
+    CATEGORY_VOCABULARY.filter((category) => (catalog?.categories ?? []).includes(category)),
+  );
 
   const tabEntries = $derived(
     (catalog?.entries ?? []).filter((entry) =>
@@ -114,6 +127,7 @@
           entry.longDescription,
           entry.license,
           ...entry.categories,
+          ...entry.tags,
           ...entry.agents,
         ]
           .join(' ')
@@ -844,6 +858,9 @@
                     {#each card.categories as category}
                       <span class="market-category">{category}</span>
                     {/each}
+                    {#each card.tags.slice(0, 3) as tag}
+                      <span class="market-tag">#{tag}</span>
+                    {/each}
                   </span>
                 </span>
                 <span class="market-card__side">
@@ -1095,6 +1112,17 @@
 
           <p class="market-detail-lede">{selected.longDescription}</p>
           <p class="market-tier-note">{trustNote(selected.trust)}</p>
+
+          {#if selected.categories.length > 0 || selected.tags.length > 0}
+            <div class="market-detail-taxonomy">
+              {#each selected.categories as category}
+                <span class="market-category">{category}</span>
+              {/each}
+              {#each selected.tags as tag}
+                <span class="market-tag">#{tag}</span>
+              {/each}
+            </div>
+          {/if}
 
           {#if selected.revoked}
             <div class="market-warning market-warning--danger">

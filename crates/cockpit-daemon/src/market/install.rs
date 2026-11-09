@@ -2090,7 +2090,8 @@ mod tests {
             version: "1.0.0".into(),
             short_description: "Short".into(),
             long_description: "Long".into(),
-            categories: vec!["examples".into()],
+            categories: vec!["other".into()],
+            tags: Vec::new(),
             agents: vec!["claude-code".into()],
             source: MarketSource {
                 repo: "https://github.com/example/demo".into(),

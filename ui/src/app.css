@@ -6925,6 +6925,30 @@ html[data-glass-reason='reduced-transparency'] .panel {
   color: var(--text-faint);
 }
 
+.market-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg);
+  color: var(--text-faint);
+  font-size: max(var(--text-min), calc(10px * var(--font-scale)));
+  white-space: nowrap;
+}
+
+.market-detail-taxonomy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.market-detail-taxonomy .market-category {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--chip-bg);
+  color: var(--text-soft);
+}
+
 .market-card__side {
   display: flex;
   flex: 0 0 auto;

@@ -97,6 +97,7 @@ pub struct MarketCard {
     pub short_description: String,
     pub long_description: String,
     pub categories: Vec<String>,
+    pub tags: Vec<String>,
     pub agents: Vec<String>,
     pub license: String,
     pub trust: TrustTier,
@@ -480,7 +481,11 @@ impl MarketService {
             .count();
         Ok(CatalogResponse {
             entries,
-            categories: categories.into_iter().collect(),
+            categories: super::MARKET_CATEGORIES
+                .iter()
+                .filter(|category| categories.contains(**category))
+                .map(|category| (*category).to_string())
+                .collect(),
             agents: agents.into_iter().collect(),
             generated_at: Some(registry.index.generated_at.clone()),
             source: state.source,
@@ -730,6 +735,7 @@ impl MarketService {
             short_description: entry.short_description.clone(),
             long_description: entry.long_description.clone(),
             categories: entry.categories.clone(),
+            tags: entry.tags.clone(),
             agents: entry.agents.clone(),
             license: entry.license.clone(),
             trust: entry.trust,
