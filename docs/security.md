@@ -260,6 +260,22 @@ token, or read the audit log.
   steps, diffs, prompts, and responses — code and anything an agent printed.
   Prompt grants keystroke injection into a running session and is presented with
   the warning "Prompt lets this device make your agent run commands."
+- **Status is a redacted view.** Status is a floor, not a summary of content.
+  Flight titles are derived from the prompt, so a status-only device sees a
+  neutral `Flight 7 · Claude Code` label built from creation order and the agent
+  name. Workspace paths, branches, source labels, tags, free-form metadata, and
+  the agent working directory are removed. Guard events are reduced to the risk
+  severity, the rule class (`ruleName`), and the generic title
+  `Approval requested`; command, evidence, description, metadata, and the
+  approval nonce are omitted. Inbox events lose their message and metadata.
+  Live events are allowlisted by type: known status events keep counts and
+  states, guard payloads are reduced to the same safe fields, and an unknown
+  event type is delivered with an empty payload. Content and Respond devices
+  may see guard evidence, but secrets are masked first and only Respond gets
+  the approval nonce. Tests:
+  `status_scope_never_returns_prompt_command_path_or_terminal_content`,
+  `respond_and_content_scopes_see_redacted_guard_evidence`,
+  `status_live_events_strip_titles_messages_and_paths`.
 - **High-risk approvals.** Severity High/Critical or a dangerous command needs
   the PIN set at pairing. Without a PIN, the decision must happen at the
   computer. Approve and deny both require the PIN. Replayed, late, and expired

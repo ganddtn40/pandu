@@ -12,8 +12,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axum::Router;
-use cockpit_core::guard::{GuardAction, GuardEventStatus, GuardRuleKind, GuardSeverity};
+use cockpit_core::agent::{AgentEventInput, AgentEventType};
+use cockpit_core::guard::{
+    GuardAction, GuardEventStatus, GuardEvidence, GuardRuleKind, GuardSeverity,
+};
 use cockpit_core::model::{CaptureMode, SessionSource, SessionStatus};
+use cockpit_core::provider::{AgentInfo, DetectedFrom};
 use cockpit_daemon::remote::{RemoteAccess, RemoteMode};
 use cockpit_daemon::store::{NewGuardEvent, NewSession, Store};
 use cockpit_daemon::{Config, ServerHandle};
@@ -27,6 +31,53 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 const DUMMY_ID: &str = "00000000-0000-4000-8000-000000000000";
+
+const PROMPT_SENTINEL: &str = "PROMPT_SENTINEL_4f9a";
+const SOURCE_LABEL_SENTINEL: &str = "SOURCE_LABEL_SENTINEL_4f9a";
+const WORKSPACE_SENTINEL: &str = "WORKSPACE_SENTINEL_4f9a";
+const BRANCH_SENTINEL: &str = "BRANCH_SENTINEL_4f9a";
+const TAG_SENTINEL: &str = "TAG_SENTINEL_4f9a";
+const METADATA_SENTINEL: &str = "METADATA_SENTINEL_4f9a";
+const GUARD_TITLE_SENTINEL: &str = "GUARD_TITLE_SENTINEL_4f9a";
+const GUARD_DESCRIPTION_SENTINEL: &str = "GUARD_DESCRIPTION_SENTINEL_4f9a";
+const COMMAND_SENTINEL: &str = "COMMAND_SENTINEL_4f9a";
+const EVIDENCE_SENTINEL: &str = "EVIDENCE_SENTINEL_4f9a";
+const EVIDENCE_PATH_SENTINEL: &str = "EVIDENCE_PATH_SENTINEL_4f9a";
+const EVIDENCE_METADATA_SENTINEL: &str = "EVIDENCE_METADATA_SENTINEL_4f9a";
+const GUARD_METADATA_SENTINEL: &str = "GUARD_METADATA_SENTINEL_4f9a";
+const NONCE_SENTINEL: &str = "NONCE_SENTINEL_4f9a";
+const WORKDIR_SENTINEL: &str = "WORKDIR_SENTINEL_4f9a";
+const TERMINAL_MESSAGE_SENTINEL: &str = "TERMINAL_MESSAGE_SENTINEL_4f9a";
+const EVENT_METADATA_SENTINEL: &str = "EVENT_METADATA_SENTINEL_4f9a";
+const TERMINAL_OUTPUT_SENTINEL: &str = "TERMINAL_OUTPUT_SENTINEL_4f9a";
+
+fn assert_no_status_leak(path: &str, body: &str) {
+    for sentinel in [
+        PROMPT_SENTINEL,
+        SOURCE_LABEL_SENTINEL,
+        WORKSPACE_SENTINEL,
+        BRANCH_SENTINEL,
+        TAG_SENTINEL,
+        METADATA_SENTINEL,
+        GUARD_TITLE_SENTINEL,
+        GUARD_DESCRIPTION_SENTINEL,
+        COMMAND_SENTINEL,
+        EVIDENCE_SENTINEL,
+        EVIDENCE_PATH_SENTINEL,
+        EVIDENCE_METADATA_SENTINEL,
+        GUARD_METADATA_SENTINEL,
+        NONCE_SENTINEL,
+        WORKDIR_SENTINEL,
+        TERMINAL_MESSAGE_SENTINEL,
+        EVENT_METADATA_SENTINEL,
+        TERMINAL_OUTPUT_SENTINEL,
+    ] {
+        assert!(
+            !body.contains(sentinel),
+            "{path} leaked {sentinel} to a status-only device: {body}"
+        );
+    }
+}
 
 struct MockUpstream {
     addr: SocketAddr,
@@ -798,6 +849,498 @@ async fn live_events_hide_content_from_status_only_devices() {
     .await
     .expect("content events flow after the grant");
     assert!(saw_output);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn status_scope_never_returns_prompt_command_path_or_terminal_content() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let host = host_base(&daemon);
+    let device = pair_device(&daemon, &remote, "Status only", None).await;
+    set_scopes(&daemon, &device.id, &["view:status"], true).await;
+
+    let session = daemon
+        .state
+        .store
+        .create_session(NewSession {
+            title: format!("{PROMPT_SENTINEL} refactor the checkout flow"),
+            source: SessionSource::Proxy,
+            capture_mode: CaptureMode::Proxy,
+            source_label: Some(SOURCE_LABEL_SENTINEL.to_string()),
+            status: SessionStatus::Active,
+            agent: Some(AgentInfo {
+                name: Some("Sentinel Agent".to_string()),
+                version: None,
+                user_agent: None,
+                detected_from: DetectedFrom::Manual,
+            }),
+            workspace_path: Some(format!("C:\\{WORKSPACE_SENTINEL}\\repo")),
+            git_branch: Some(BRANCH_SENTINEL.to_string()),
+            tags: vec![TAG_SENTINEL.to_string()],
+            metadata: Some(json!({ "prompt": METADATA_SENTINEL })),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let secret = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339();
+    daemon
+        .state
+        .store
+        .insert_guard_event(NewGuardEvent {
+            session_id: session.id.clone(),
+            step_id: None,
+            rule_id: "test.status.leak".to_string(),
+            kind: GuardRuleKind::DangerousCommand,
+            action: GuardAction::Pause,
+            severity: GuardSeverity::Critical,
+            status: GuardEventStatus::Pending,
+            title: GUARD_TITLE_SENTINEL.to_string(),
+            description: GUARD_DESCRIPTION_SENTINEL.to_string(),
+            command: Some(format!("rm -rf / # {COMMAND_SENTINEL} {secret}")),
+            evidence: vec![GuardEvidence {
+                field: Some("command".to_string()),
+                excerpt: Some(format!("{EVIDENCE_SENTINEL} {secret}")),
+                path: Some(format!("C:\\{EVIDENCE_PATH_SENTINEL}")),
+                line: Some(4),
+                metadata: Some(json!({ "secret": EVIDENCE_METADATA_SENTINEL })),
+            }],
+            metadata: Some(json!({ "secret": GUARD_METADATA_SENTINEL })),
+            approval_nonce: Some(NONCE_SENTINEL.to_string()),
+            approval_expires_at: Some(expires_at),
+        })
+        .unwrap();
+
+    let registered: Value = client
+        .post(format!("{host}/api/agents/register"))
+        .headers(host_headers(&daemon))
+        .json(&json!({
+            "agentName": "Terminal Agent",
+            "projectName": "repo",
+            "workingDir": format!("C:\\{WORKDIR_SENTINEL}\\repo"),
+            "adapter": "opencode",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let agent_id = registered["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    daemon
+        .state
+        .store
+        .insert_agent_event(
+            &agent_id,
+            "Terminal Agent",
+            "repo",
+            &AgentEventInput {
+                event_type: AgentEventType::Question,
+                message: TERMINAL_MESSAGE_SENTINEL.to_string(),
+                metadata: Some(json!({ "prompt": EVENT_METADATA_SENTINEL })),
+            },
+        )
+        .unwrap();
+
+    let endpoints = [
+        "/api/remote/session".to_string(),
+        "/api/remote/overview".to_string(),
+        "/api/remote/sessions".to_string(),
+        format!("/api/remote/sessions/{}", session.id),
+        "/api/remote/guards/events".to_string(),
+        "/api/remote/agents".to_string(),
+        "/api/remote/agent-events".to_string(),
+    ];
+    for path in endpoints {
+        let response = client
+            .get(format!("{remote}{path}"))
+            .bearer_auth(&device.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let body = response.text().await.unwrap();
+        assert_no_status_leak(&path, &body);
+        assert!(
+            !body.contains(secret),
+            "{path} leaked a raw credential to a status-only device: {body}"
+        );
+    }
+
+    // The guard list keeps only risk, rule class, and a neutral label.
+    let guards: Value = client
+        .get(format!("{remote}/api/remote/guards/events"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let event = guards["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["ruleId"] == "test.status.leak")
+        .expect("the status device sees the approval");
+    assert_eq!(event["title"], "Approval requested");
+    assert_eq!(event["ruleName"], "Dangerous command");
+    assert_eq!(event["severity"], "critical");
+    assert!(event.get("command").is_none());
+    assert!(event.get("evidence").is_none());
+    assert!(event.get("description").is_none());
+    assert!(event.get("approvalNonce").is_none());
+
+    // The flight keeps its ordinal and agent but loses the prompt title, path,
+    // branch, source label, tags, and metadata.
+    let sessions: Value = client
+        .get(format!("{remote}/api/remote/sessions"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let flight = sessions["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == session.id)
+        .expect("the status device sees the flight");
+    let title = flight["title"].as_str().unwrap();
+    assert!(
+        title.starts_with("Flight ") && title.ends_with("Sentinel Agent"),
+        "unexpected neutral title: {title}"
+    );
+    for key in [
+        "workspacePath",
+        "gitBranch",
+        "gitBaseCommit",
+        "sourceLabel",
+        "tags",
+        "metadata",
+    ] {
+        assert!(flight.get(key).is_none(), "status flight leaked {key}");
+    }
+
+    // The agent list and inbox lose workspace and terminal metadata.
+    let agents: Value = client
+        .get(format!("{remote}/api/remote/agents"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let agent = agents["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["sessionId"] == agent_id)
+        .expect("the status device sees the agent");
+    assert!(agent.get("workingDir").is_none());
+    let inbox: Value = client
+        .get(format!("{remote}/api/remote/agent-events"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let event = inbox["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["sessionId"] == agent_id)
+        .expect("the status device sees the inbox event");
+    assert_eq!(event["type"], "question");
+    assert!(event.get("message").is_none());
+    assert!(event.get("metadata").is_none());
+
+    // A live ticket carries no content either.
+    let ticket = client
+        .post(format!("{remote}/api/remote/ws-ticket"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ticket.status(), StatusCode::OK);
+    assert_no_status_leak("/api/remote/ws-ticket", &ticket.text().await.unwrap());
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn respond_and_content_scopes_see_redacted_guard_evidence() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let content = pair_device(&daemon, &remote, "Content", None).await;
+    set_scopes(
+        &daemon,
+        &content.id,
+        &["view:status", "view:content"],
+        false,
+    )
+    .await;
+    let responder = pair_device(&daemon, &remote, "Responder", Some("123456")).await;
+    set_scopes(&daemon, &responder.id, &["view:status", "respond"], true).await;
+
+    let session = daemon
+        .state
+        .store
+        .create_session(NewSession {
+            title: "Guard evidence flight".to_string(),
+            source: SessionSource::Proxy,
+            capture_mode: CaptureMode::Proxy,
+            status: SessionStatus::Active,
+            ..Default::default()
+        })
+        .unwrap();
+    let secret = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339();
+    daemon
+        .state
+        .store
+        .insert_guard_event(NewGuardEvent {
+            session_id: session.id.clone(),
+            step_id: None,
+            rule_id: "test.content.guard".to_string(),
+            kind: GuardRuleKind::DangerousCommand,
+            action: GuardAction::Pause,
+            severity: GuardSeverity::Critical,
+            status: GuardEventStatus::Pending,
+            title: GUARD_TITLE_SENTINEL.to_string(),
+            description: GUARD_DESCRIPTION_SENTINEL.to_string(),
+            command: Some(format!("rm -rf / # {COMMAND_SENTINEL} {secret}")),
+            evidence: vec![GuardEvidence {
+                field: Some("command".to_string()),
+                excerpt: Some(format!("{EVIDENCE_SENTINEL} {secret}")),
+                path: Some(format!("C:\\{EVIDENCE_PATH_SENTINEL}")),
+                line: Some(4),
+                metadata: None,
+            }],
+            metadata: None,
+            approval_nonce: Some(NONCE_SENTINEL.to_string()),
+            approval_expires_at: Some(expires_at),
+        })
+        .unwrap();
+
+    for (label, device, expect_nonce) in [
+        ("view:content", &content, false),
+        ("respond", &responder, true),
+    ] {
+        let guards: Value = client
+            .get(format!("{remote}/api/remote/guards/events"))
+            .bearer_auth(&device.token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let event = guards["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["ruleId"] == "test.content.guard")
+            .unwrap_or_else(|| panic!("{label} should see the approval"));
+        assert_eq!(event["title"], GUARD_TITLE_SENTINEL, "{label}");
+        assert_eq!(event["description"], GUARD_DESCRIPTION_SENTINEL, "{label}");
+        let command = event["command"].as_str().unwrap();
+        assert!(command.contains(COMMAND_SENTINEL), "{label}");
+        assert!(!command.contains(secret), "{label} leaked a raw credential");
+        let excerpt = event["evidence"][0]["excerpt"].as_str().unwrap();
+        assert!(excerpt.contains(EVIDENCE_SENTINEL), "{label}");
+        assert!(!excerpt.contains(secret), "{label} leaked a raw credential");
+        if expect_nonce {
+            assert_eq!(event["approvalNonce"], NONCE_SENTINEL, "{label}");
+        } else {
+            assert!(
+                event.get("approvalNonce").is_none(),
+                "{label} must not receive the approval nonce"
+            );
+        }
+    }
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn status_live_events_strip_titles_messages_and_paths() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let device = pair_device(&daemon, &remote, "Live status", None).await;
+    set_scopes(&daemon, &device.id, &["view:status"], true).await;
+
+    let ticket: Value = client
+        .post(format!("{remote}/api/remote/ws-ticket"))
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let protocol = ticket["protocol"].as_str().unwrap().to_string();
+    let ws_url = remote.replacen("http://", "ws://", 1) + "/api/remote/live";
+    let mut request = ws_url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("sec-websocket-protocol", protocol.parse().unwrap());
+    let (mut socket, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("the live socket connects");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    let ready = tokio::time::timeout(Duration::from_secs(5), socket.next())
+        .await
+        .expect("a live.ready message")
+        .expect("a message")
+        .expect("a valid frame");
+    assert!(ready.to_text().unwrap().contains("live.ready"));
+
+    let session = daemon
+        .state
+        .store
+        .create_session(NewSession {
+            title: PROMPT_SENTINEL.to_string(),
+            source: SessionSource::Manual,
+            capture_mode: CaptureMode::Pty,
+            status: SessionStatus::Active,
+            ..Default::default()
+        })
+        .unwrap();
+    daemon.state.live.publish(
+        "session.started",
+        Some(&session.id),
+        None,
+        json!({
+            "title": PROMPT_SENTINEL,
+            "source": "manual",
+            "captureMode": "pty",
+            "status": "active",
+            "agentName": "Live Sentinel Agent",
+            "projectName": "repo",
+            "workspacePath": format!("C:\\{WORKSPACE_SENTINEL}"),
+        }),
+    );
+    daemon.state.live.publish(
+        "agent.started",
+        Some(&session.id),
+        None,
+        json!({
+            "session": {
+                "sessionId": session.id,
+                "agentName": "Live Sentinel Agent",
+                "projectName": "repo",
+                "workingDir": format!("C:\\{WORKDIR_SENTINEL}"),
+                "status": "running",
+            }
+        }),
+    );
+    daemon.state.live.publish(
+        "guard.triggered",
+        Some(&session.id),
+        None,
+        json!({
+            "ruleId": "test.live.guard",
+            "kind": "dangerous_command",
+            "action": "pause",
+            "severity": "critical",
+            "status": "pending",
+            "title": GUARD_TITLE_SENTINEL,
+            "description": GUARD_DESCRIPTION_SENTINEL,
+            "command": COMMAND_SENTINEL,
+            "evidence": [EVIDENCE_SENTINEL],
+        }),
+    );
+    daemon.state.live.publish(
+        "agent.event",
+        Some(&session.id),
+        None,
+        json!({
+            "event": {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "sessionId": session.id,
+                "agentName": "Live Sentinel Agent",
+                "projectName": "repo",
+                "type": "question",
+                "message": TERMINAL_MESSAGE_SENTINEL,
+                "status": "open",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "metadata": { "prompt": EVENT_METADATA_SENTINEL },
+            }
+        }),
+    );
+    daemon.state.live.publish(
+        "agent.output",
+        Some(&session.id),
+        None,
+        json!({ "sessionId": session.id, "sequence": 1, "data": TERMINAL_OUTPUT_SENTINEL }),
+    );
+
+    let mut saw_started = false;
+    let mut saw_guard = false;
+    let mut saw_agent_event = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !(saw_started && saw_guard && saw_agent_event) {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let frame = match tokio::time::timeout(remaining, socket.next()).await {
+            Ok(Some(Ok(frame))) => frame,
+            Ok(Some(Err(_))) | Ok(None) | Err(_) => break,
+        };
+        let Message::Text(text) = frame else {
+            continue;
+        };
+        assert_no_status_leak("/api/remote/live", &text);
+        if text.contains("\"session.started\"") {
+            let value: Value = serde_json::from_str(&text).unwrap();
+            let title = value["payload"]["title"].as_str().unwrap();
+            assert!(
+                title.starts_with("Flight ") && title.ends_with("Live Sentinel Agent"),
+                "unexpected neutral live title: {title}"
+            );
+            assert!(value["payload"].get("workspacePath").is_none());
+            saw_started = true;
+        }
+        if text.contains("\"guard.triggered\"") {
+            let value: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["payload"]["title"], "Approval requested");
+            assert!(value["payload"].get("command").is_none());
+            assert!(value["payload"].get("evidence").is_none());
+            assert!(value["payload"].get("description").is_none());
+            saw_guard = true;
+        }
+        if text.contains("\"agent.event\"") && !text.contains("\"agent.event.acknowledged\"") {
+            let value: Value = serde_json::from_str(&text).unwrap();
+            assert!(value["payload"]["event"].get("message").is_none());
+            assert!(value["payload"]["event"].get("metadata").is_none());
+            saw_agent_event = true;
+        }
+    }
+    assert!(saw_started, "the status socket should see session.started");
+    assert!(saw_guard, "the status socket should see guard.triggered");
+    assert!(
+        saw_agent_event,
+        "the status socket should see the sanitized agent event"
+    );
 
     daemon.shutdown().await.unwrap();
 }

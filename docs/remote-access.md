@@ -259,7 +259,7 @@ Scopes are enforced by the daemon, not by hiding buttons in the UI.
 
 | Scope | What it allows | Notes |
 | --- | --- | --- |
-| **Status** (`view:status`) | See flights, sessions, agents, costs, counts, pending approvals, and inbox events. | Every device starts here. |
+| **Status** (`view:status`) | See flights, sessions, agents, costs, counts, pending approvals, and inbox events. | Every device starts here. Titles are neutral (`Flight 7 · Claude Code`); prompts, commands, paths, terminal text, tags, and metadata are redacted. |
 | **Content** (`view:content`) | Read terminal output, steps, diffs, prompts, and responses. | Opt-in. The host warns: *"Content can read code and anything your agent printed."* |
 | **Respond** | Approve or deny guarded actions. | High-risk actions also need the pairing PIN. |
 | **Prompt** | Type into an agent session that is already running. | The host warns: *"Prompt lets this device make your agent run commands."* |
@@ -497,15 +497,15 @@ The remote listener exposes only the routes below. The same matrix is shown in
 | POST | `/api/remote/pair/claim` | none | Pairing code + device name |
 | POST | `/api/remote/pair/claim/{id}` | none | One-time claim secret |
 | GET | `/api/remote/session` | view:status | This device's scopes |
-| GET | `/api/remote/overview` | view:status | Flights and totals |
-| GET | `/api/remote/sessions` | view:status | Flight list |
-| GET | `/api/remote/sessions/{id}` | view:status | Flight detail |
+| GET | `/api/remote/overview` | view:status | Flights and totals; neutral titles without `view:content` |
+| GET | `/api/remote/sessions` | view:status | Flight list; neutral titles without `view:content` |
+| GET | `/api/remote/sessions/{id}` | view:status | Flight detail; redacted without `view:content` |
 | GET | `/api/remote/sessions/{id}/steps` | view:content | Captured steps, prompts, and responses |
-| GET | `/api/remote/guards/events` | view:status | Pending and past approvals |
-| GET | `/api/remote/agents` | view:status | Running agent sessions |
+| GET | `/api/remote/guards/events` | view:status | Pending and past approvals; status-only devices get severity, `ruleName`, and `Approval requested` |
+| GET | `/api/remote/agents` | view:status | Running agent sessions; `workingDir` requires `view:content` |
 | GET | `/api/remote/agents/{id}` | view:content | Sanitized terminal output |
-| GET | `/api/remote/agent-events` | view:status | Inbox events |
-| GET | `/api/remote/live` | view:status | WebSocket ticket in `Sec-WebSocket-Protocol`; content events need `view:content` |
+| GET | `/api/remote/agent-events` | view:status | Inbox events; `message` and `metadata` require `view:content` |
+| GET | `/api/remote/live` | view:status | WebSocket ticket in `Sec-WebSocket-Protocol`; content events need `view:content`; unknown payloads are dropped |
 | POST | `/api/remote/ws-ticket` | view:status | 30-second single-use ticket |
 | POST | `/api/remote/guards/events/{id}/decision` | respond | Approve or deny; high risk needs the pairing PIN |
 | POST | `/api/remote/agents/{id}/prompt` | prompt | Keystrokes only; host confirmation by default |

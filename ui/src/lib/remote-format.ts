@@ -57,12 +57,13 @@ export function remoteAuditKindKey(event: string): MessageKey {
  * that rule so the card explains it before a device tries to answer.
  */
 export function isAuthPrompt(event: GuardEvent): boolean {
+  // Status-only devices receive a redacted guard event without evidence.
   const text = [
     event.title,
     event.description,
     event.ruleId,
     event.command ?? '',
-    ...event.evidence.map((entry) => entry.excerpt ?? ''),
+    ...(event.evidence ?? []).map((entry) => entry.excerpt ?? ''),
   ]
     .join(' ')
     .toLowerCase();

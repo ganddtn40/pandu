@@ -19,8 +19,10 @@ use cockpit_core::guard::{
     ApprovalChoice, ApprovalDecisionInput, GuardEvent, GuardRuleKind, GuardSeverity,
 };
 use cockpit_core::ids::is_id;
+use cockpit_core::model::LiveEvent;
+use cockpit_core::redact::{CaptureLocation, RedactionCollector, redact_json};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::api as loopback;
@@ -265,22 +267,50 @@ async fn session_info(
     }))
 }
 
-async fn overview(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    loopback::overview(State(state)).await
+async fn overview(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+) -> Result<Json<Value>, ApiError> {
+    let Json(mut payload) = loopback::overview(State(state.clone())).await?;
+    if !principal.allows(Scope::ViewContent) {
+        for key in ["activeSessions", "recentSessions"] {
+            if let Some(sessions) = payload.get_mut(key).and_then(Value::as_array_mut) {
+                for session in sessions {
+                    *session = status_session_value(&state, session);
+                }
+            }
+        }
+    }
+    Ok(Json(payload))
 }
 
 async fn list_sessions(
     State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
     Query(query): Query<loopback::SessionQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    loopback::list_sessions(State(state), Query(query)).await
+    let Json(mut payload) = loopback::list_sessions(State(state.clone()), Query(query)).await?;
+    if !principal.allows(Scope::ViewContent) {
+        if let Some(sessions) = payload.get_mut("sessions").and_then(Value::as_array_mut) {
+            for session in sessions {
+                *session = status_session_value(&state, session);
+            }
+        }
+    }
+    Ok(Json(payload))
 }
 
 async fn get_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    loopback::get_session(State(state), Path(id)).await
+    let Json(session) = loopback::get_session(State(state.clone()), Path(id)).await?;
+    if principal.allows(Scope::ViewContent) {
+        Ok(Json(session))
+    } else {
+        Ok(Json(status_session_value(&state, &session)))
+    }
 }
 
 async fn list_steps(
@@ -299,13 +329,31 @@ async fn list_steps(
 
 async fn list_guard_events(
     State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
     Query(query): Query<loopback::GuardEventQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    loopback::list_guard_events(State(state), Query(query)).await
+    let Json(mut payload) = loopback::list_guard_events(State(state.clone()), Query(query)).await?;
+    if let Some(events) = payload.get_mut("events").and_then(Value::as_array_mut) {
+        for event in events {
+            *event = remote_guard_event(event, &principal);
+        }
+    }
+    Ok(Json(payload))
 }
 
-async fn list_agents(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    loopback::list_agents(State(state)).await
+async fn list_agents(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+) -> Result<Json<Value>, ApiError> {
+    let Json(mut payload) = loopback::list_agents(State(state)).await?;
+    if !principal.allows(Scope::ViewContent) {
+        if let Some(sessions) = payload.get_mut("sessions").and_then(Value::as_array_mut) {
+            for session in sessions {
+                strip_agent_status_fields(session);
+            }
+        }
+    }
+    Ok(Json(payload))
 }
 
 async fn get_agent(
@@ -324,9 +372,147 @@ async fn get_agent(
 
 async fn list_agent_events(
     State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
     Query(query): Query<loopback::AgentEventQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    loopback::list_agent_events(State(state), Query(query)).await
+    let Json(mut payload) = loopback::list_agent_events(State(state), Query(query)).await?;
+    if !principal.allows(Scope::ViewContent) {
+        if let Some(events) = payload.get_mut("events").and_then(Value::as_array_mut) {
+            for event in events {
+                strip_agent_event_status_fields(event);
+            }
+        }
+    }
+    Ok(Json(payload))
+}
+
+/// A status-only flight never exposes its prompt-derived title, workspace, or
+/// free-form metadata. The ordinal and agent name are enough to recognize it.
+fn status_session_value(state: &AppState, session: &Value) -> Value {
+    let id = session
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let agent_name = session
+        .pointer("/agent/name")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let mut value = Map::new();
+    value.insert("id".to_string(), json!(id));
+    value.insert(
+        "title".to_string(),
+        json!(neutral_flight_title(state, id, agent_name.as_deref())),
+    );
+    for key in [
+        "source",
+        "captureMode",
+        "status",
+        "protocol",
+        "provider",
+        "model",
+        "startedAt",
+        "endedAt",
+        "durationMs",
+        "totals",
+    ] {
+        if let Some(field) = session.get(key) {
+            value.insert(key.to_string(), field.clone());
+        }
+    }
+    if let Some(name) = agent_name {
+        value.insert("agent".to_string(), json!({ "name": name }));
+    }
+    Value::Object(value)
+}
+
+fn neutral_flight_title(state: &AppState, session_id: &str, agent: Option<&str>) -> String {
+    let ordinal = state.store.session_ordinal(session_id).ok().flatten();
+    let agent = agent
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Agent");
+    match ordinal {
+        Some(ordinal) if ordinal > 0 => format!("Flight {ordinal} · {agent}"),
+        _ => format!("Flight · {agent}"),
+    }
+}
+
+/// A guard event is content. `view:status` gets only the risk level, the rule
+/// class, and a neutral label. `respond` and `view:content` may see the full
+/// event, but secrets are masked first and the approval nonce stays exclusive
+/// to Respond.
+fn remote_guard_event(event: &Value, principal: &RemotePrincipal) -> Value {
+    let content = principal.allows(Scope::ViewContent);
+    let respond = principal.allows(Scope::Respond);
+    if !content && !respond {
+        return status_guard_event(event);
+    }
+    redacted_guard_event(event, respond)
+}
+
+fn status_guard_event(event: &Value) -> Value {
+    let kind = event
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("custom");
+    let mut value = Map::new();
+    for key in [
+        "id",
+        "sessionId",
+        "stepId",
+        "ruleId",
+        "kind",
+        "action",
+        "severity",
+        "status",
+        "requestedAt",
+        "approvalExpiresAt",
+        "resolvedAt",
+    ] {
+        if let Some(field) = event.get(key) {
+            value.insert(key.to_string(), field.clone());
+        }
+    }
+    value.insert("ruleName".to_string(), json!(guard_rule_name(kind)));
+    value.insert("title".to_string(), json!("Approval requested"));
+    Value::Object(value)
+}
+
+fn guard_rule_name(kind: &str) -> &'static str {
+    match kind {
+        "secret" => "Secret scan",
+        "dangerous_command" => "Dangerous command",
+        "loop" => "Loop detection",
+        "budget" => "Budget",
+        "egress" => "Network egress",
+        _ => "Custom rule",
+    }
+}
+
+fn redacted_guard_event(event: &Value, include_nonce: bool) -> Value {
+    let mut collector = RedactionCollector::new();
+    let mut value = redact_json(event, &mut collector, CaptureLocation::RequestBody);
+    if let Some(object) = value.as_object_mut() {
+        if !include_nonce {
+            object.remove("approvalNonce");
+        }
+    }
+    value
+}
+
+fn strip_agent_status_fields(session: &mut Value) {
+    if let Some(object) = session.as_object_mut() {
+        object.remove("workingDir");
+        object.remove("workspacePath");
+        object.remove("workspace");
+    }
+}
+
+fn strip_agent_event_status_fields(event: &mut Value) {
+    if let Some(object) = event.as_object_mut() {
+        object.remove("message");
+        object.remove("metadata");
+    }
 }
 
 // ----- Remote decisions ---------------------------------------------------
@@ -489,7 +675,8 @@ async fn guard_decision(
                 None,
             );
             state.remote.send_notification("approval").await;
-            Json(json!({ "event": resolved })).into_response()
+            let event = redacted_guard_event(&json!(resolved), true);
+            Json(json!({ "event": event })).into_response()
         }
         Err(error) => {
             let status = StatusCode::from_u16(error.status()).unwrap_or(StatusCode::BAD_REQUEST);
@@ -813,9 +1000,9 @@ async fn remote_live_socket(mut socket: WebSocket, state: AppState, principal: R
         // Status-only devices get the event stream, not terminal output or
         // file paths. Content events are skipped but still advance the cursor
         // so a later content grant does not replay old output.
-        if event_needs_content(&event.event_type) && !content {
+        let Some(event) = sanitize_live_event(&state, &event, content) else {
             continue;
-        }
+        };
         if send_json(&mut socket, &event).await.is_err() {
             return;
         }
@@ -841,11 +1028,10 @@ async fn remote_live_socket(mut socket: WebSocket, state: AppState, principal: R
                             return;
                         }
                         content = current.allows(Scope::ViewContent);
-                        if event_needs_content(&event.event_type) && !content {
-                            last_sequence = event.sequence;
-                            continue;
-                        }
                         last_sequence = event.sequence;
+                        let Some(event) = sanitize_live_event(&state, &event, content) else {
+                            continue;
+                        };
                         if send_json(&mut socket, &event).await.is_err() {
                             return;
                         }
@@ -1240,6 +1426,103 @@ fn client_identity(request: &axum::extract::Request) -> ClientIdentity {
 /// still receives the event stream, but these are filtered out.
 fn event_needs_content(event_type: &str) -> bool {
     matches!(event_type, "agent.output" | "tool.completed")
+}
+
+/// A status-only socket must not receive prompt-derived titles, commands,
+/// evidence, workspace paths, terminal messages, or unknown payloads. Known
+/// status events keep their counts and state; everything else is reduced to an
+/// empty payload. Content devices still get guard payloads with secrets masked.
+fn sanitize_live_event(state: &AppState, event: &LiveEvent, content: bool) -> Option<LiveEvent> {
+    if event_needs_content(&event.event_type) && !content {
+        return None;
+    }
+    let mut sanitized = event.clone();
+    if content {
+        if event.event_type.starts_with("guard.") {
+            let mut collector = RedactionCollector::new();
+            sanitized.payload =
+                redact_json(&event.payload, &mut collector, CaptureLocation::RequestBody);
+        }
+        return Some(sanitized);
+    }
+    sanitized.payload = status_live_payload(state, event);
+    Some(sanitized)
+}
+
+fn status_live_payload(state: &AppState, event: &LiveEvent) -> Value {
+    match event.event_type.as_str() {
+        "session.started" => {
+            let mut payload = event.payload.clone();
+            if let Some(object) = payload.as_object_mut() {
+                let agent = object
+                    .get("agentName")
+                    .or_else(|| object.get("agent"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let title = event
+                    .session_id
+                    .as_deref()
+                    .map(|id| neutral_flight_title(state, id, agent.as_deref()))
+                    .unwrap_or_else(|| "Flight".to_string());
+                object.insert("title".to_string(), Value::String(title));
+                object.remove("workspacePath");
+                object.remove("gitBranch");
+            }
+            payload
+        }
+        "guard.triggered" | "guard.resolved" => {
+            let mut payload = event.payload.clone();
+            if let Some(object) = payload.as_object_mut() {
+                object.insert("title".to_string(), json!("Approval requested"));
+                for key in [
+                    "command",
+                    "evidence",
+                    "description",
+                    "metadata",
+                    "resolvedBy",
+                    "resolutionNote",
+                ] {
+                    object.remove(key);
+                }
+            }
+            payload
+        }
+        "agent.started" => {
+            let mut payload = event.payload.clone();
+            if let Some(session) = payload.get_mut("session").and_then(Value::as_object_mut) {
+                session.remove("workingDir");
+                session.remove("workspacePath");
+            }
+            payload
+        }
+        "agent.event" => {
+            let mut payload = event.payload.clone();
+            if let Some(agent_event) = payload.get_mut("event").and_then(Value::as_object_mut) {
+                agent_event.remove("message");
+                agent_event.remove("metadata");
+            }
+            payload
+        }
+        // These payloads contain counts, states, static labels, or already
+        // sanitized terminal-free metadata.
+        "session.completed"
+        | "session.ended"
+        | "session.updated"
+        | "step.started"
+        | "step.completed"
+        | "snapshot.created"
+        | "budget.warning"
+        | "budget.exceeded"
+        | "agent.ended"
+        | "agent.needs_you"
+        | "agent.awaiting_prompt"
+        | "agent.event.acknowledged"
+        | "remote.prompt"
+        | "remote.prompt.sent" => event.payload.clone(),
+        // Unknown event types are not trusted to be safe for a status-only
+        // device. The socket still advances, but the payload is dropped.
+        _ => json!({}),
+    }
 }
 
 fn require_scope(principal: &RemotePrincipal, scope: Scope) -> Option<Response> {

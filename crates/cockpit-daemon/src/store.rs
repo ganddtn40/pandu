@@ -898,6 +898,21 @@ impl Store {
         Ok(count as u64)
     }
 
+    /// One-based creation order for a session. Remote status views use this to
+    /// label a flight without exposing its prompt-derived title.
+    pub fn session_ordinal(&self, id: &str) -> Result<Option<u64>> {
+        let connection = self.lock()?;
+        let ordinal: Option<i64> = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM sessions WHERE rowid <= s.rowid)
+                 FROM sessions s WHERE s.id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(ordinal.map(|value| value.max(0) as u64))
+    }
+
     pub fn list_active_sessions(&self) -> Result<Vec<Session>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare(&format!(
