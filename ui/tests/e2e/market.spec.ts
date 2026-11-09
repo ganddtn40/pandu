@@ -12,6 +12,8 @@ const USER_HOME = path.join(MARKET_HOME, 'user');
 const PROJECT_CONFIG = path.join(MARKET_HOME, 'workspace', '.mcp.json');
 const MANIFEST_DIR = path.join(MARKET_HOME, 'market', 'installed');
 const SECRET_VALUE = 'e2e-secret-value';
+const COMMIT_SHA = '1'.repeat(40);
+const CONTENT_SHA = '9c2240678e75338d8b079a83e5c3c8f60638b64c75eca9dad5acfdbcc4d0886e';
 
 const SKILL_ID = 'example-changelog-writer';
 const OTHER_SKILL_ID = 'example-commit-messages';
@@ -81,6 +83,15 @@ test('catalogue, instant search, filters and detail', async ({ page }) => {
   ).toBeVisible();
   await expect(sheet.getByText('filesystem:read')).toBeVisible();
   await expect(sheet.getByText('README', { exact: true })).toBeVisible();
+  await expect(sheet.getByText(COMMIT_SHA)).toBeVisible();
+  await expect(sheet.getByText(CONTENT_SHA)).toBeVisible();
+  await expect(sheet.getByText('MIT', { exact: true })).toBeVisible();
+  const repo = sheet.getByRole('link', {
+    name: /https:\/\/github\.com\/cockpit-examples\/commit-messages/,
+  });
+  await expect(repo).toHaveAttribute('rel', 'noopener');
+  await expect(repo).toHaveText('https://github.com/cockpit-examples/commit-messages');
+  await sheet.getByText('Pinned commit').scrollIntoViewIfNeeded();
   await shot(page, 'market-detail.png');
 });
 
@@ -100,10 +111,24 @@ test('skill install preview, installed tab, uninstall and undo', async ({ page }
   await openDetail(page, SKILL_ID);
   await previewInstall(page);
   await expect(page.getByTestId('market-confirm-install')).toBeEnabled();
+  await expect(page.getByTestId('market-skill-warning')).toContainText(
+    'instructions for your agent',
+  );
+  const skillFile = path.join(
+    USER_HOME,
+    '.claude',
+    'skills',
+    'example-changelog-writer',
+    'SKILL.md',
+  );
+  await expect(page.getByTestId('market-preview-file-path').first()).toHaveText(skillFile);
+  await expect(page.getByTestId('market-preview-file-display').first()).toHaveText(
+    '~/.claude/skills/example-changelog-writer/SKILL.md',
+  );
 
   const sheet = page.getByTestId('market-sheet');
   await sheet.getByText('Show diff').first().click();
-  await expect(sheet.getByText('SKILL.md')).toBeVisible();
+  await expect(sheet.locator('.market-diff pre').first()).toContainText('# Changelog Writer');
   await shot(page, 'market-preview.png');
 
   await page.getByTestId('market-confirm-install').click();
@@ -157,6 +182,8 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
   const sheet = page.getByTestId('market-sheet');
   const secret = page.getByTestId('market-secret-WEATHER_API_KEY');
   await expect(secret).toBeVisible();
+  await expect(page.getByTestId('market-config-path')).toHaveText(PROJECT_CONFIG);
+  await expect(page.getByTestId('market-config-display')).toHaveText('.mcp.json');
   await expect(page.getByTestId('market-confirm-install')).toBeDisabled();
   await secret.fill('e2e-secret-value');
   await expect(page.getByTestId('market-confirm-install')).toBeEnabled();

@@ -398,7 +398,9 @@ fn resolve_one(
                     "`{path}` escapes the user home."
                 )));
             }
-            let actual = context.user_home.join(rest);
+            let actual = context
+                .user_home
+                .join(rest.replace('/', std::path::MAIN_SEPARATOR_STR));
             Ok((actual, format!("~/{rest}")))
         }
         InstallScope::Project => {
@@ -416,7 +418,7 @@ fn resolve_one(
                     "`{path}` is not a safe project path."
                 )));
             }
-            let actual = workspace.join(&normalized);
+            let actual = workspace.join(normalized.replace('/', std::path::MAIN_SEPARATOR_STR));
             Ok((actual, normalized))
         }
     }
@@ -721,6 +723,38 @@ verified = true
         assert_eq!(claude["env"]["DEMO_KEY"], "value");
         let opencode = render_mcp_value(&entry, McpStyle::OpenCode, Some(&secrets)).unwrap();
         assert_eq!(opencode["environment"]["DEMO_KEY"], "{env:DEMO_KEY}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolved_windows_paths_use_one_separator() {
+        let registry = registry();
+        let context = TargetContext {
+            adapters: &registry,
+            user_home: Path::new(r"C:\Users\tester"),
+            workspace: Some(Path::new(r"C:\work\project")),
+        };
+        let skill = resolve(
+            &entry(MarketKind::Skill),
+            "claude-code",
+            InstallScope::User,
+            &context,
+        )
+        .unwrap();
+        let root = skill.skill_root().unwrap();
+        assert_eq!(root, Path::new(r"C:\Users\tester\.claude\skills\demo"));
+        assert!(!root.to_string_lossy().contains('/'), "{}", root.display());
+        let mcp = resolve(
+            &entry(MarketKind::Mcp),
+            "claude-code",
+            InstallScope::Project,
+            &context,
+        )
+        .unwrap();
+        let (path, display, _, _, _) = mcp.mcp().unwrap();
+        assert_eq!(path, Path::new(r"C:\work\project\.mcp.json"));
+        assert!(!path.to_string_lossy().contains('/'), "{}", path.display());
+        assert_eq!(display, ".mcp.json");
     }
 
     #[test]

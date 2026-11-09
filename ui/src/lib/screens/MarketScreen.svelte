@@ -1172,15 +1172,19 @@
                 <div>
                   <dt>{t('market.source')}</dt>
                   <dd>
-                    <a class="text-link" href={detail.source.repo} target="_blank" rel="noreferrer noopener">
-                      {detail.source.repo.replace('https://github.com/', '')}
+                    <a class="text-link" href={detail.source.repo} target="_blank" rel="noopener">
+                      {detail.source.repo}
                       <Icon name="external" size={13} />
                     </a>
                   </dd>
                 </div>
                 <div>
                   <dt>{t('market.commit')}</dt>
-                  <dd><span class="market-mono">{detail.source.commit.slice(0, 12)}</span></dd>
+                  <dd><span class="market-mono">{detail.source.commit}</span></dd>
+                </div>
+                <div>
+                  <dt>{t('market.sha256')}</dt>
+                  <dd><span class="market-mono">{detail.source.contentSha256}</span></dd>
                 </div>
                 <div>
                   <dt>{t('market.license')}</dt>
@@ -1207,7 +1211,7 @@
                   <div>
                     <dt>{t('market.openSource')}</dt>
                     <dd>
-                      <a class="text-link" href={detail.homepage} target="_blank" rel="noreferrer noopener">
+                      <a class="text-link" href={detail.homepage} target="_blank" rel="noopener">
                         {detail.homepage}
                         <Icon name="external" size={13} />
                       </a>
@@ -1261,6 +1265,12 @@
             </div>
 
             <p class="market-detail-lede">{t('market.previewBody')}</p>
+
+            {#if preview.kind === 'skill'}
+              <div class="market-warning" data-testid="market-skill-warning">
+                <p>{t('market.skillWarning')}</p>
+              </div>
+            {/if}
 
             {#if preview.update}
               <div class="market-warning">
@@ -1338,7 +1348,10 @@
                     {#each preview.files as file (file.path)}
                       <li>
                         <div class="market-preview-file__head">
-                          <span class="market-mono">{file.displayPath}</span>
+                          <span class="market-path">
+                            <span class="market-mono" data-testid="market-preview-file-path">{file.path}</span>
+                            <span class="market-muted market-path__display" data-testid="market-preview-file-display">{file.displayPath}</span>
+                          </span>
                           <span class={`status-pill ${actionClass(file.action)}`}>
                             {t(actionKey(file.action))}
                           </span>
@@ -1367,7 +1380,10 @@
                 <section class="sheet-section">
                   <div class="sheet-section__head">
                     <h3>{t('market.willConfigure')}</h3>
-                    <p class="market-mono">{preview.config.displayPath}</p>
+                    <p class="market-path">
+                      <span class="market-mono" data-testid="market-config-path">{preview.config.path}</span>
+                      <span class="market-muted market-path__display" data-testid="market-config-display">{preview.config.displayPath}</span>
+                    </p>
                   </div>
                   <p class="market-muted">
                     {t('market.configKeys')}: <span class="market-mono">{preview.config.keyPath.join(' · ')}</span>

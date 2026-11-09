@@ -401,6 +401,19 @@ async fn skill_install_uninstall_and_undo_round_trip() {
     assert!(preview.conflicts.is_empty());
     assert!(preview.command.is_none());
     assert!(preview.files.iter().all(|file| file.action == "create"));
+    assert!(
+        preview
+            .files
+            .iter()
+            .all(|file| Path::new(&file.path).is_absolute()),
+        "the preview carries resolved absolute paths"
+    );
+    assert!(
+        preview
+            .files
+            .iter()
+            .any(|file| file.display_path.starts_with("~/"))
+    );
 
     let installed = service
         .install(&preview.preview_id, BTreeMap::new())
@@ -513,6 +526,7 @@ async fn mcp_install_edits_project_config_without_losing_comments_or_secrets() {
         .unwrap();
     let config = preview.config.as_ref().expect("MCP preview has a config");
     assert_eq!(config.display_path, ".mcp.json");
+    assert!(Path::new(&config.path).is_absolute());
     assert_eq!(config.secret_names, vec!["WEATHER_API_KEY".to_string()]);
     assert_eq!(
         preview.command.as_deref(),
