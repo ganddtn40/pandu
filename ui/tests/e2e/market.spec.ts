@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase8');
@@ -7,10 +7,14 @@ mkdirSync(SHOTS, { recursive: true });
 
 const MARKET_DAEMON = 'http://127.0.0.1:4323';
 const OFFLINE_DAEMON = 'http://127.0.0.1:4324';
+const STATE_DAEMON = 'http://127.0.0.1:4325';
 const MARKET_HOME = path.resolve('.tmp', 'e2e-market-4323');
 const USER_HOME = path.join(MARKET_HOME, 'user');
 const PROJECT_CONFIG = path.join(MARKET_HOME, 'workspace', '.mcp.json');
 const MANIFEST_DIR = path.join(MARKET_HOME, 'market', 'installed');
+const STATE_HOME = path.resolve('.tmp', 'e2e-market-state-4325');
+const STATE_USER_HOME = path.join(STATE_HOME, 'user');
+const STATE_MANIFEST_DIR = path.join(STATE_HOME, 'market', 'installed');
 const SECRET_VALUE = 'e2e-secret-value';
 const COMMIT_SHA = '1'.repeat(40);
 const CONTENT_SHA = '9c2240678e75338d8b079a83e5c3c8f60638b64c75eca9dad5acfdbcc4d0886e';
@@ -228,6 +232,65 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
   ).toHaveCount(0);
   const after = existsSync(PROJECT_CONFIG) ? readFileSync(PROJECT_CONFIG, 'utf8') : '';
   expect(after).not.toContain('example-weather');
+});
+
+test('installed state badges and the 30 second undo toast', async ({ page }) => {
+  await openMarket(page, STATE_DAEMON);
+  await openDetail(page, SKILL_ID);
+  await previewInstall(page);
+  await page.getByTestId('market-confirm-install').click();
+
+  const sheet = page.getByTestId('market-sheet');
+  await expect(
+    sheet.getByRole('heading', { level: 3, name: `Installed ${SKILL_NAME}` }),
+  ).toBeVisible();
+
+  const toast = page.getByTestId('toast');
+  await expect(toast).toContainText(`Installed ${SKILL_NAME}`);
+  const undo = toast.getByTestId('toast-action');
+  await expect(undo).toHaveText('Undo');
+  // The default toast lasts 3.4 seconds; the install toast must still be there.
+  await page.waitForTimeout(4_000);
+  await expect(toast).toBeVisible();
+
+  await page.getByRole('button', { name: 'Done' }).click();
+
+  const skillFile = path.join(
+    STATE_USER_HOME,
+    '.claude',
+    'skills',
+    'example-changelog-writer',
+    'SKILL.md',
+  );
+  const original = readFileSync(skillFile, 'utf8');
+  writeFileSync(skillFile, `${original}\n\nMy local notes.\n`);
+
+  const manifests = readdirSync(STATE_MANIFEST_DIR).filter((name) => name.endsWith('.json'));
+  expect(manifests).toHaveLength(1);
+  const manifestPath = path.join(STATE_MANIFEST_DIR, manifests[0]);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const originalVersion = manifest.version;
+  manifest.version = '0.9.0';
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+
+  await page.getByTestId('market-tab-installed').click();
+  const installed = page
+    .locator('[data-testid^="market-installed-"]')
+    .filter({ hasText: SKILL_NAME });
+  await expect(installed).toBeVisible();
+  await expect(installed.getByText('Modified since install')).toBeVisible();
+  await expect(installed.getByText('Update available')).toBeVisible();
+  await shot(page, 'market-installed-states.png');
+
+  // Restore the file and version so the toast's Undo can remove the install.
+  writeFileSync(skillFile, original);
+  manifest.version = originalVersion;
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+
+  await undo.click();
+  await expect(page.getByTestId('toast')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="market-installed-"]')).toHaveCount(0);
+  expect(existsSync(skillFile)).toBe(false);
 });
 
 test('offline registry shows the cached banner and blocks refresh', async ({ page }) => {

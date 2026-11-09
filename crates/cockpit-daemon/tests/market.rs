@@ -446,6 +446,7 @@ async fn skill_install_uninstall_and_undo_round_trip() {
     assert_eq!(list.installs.len(), 1);
     assert_eq!(list.installs[0].state, InstallState::Installed);
     assert!(!list.installs[0].needs_attention);
+    assert!(!list.installs[0].modified_since_install);
 
     let removal = service.preview_uninstall(&installed.install_id).unwrap();
     assert_eq!(removal.files_to_remove.len(), 2);
@@ -493,6 +494,10 @@ async fn uninstall_preserves_user_edited_files() {
         std::fs::read_to_string(&skill).unwrap()
     );
     std::fs::write(&skill, &edited).unwrap();
+
+    let list = service.installed_checked().await.unwrap();
+    assert!(list.installs[0].modified_since_install);
+    assert!(list.installs[0].needs_attention);
 
     let removal = service.preview_uninstall(&installed.install_id).unwrap();
     assert!(removal.needs_confirmation);

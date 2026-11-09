@@ -2577,6 +2577,9 @@ pre {
   bottom: 28px;
   left: 50%;
   z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   max-width: min(460px, calc(100vw - 32px));
   padding: 11px 17px;
   border: 1px solid var(--hairline);
@@ -2589,6 +2592,27 @@ pre {
   transform: translateX(-50%);
   pointer-events: none;
   animation: toast-in 0.22s ease both;
+}
+
+.toast__action {
+  pointer-events: auto;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--toast-text) 28%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--toast-text) 8%, transparent);
+  color: var(--toast-text);
+  font: inherit;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.toast__action:hover {
+  background: color-mix(in srgb, var(--toast-text) 14%, transparent);
+}
+
+.toast__action:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
 }
 
 /* -------------------------------------------------------------------------

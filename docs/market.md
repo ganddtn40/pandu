@@ -124,12 +124,19 @@ values.
 ### Result, undo, and uninstall
 
 After a successful install, the result sheet lists what was written and offers
-**Undo**. Undo restores the backup and removes the install record.
+**Undo**. The success toast carries the same **Undo** action for 30 seconds, so a
+mistake can be reverted without reopening the sheet. Undo restores the backup
+and removes the install record.
 
 The **Installed** tab keeps a row for every install:
 
-- **Installed** with an available update shows **Update**. An update is a new
-  preview and a new confirmation; Cockpit never auto-updates.
+- **Installed** with an available update shows an **Update available** pill and
+  **Update**. An update is a new preview and a new confirmation; Cockpit never
+  auto-updates.
+- **Modified since install** appears when any installed file no longer matches
+  the recorded hash, or the configuration Cockpit wrote changed. The row also
+  shows **Needs attention** with the specifics. Local edits never trigger an
+  update or an automatic overwrite.
 - **Revoked** means the signed revocation list marks the entry as unsafe or
   broken. The row explains why and offers **Remove now**.
 - **Needs attention** means a file or configuration key changed on disk, is
@@ -144,6 +151,8 @@ current value still matches what Cockpit wrote. A backup is kept so the removal
 can be undone.
 
 ![Installed entries](screenshots/phase8/market-installed.png)
+
+![Installed states and the undo toast](screenshots/phase8/market-installed-states.png)
 
 ## The install pipeline
 

@@ -474,8 +474,17 @@
     installError = '';
     try {
       outcome = await marketApi.install(preview.previewId, { ...secrets });
+      const installId = outcome.installId;
       sheetView = 'result';
-      toast(t('market.installSuccess', { name: outcome.name }));
+      toast(t('market.installSuccess', { name: outcome.name }), {
+        action: {
+          label: t('market.undo'),
+          run: () => {
+            void undoInstall(installId);
+          },
+        },
+        durationMs: 30_000,
+      });
       await Promise.all([loadCatalog(), loadInstalled()]);
     } catch (error) {
       installError = daemonErrorMessage(error);
@@ -983,6 +992,14 @@
                   {#if item.latestVersion}
                     · {t('market.latestVersion', { version: item.latestVersion })}
                   {/if}
+                </span>
+              {/if}
+              {#if item.modifiedSinceInstall}
+                <span
+                  class="status-pill status-pill--warn"
+                  data-testid={`market-modified-${item.installId}`}
+                >
+                  {t('market.modifiedSinceInstall')}
                 </span>
               {/if}
             </div>

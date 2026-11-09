@@ -314,6 +314,7 @@ pub struct InstalledSummary {
     pub updated_at: String,
     pub revoked: bool,
     pub update_available: bool,
+    pub modified_since_install: bool,
     pub latest_version: Option<String>,
     pub needs_attention: bool,
     pub attention: Vec<String>,
@@ -1452,6 +1453,7 @@ pub fn summarize(
     let mut attention = Vec::new();
     let mut missing = 0;
     let mut edited = 0;
+    let mut config_changed = false;
     for file in &manifest.files {
         match std::fs::read(&file.path) {
             Ok(bytes) => {
@@ -1478,6 +1480,7 @@ pub fn summarize(
             })
         {
             if !value_matches(&current, &config.value, &config.secret_names, None) {
+                config_changed = true;
                 attention.push("Configuration changed on disk".into());
             }
         }
@@ -1502,6 +1505,7 @@ pub fn summarize(
         updated_at: manifest.updated_at.clone(),
         revoked,
         update_available,
+        modified_since_install: edited > 0 || config_changed,
         latest_version: catalog.map(|entry| entry.version.clone()),
         needs_attention: !attention.is_empty(),
         attention,

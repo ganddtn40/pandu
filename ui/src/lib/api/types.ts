@@ -724,6 +724,7 @@ export interface InstalledSummary {
   updatedAt: string;
   revoked: boolean;
   updateAvailable: boolean;
+  modifiedSinceInstall: boolean;
   latestVersion?: string | null;
   needsAttention: boolean;
   attention: string[];

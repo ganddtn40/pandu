@@ -349,6 +349,7 @@ const en = {
   'market.revoked': 'Revoked',
   'market.installed': 'Installed',
   'market.updateAvailable': 'Update available',
+  'market.modifiedSinceInstall': 'Modified since install',
   'market.version': 'v{version}',
   'market.installedVersion': 'Installed v{version}',
   'market.latestVersion': 'Registry v{version}',

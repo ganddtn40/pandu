@@ -47,5 +47,11 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
     },
+    {
+      command: 'node tests/e2e/daemon-server.mjs market-state 4325',
+      url: 'http://127.0.0.1:4325/api/health',
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
   ],
 });

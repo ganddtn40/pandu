@@ -27,7 +27,8 @@ const home = path.join(root, 'ui', '.tmp', `e2e-${mode}-${port}`);
 rmSync(home, { recursive: true, force: true });
 mkdirSync(home, { recursive: true });
 
-const isMarket = mode === 'market' || mode === 'market-offline';
+const isMarket =
+  mode === 'market' || mode === 'market-offline' || mode === 'market-state';
 const userHome = path.join(home, 'user');
 const workspace = path.join(home, 'workspace');
 if (isMarket) {
