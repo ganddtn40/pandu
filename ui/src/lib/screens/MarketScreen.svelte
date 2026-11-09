@@ -1136,7 +1136,6 @@
           <section class="sheet-section">
             <div class="sheet-section__head">
               <h3>{t('market.supportedAgents')}</h3>
-              <p>{t('market.filterAgentHint')}</p>
             </div>
             <div class="market-support-list">
               {#each selected.support as support (support.agent)}
@@ -1147,7 +1146,7 @@
                     <small>{supportLabel(support)}</small>
                   </div>
                   {#if support.verified}
-                    <span class="status-pill status-pill--ok">{t('market.ciPassedShort')}</span>
+                    <span class="status-pill status-pill--ok">{t('market.targetVerified')}</span>
                   {:else}
                     <span class="status-pill status-pill--warn">{t('market.manualOnly')}</span>
                   {/if}
