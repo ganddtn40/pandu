@@ -7307,15 +7307,16 @@ html[data-glass-reason='reduced-transparency'] .panel {
 .market-diff-block {
   max-height: 260px;
   margin-top: 7px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
   background: var(--inset-bg);
   color: var(--text-soft);
   font-family: var(--font-mono);
   font-size: max(var(--text-min), calc(10.5px * var(--font-scale)));
-  line-height: 1.55;
+  line-height: 1.4;
   white-space: pre;
 }
 
@@ -7338,6 +7339,10 @@ html[data-glass-reason='reduced-transparency'] .panel {
 
 .market-diff__line.is-head {
   color: var(--text-faint);
+}
+
+.market-diff__line.is-hunk {
+  color: var(--accent-ink);
 }
 
 .market-command {

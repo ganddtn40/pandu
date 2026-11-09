@@ -20,6 +20,7 @@
     UninstallPreview,
   } from '../api/types';
   import { copyText } from '../clipboard';
+  import { diffLines } from '../diff';
   import { formatDate } from '../format';
   import { t, type MessageKey } from '../i18n/i18n.svelte';
   import { toast } from '../toast-store.svelte';
@@ -353,16 +354,6 @@
     if (text === 'Configuration changed on disk') return t('market.attentionConfig');
     if (text === 'Revoked by the registry') return t('market.attentionRevoked');
     return text;
-  }
-
-  function diffLines(text: string): Array<{ tone: string; line: string }> {
-    return text.split('\n').map((line) => {
-      let tone = 'context';
-      if (line.startsWith('+++') || line.startsWith('---')) tone = 'head';
-      else if (line.startsWith('+')) tone = 'add';
-      else if (line.startsWith('-')) tone = 'del';
-      return { tone, line };
-    });
   }
 
   function chooseDefaultTarget(card: MarketCard): void {
@@ -1354,11 +1345,7 @@
                         {:else if file.diff}
                           <details class="market-diff">
                             <summary>{t('market.showDiff')}</summary>
-                            <pre>
-                              {#each diffLines(file.diff) as row}
-                                <span class={`market-diff__line is-${row.tone}`}>{row.line || ' '}</span>
-                              {/each}
-                            </pre>
+                            <pre>{#each diffLines(file.diff) as row}<span class={`market-diff__line is-${row.tone}`}>{row.line || ' '}</span>{/each}</pre>
                           </details>
                         {:else if file.content}
                           <details class="market-diff">
@@ -1381,11 +1368,7 @@
                   <p class="market-muted">
                     {t('market.configKeys')}: <span class="market-mono">{preview.config.keyPath.join(' · ')}</span>
                   </p>
-                  <pre class="market-diff-block">
-                    {#each diffLines(preview.config.diff) as row}
-                      <span class={`market-diff__line is-${row.tone}`}>{row.line || ' '}</span>
-                    {/each}
-                  </pre>
+                  <pre class="market-diff-block">{#each diffLines(preview.config.diff) as row}<span class={`market-diff__line is-${row.tone}`}>{row.line || ' '}</span>{/each}</pre>
                 </section>
               {/if}
 
