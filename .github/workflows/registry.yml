@@ -1,0 +1,91 @@
+name: Registry
+
+# The registry is a security boundary. Pull requests are checked without the
+# signing key; pushes to a protected branch verify the signed index that
+# Cockpit actually loads. A contributor never needs the private key.
+
+on:
+  pull_request:
+    paths:
+      - 'registry/**'
+      - '.github/workflows/registry.yml'
+  push:
+    branches: [main, rewrite]
+    paths:
+      - 'registry/**'
+      - '.github/workflows/registry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  staged:
+    name: Validate contributor entries
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check registry tooling syntax
+        run: node --check registry/sign.mjs && node --check registry/hash.mjs
+
+      - name: Validate loose entries, hashes, and scans
+        run: |
+          cargo run --locked -p cockpit-cli -- market check \
+            --dir registry --staged --online --links
+
+  signed:
+    name: Verify signed registry
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check registry tooling syntax
+        run: node --check registry/sign.mjs && node --check registry/hash.mjs
+
+      - name: Verify signatures, index hashes, and pinned sources
+        run: |
+          cargo run --locked -p cockpit-cli -- market check \
+            --dir registry --online --links
+
+      - name: Run market registry tests
+        run: cargo test --locked -p cockpit-daemon --lib "market::"
+
+  policy:
+    name: Security policy files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Require policy files
+        run: |
+          test -s SECURITY.md
+          test -s docs/security.md
+          test -s docs/market.md
+          test -s docs/registry/CONTRIBUTING.md
+          test -s .github/CODEOWNERS
+          test -s registry/schema/entry.schema.json

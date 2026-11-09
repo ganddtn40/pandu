@@ -521,3 +521,224 @@ export interface RemoteClaimPoll {
   createdAt?: string;
 }
 
+// ----- Market --------------------------------------------------------------
+
+export type MarketKind = 'skill' | 'mcp';
+export type TrustTier = 'official' | 'community-reviewed' | 'unreviewed';
+export type InstallScope = 'user' | 'project';
+export type InstallState = 'installed' | 'uninstalled';
+export type RegistrySource = 'environment' | 'cache' | 'repo' | 'bundled' | 'network';
+
+export interface MarketReviewer {
+  name: string;
+  date: string;
+  ciPassed: boolean;
+  ciUrl?: string | null;
+}
+
+export interface MarketPermission {
+  id: string;
+  description: string;
+}
+
+export interface MarketSource {
+  repo: string;
+  commit: string;
+  contentSha256: string;
+  files: string[];
+}
+
+export interface AgentSupport {
+  agent: string;
+  name: string;
+  scopes: InstallScope[];
+  verified: boolean;
+  available: boolean;
+}
+
+export interface MarketCard {
+  id: string;
+  kind: MarketKind;
+  name: string;
+  version: string;
+  shortDescription: string;
+  longDescription: string;
+  categories: string[];
+  agents: string[];
+  license: string;
+  trust: TrustTier;
+  reviewer?: MarketReviewer | null;
+  reviewedOn?: string | null;
+  homepage?: string | null;
+  permissions: MarketPermission[];
+  example: boolean;
+  revoked: boolean;
+  installed: boolean;
+  installedVersion?: string | null;
+  updateAvailable: boolean;
+  latestVersion: string;
+  support: AgentSupport[];
+}
+
+export interface MarketDetail extends MarketCard {
+  source: MarketSource;
+  readme: string;
+}
+
+export interface CatalogCounts {
+  skills: number;
+  mcp: number;
+  installed: number;
+}
+
+export interface MarketSettings {
+  autoRefresh: boolean;
+  lastRefresh?: string | null;
+}
+
+export interface CatalogResponse {
+  entries: MarketCard[];
+  categories: string[];
+  agents: string[];
+  generatedAt?: string | null;
+  source: RegistrySource;
+  offline: boolean;
+  warnings: string[];
+  lastError?: string | null;
+  settings: MarketSettings;
+  counts: CatalogCounts;
+}
+
+export interface ManualInstructions {
+  reason: string;
+  path: string;
+  steps: string[];
+  snippet: string;
+}
+
+export interface PreviewFile {
+  path: string;
+  displayPath: string;
+  sha256: string;
+  size: number;
+  action: string;
+  binary: boolean;
+  diff?: string | null;
+  content?: string | null;
+}
+
+export interface PreviewConfig {
+  path: string;
+  displayPath: string;
+  format: string;
+  keyPath: string[];
+  before?: unknown;
+  after: unknown;
+  diff: string;
+  action: string;
+  secretNames: string[];
+}
+
+export interface InstallPreview {
+  previewId: string;
+  kind: MarketKind;
+  entryId: string;
+  name: string;
+  version: string;
+  agent: string;
+  scope: InstallScope;
+  trust: TrustTier;
+  license: string;
+  source: MarketSource;
+  permissions: MarketPermission[];
+  command?: string | null;
+  commandWarning?: string | null;
+  files: PreviewFile[];
+  config?: PreviewConfig | null;
+  manual?: ManualInstructions | null;
+  secretNames: string[];
+  warnings: string[];
+  update: boolean;
+  installedVersion?: string | null;
+  totalBytes: number;
+  conflicts: string[];
+}
+
+export interface InstallOutcome {
+  installId: string;
+  kind: MarketKind;
+  entryId: string;
+  name: string;
+  version: string;
+  agent: string;
+  scope: InstallScope;
+  backupId: string;
+  filesWritten: number;
+  configPath?: string | null;
+  undoAvailable: boolean;
+  warnings: string[];
+}
+
+export interface UninstallPreview {
+  installId: string;
+  kind: MarketKind;
+  entryId: string;
+  name: string;
+  agent: string;
+  scope: InstallScope;
+  filesToRemove: string[];
+  filesEdited: string[];
+  filesMissing: string[];
+  configAction: string;
+  needsConfirmation: boolean;
+}
+
+export interface UninstallOutcome {
+  preview: UninstallPreview;
+  backupId: string;
+  undoAvailable: boolean;
+}
+
+export interface UndoOutcome {
+  installId: string;
+  state: string;
+  restoredFiles: number;
+  restoredConfig: boolean;
+}
+
+export interface InstalledSummary {
+  installId: string;
+  kind: MarketKind;
+  entryId: string;
+  name: string;
+  version: string;
+  agent: string;
+  scope: InstallScope;
+  trust: TrustTier;
+  state: InstallState;
+  installedAt: string;
+  updatedAt: string;
+  revoked: boolean;
+  updateAvailable: boolean;
+  latestVersion?: string | null;
+  needsAttention: boolean;
+  attention: string[];
+  fileCount: number;
+  configPath?: string | null;
+  backupId: string;
+}
+
+export interface InstalledResponse {
+  installs: InstalledSummary[];
+  source: RegistrySource;
+  offline: boolean;
+  warnings: string[];
+  lastError?: string | null;
+}
+
+export interface MarketStatus {
+  hostOnly: boolean;
+  autoRefresh: boolean;
+  lastRefresh?: string | null;
+}
+

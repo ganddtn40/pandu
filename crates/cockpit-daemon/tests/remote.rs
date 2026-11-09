@@ -544,6 +544,16 @@ async fn remote_listener_never_mounts_proxy_routes_or_host_management() {
         "/api/remote/pair/pending",
         "/api/remote/enable",
         "/api/remote/panic",
+        // The market installs untrusted code. No remote device may read the
+        // catalog, preview an install, or change installed skills and MCP
+        // servers. These routes exist on the loopback listener only.
+        "/api/market/catalog",
+        "/api/market/installed",
+        "/api/market/preview",
+        "/api/market/install",
+        "/api/market/refresh",
+        "/api/market/settings",
+        "/api/market/entries/skill/example-commit-messages",
     ] {
         let response = send_remote(
             &client,

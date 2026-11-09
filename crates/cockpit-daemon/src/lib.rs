@@ -17,6 +17,7 @@ pub mod guards;
 pub mod live;
 pub mod logparse;
 pub mod logwatch;
+pub mod market;
 pub mod proxy;
 pub mod recorder;
 pub mod remote;

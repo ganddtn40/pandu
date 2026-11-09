@@ -1,0 +1,81 @@
+schema_version: 1
+id: example-weather
+name: "Example: Weather MCP"
+kind: mcp
+version: 1.0.0
+short_description: A read-only example MCP server that returns current conditions and a short forecast.
+long_description: >-
+  An example fixture that shows the MCP entry shape, a pinned package version,
+  required environment variable names, and a secret Cockpit asks for locally.
+  The package name is illustrative and is not published. Cockpit writes the
+  agent configuration only; the agent runs the command when it starts.
+categories:
+  - weather
+  - data
+agents:
+  - claude-code
+  - codex
+  - opencode
+source:
+  repo: https://github.com/cockpit-examples/weather-mcp
+  commit: "3333333333333333333333333333333333333333"
+  content_sha256: 74c3e17aacd5a76e1291ac92f5072aa8b2a73a31229ff533fcc2c59d9ae7b973
+  files:
+    - README.md
+license: MIT
+trust: unreviewed
+example: true
+permissions:
+  - id: network
+    description: Calls a weather service over HTTPS.
+  - id: secrets
+    description: Needs a weather API key supplied by the user at install time.
+mcp:
+  transport: stdio
+  command: npx
+  args:
+    - "-y"
+    - example-weather-mcp@1.0.0
+  env:
+    - WEATHER_UNITS
+  secrets:
+    - WEATHER_API_KEY
+  install:
+    - agent: claude-code
+      scopes:
+        - user
+        - project
+    - agent: codex
+      scopes:
+        - user
+        - project
+    - agent: opencode
+      scopes:
+        - user
+        - project
+readme: |
+  # Weather MCP
+
+  **This is an example fixture.** It is hidden from production builds and is
+  not a real marketplace listing.
+
+  The server would expose two read-only tools:
+
+  - `current_conditions` for a city.
+  - `short_forecast` for the next few hours.
+
+  ## Configuration
+
+  - `WEATHER_UNITS` selects metric or imperial output. Set it in the agent's
+    environment before the agent starts.
+  - `WEATHER_API_KEY` is a secret. Cockpit asks for it locally at install time
+    and never stores it in the registry, the database, or the install manifest.
+
+  ## Command
+
+  ```text
+  npx -y example-weather-mcp@1.0.0
+  ```
+
+  The agent will run this command when it starts the server. Cockpit writes
+  configuration only and never executes the command itself.

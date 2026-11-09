@@ -20,6 +20,7 @@ use crate::api;
 use crate::config::{Config, is_loopback_host};
 use crate::error::{DaemonError, Result};
 use crate::logwatch;
+use crate::market::http as market;
 use crate::proxy::proxy_handler;
 use crate::remote::auth::constant_time_eq;
 use crate::remote::{RemoteMode, RemoteServerHandle, host};
@@ -117,6 +118,28 @@ pub fn build_router(state: AppState, bound_port: u16) -> Router {
             "/remote/notifications/test",
             post(host::test_notification),
         )
+        // The skill and MCP market is host-only. The remote listener never
+        // mounts these routes; the remote isolation test asserts the 404.
+        .route("/market/catalog", get(market::catalog))
+        .route("/market/refresh", post(market::refresh))
+        .route("/market/entries/{kind}/{id}", get(market::detail))
+        .route("/market/installed", get(market::installed))
+        .route("/market/preview", post(market::preview))
+        .route("/market/install", post(market::install))
+        .route(
+            "/market/installed/{id}/uninstall-preview",
+            get(market::preview_uninstall),
+        )
+        .route(
+            "/market/installed/{id}/uninstall",
+            post(market::uninstall),
+        )
+        .route("/market/installed/{id}/undo", post(market::undo))
+        .route(
+            "/market/settings",
+            get(market::settings).put(market::update_settings),
+        )
+        .route("/market/status", get(market::status))
         .route("/demo/seed", post(api::seed_demo))
         .route("/live", get(api::live))
         .fallback(api::not_found)

@@ -884,6 +884,8 @@ mod tests {
                 verified: false,
             }),
             hook_otel: None,
+            skills: None,
+            mcp: None,
         }
     }
 

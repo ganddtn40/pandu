@@ -7,10 +7,11 @@ and asks permission before risky actions. Everything stays on your machine. No
 account, no cloud, no telemetry.
 
 > **Status:** the 0.2.0 rewrite is in progress on the `rewrite` branch. Phases
-> 0–5 are complete: the Rust core, proxy, adapters, guards, snapshots, the
-> design v2 UI, and the five tabs wired to real daemon data. The shipped 0.1.0
-> TypeScript/Node implementation is preserved under `legacy/` as the behavior
-> spec. Next: agent control and notifications (Phase 6).
+> 0–8 are complete: the Rust core, proxy, adapters, guards, snapshots, the
+> design v2 UI, the five tabs wired to real daemon data, host-confirmed remote
+> access, and the signed skill/MCP market. The shipped 0.1.0 TypeScript/Node
+> implementation is preserved under `legacy/` as the behavior spec. Remaining
+> work is tracked in the [roadmap](docs/ROADMAP.md).
 
 ## What v0.2.0 will be
 
@@ -121,6 +122,8 @@ your local database.
   scopes, revocation, and troubleshooting
 - [Security model](docs/security.md) — what is protected, stolen-token impact,
   and the endpoints × scopes table
+- [Market and registry](docs/market.md) — trust tiers, signed registry, install
+  previews, offline behavior, and the contributor rules
 - [Rewrite decision record](docs/REWRITE.md) — what is kept, cut, and changed
 - [Roadmap](docs/ROADMAP.md) — v0.2.0 scope, phases, and deferred features
 - [Issue drafts](docs/issues/) — ready-to-paste `help wanted` work

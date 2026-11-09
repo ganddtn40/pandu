@@ -55,6 +55,8 @@ enum Command {
     Pair(PairArgs),
     /// Inspect and verify the local audit log.
     Audit(AuditArgs),
+    /// Maintain the signed skill and MCP registry. Maintainer tooling only.
+    Market(MarketArgs),
 }
 
 #[derive(Debug, Args, Default, Clone)]
@@ -208,6 +210,64 @@ struct AuditVerifyArgs {
     json: bool,
 }
 
+#[derive(Debug, Args)]
+struct MarketArgs {
+    #[command(subcommand)]
+    action: MarketAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum MarketAction {
+    /// Generate an Ed25519 keypair for signing the registry.
+    Keygen(MarketKeygenArgs),
+    /// Sign index.json and revoked.json in a registry directory.
+    Sign(MarketSignArgs),
+    /// Validate a registry directory, its signatures, hashes, and files.
+    Check(MarketCheckArgs),
+}
+
+#[derive(Debug, Args)]
+struct MarketKeygenArgs {
+    /// Write the private key here. Keep it offline; never commit it.
+    #[arg(long, value_name = "PATH")]
+    out: PathBuf,
+    /// Overwrite an existing key file.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Debug, Args)]
+struct MarketSignArgs {
+    /// Private signing key written by `cockpit market keygen`.
+    #[arg(long, value_name = "PATH")]
+    key: PathBuf,
+    /// Registry directory. Defaults to ./registry.
+    #[arg(long, value_name = "PATH", default_value = "registry")]
+    dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct MarketCheckArgs {
+    /// Registry directory. Defaults to ./registry.
+    #[arg(long, value_name = "PATH", default_value = "registry")]
+    dir: PathBuf,
+    /// Download pinned sources and verify their content hashes. Without this,
+    /// only the signed index, schema, and local example fixtures are checked.
+    #[arg(long)]
+    online: bool,
+    /// Validate loose skills/*.yaml and mcp/*.yaml files without requiring a
+    /// signed index. Use this on contributor pull requests; publication still
+    /// requires re-signing the index.
+    #[arg(long)]
+    staged: bool,
+    /// Also check source and homepage links. Implies --online.
+    #[arg(long)]
+    links: bool,
+    /// Print JSON instead of a human-readable report.
+    #[arg(long)]
+    json: bool,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -249,6 +309,11 @@ fn main() -> anyhow::Result<()> {
                 audit_verify(config, args.database, args.json)
             }
         },
+        Command::Market(args) => match args.action {
+            MarketAction::Keygen(args) => market_keygen(args),
+            MarketAction::Sign(args) => market_sign(args),
+            MarketAction::Check(args) => market_check(args),
+        },
     }
 }
 
@@ -284,6 +349,92 @@ fn apply_local_args(
         config.port = port;
     }
     config
+}
+
+// ---------------------------------------------------------------------------
+// market
+// ---------------------------------------------------------------------------
+
+fn market_keygen(args: MarketKeygenArgs) -> anyhow::Result<()> {
+    if args.out.exists() && !args.force {
+        bail!(
+            "{} already exists. Pass --force to overwrite it.",
+            args.out.display()
+        );
+    }
+    let (public, private) = cockpit_daemon::market::signing::generate();
+    cockpit_daemon::market::signing::save_signing_key(&args.out, &private)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    println!("public key: {public}");
+    println!("private key: {}", args.out.display());
+    println!(
+        "Keep the private key offline. Embed the public key in \
+         crates/cockpit-daemon/src/market/mod.rs before publishing a registry."
+    );
+    Ok(())
+}
+
+fn market_sign(args: MarketSignArgs) -> anyhow::Result<()> {
+    let key = cockpit_daemon::market::signing::load_signing_key(&args.key)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let public = cockpit_daemon::market::signing::public_key_base64(&key);
+    if public != cockpit_daemon::market::REGISTRY_PUBLIC_KEY_BASE64 {
+        bail!(
+            "This key's public half is {public}, but Cockpit embeds {}. \
+             Signing with it would produce a registry every Cockpit refuses.",
+            cockpit_daemon::market::REGISTRY_PUBLIC_KEY_BASE64
+        );
+    }
+    cockpit_daemon::market::signing::sign_registry_dir(&args.dir, &key)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    println!(
+        "signed {}/index.json and {}/revoked.json with {public}",
+        args.dir.display(),
+        args.dir.display()
+    );
+    Ok(())
+}
+
+fn market_check(args: MarketCheckArgs) -> anyhow::Result<()> {
+    use cockpit_daemon::market::registry_check;
+
+    let online = args.online || args.links;
+    let report = if args.staged {
+        if online {
+            let client = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(Duration::from_secs(30))
+                .build()
+                .context("could not build the registry HTTP client")?;
+            let runtime = runtime()?;
+            runtime.block_on(registry_check::check_staged(&args.dir, &client, args.links))
+        } else {
+            registry_check::check_staged_offline(&args.dir)
+        }
+    } else if online {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(30))
+            .build()
+            .context("could not build the registry HTTP client")?;
+        let runtime = runtime()?;
+        runtime.block_on(registry_check::check_registry(
+            &args.dir, &client, args.links,
+        ))
+    } else {
+        registry_check::check_registry_offline(&args.dir)
+    }
+    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", registry_check::report_text(&report));
+    }
+    if !report.ok {
+        bail!("the registry check failed");
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,6 +1220,8 @@ mod tests {
             }),
             log_watch: None,
             hook_otel: None,
+            skills: None,
+            mcp: None,
         }
     }
 

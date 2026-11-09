@@ -27,6 +27,10 @@ const home = path.join(root, 'ui', '.tmp', `e2e-${mode}-${port}`);
 rmSync(home, { recursive: true, force: true });
 mkdirSync(home, { recursive: true });
 
+const isMarket = mode === 'market' || mode === 'market-offline';
+const userHome = path.join(home, 'user');
+if (isMarket) mkdirSync(userHome, { recursive: true });
+
 const child = spawn(binary, ['serve'], {
   cwd: root,
   env: {
@@ -37,6 +41,16 @@ const child = spawn(binary, ['serve'], {
     COCKPIT_LOG_WATCH: '0',
     COCKPIT_NOTIFICATIONS: '0',
     COCKPIT_DEMO: mode === 'demo' ? '1' : '0',
+    ...(isMarket
+      ? {
+          // Debug-only overrides: the market daemon reads its registry from the
+          // repository and installs into a disposable home, never the real one.
+          COCKPIT_USER_HOME: userHome,
+          COCKPIT_MARKET_REGISTRY: path.join(root, 'registry'),
+          COCKPIT_MARKET_LOCAL_SOURCE: path.join(root, 'registry', 'fixtures'),
+          COCKPIT_MARKET_OFFLINE: mode === 'market-offline' ? '1' : '0',
+        }
+      : {}),
   },
   stdio: ['ignore', 'inherit', 'inherit'],
 });

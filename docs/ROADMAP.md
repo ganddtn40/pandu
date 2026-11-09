@@ -22,7 +22,8 @@ come back without reopening old decisions.
 - [x] Flights: list and detail, timeline scrubber, step inspector, per-step git
       diff, cost, live output, replay, deep links
 - [ ] Flights: one trust badge and `Fork from here` (replay forks are deferred)
-- [ ] Market: adapter and theme discovery, then the registry (Phase 8)
+- [x] Market: signed skill and MCP registry with host-only installs (Phase 8)
+- [ ] Market: adapter and theme discovery
 - [x] Settings: Add an agent flow, language, privacy, platform support,
       about/updates
 - [ ] Settings: `Report a bug` diagnostics bundle
@@ -31,8 +32,8 @@ come back without reopening old decisions.
 - [ ] Honest per-flight capture label: `Recorded via proxy`, `Observed from
       logs`, or `Observed via hook`
 
-Phase 5 wires the five tabs to real daemon data. The Market registry remains a
-later phase; the screen says so instead of showing fake listings.
+Phase 5 wires the five tabs to real daemon data. Phase 8 adds the signed skill
+and MCP registry; adapter and theme discovery remain later work.
 
 ### Design v2
 

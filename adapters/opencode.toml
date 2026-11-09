@@ -21,3 +21,20 @@ roots = ["~/.local/share/opencode/storage"]
 include = ["**/*.json"]
 parser = "generic-json"
 verified = false
+
+# Skills live in ~/.config/opencode/skills (user) and .opencode/skills
+# (project). Checked against https://opencode.ai/docs/skills
+[skills]
+user_paths = ["~/.config/opencode/skills"]
+project_paths = [".opencode/skills"]
+verified = true
+
+# MCP servers live under mcp.servers in opencode.json or opencode.jsonc.
+# Checked against https://opencode.ai/docs/mcp-servers
+[mcp]
+user_paths = ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"]
+project_paths = ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]
+format = "jsonc"
+style = "opencode"
+key_path = ["mcp", "servers"]
+verified = true

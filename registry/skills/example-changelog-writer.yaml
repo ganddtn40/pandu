@@ -1,0 +1,64 @@
+schema_version: 1
+id: example-changelog-writer
+name: "Example: Changelog Writer"
+kind: skill
+version: 1.0.0
+short_description: Turn merged changes into a player-facing changelog grouped by impact.
+long_description: >-
+  An example fixture for a writing skill. It groups merged changes into Added,
+  Changed, Fixed, and Removed, leads with the player-visible result, and asks
+  for the audience when a release could be read by players, modders, or server
+  operators. It never publishes anything itself.
+categories:
+  - writing
+  - release
+agents:
+  - claude-code
+  - opencode
+source:
+  repo: https://github.com/cockpit-examples/changelog-writer
+  commit: "2222222222222222222222222222222222222222"
+  content_sha256: 7d32ebd2318b918e765204471e0f9189e921e3adaf76f8269335ef6a94bba5e8
+  files:
+    - SKILL.md
+    - references/voice.md
+license: CC-BY-4.0
+trust: unreviewed
+example: true
+permissions:
+  - id: filesystem:read
+    description: Reads the change list the user shares.
+skills:
+  install:
+    - agent: claude-code
+      scopes:
+        - user
+        - project
+    - agent: opencode
+      scopes:
+        - user
+        - project
+readme: |
+  # Changelog Writer
+
+  **This is an example fixture.** It is hidden from production builds and is
+  not a real marketplace listing.
+
+  The skill turns a list of merged changes into short, player-facing notes.
+
+  ## Structure
+
+  - **Added** for new content and features.
+  - **Changed** for behavior that existing players will notice.
+  - **Fixed** for defects that affected players.
+  - **Removed** for content or behavior that is gone.
+
+  ## Voice
+
+  Prefer concrete nouns and active verbs. Do not call a fix "minor" when a
+  player lost progress. Leave internal tooling changes out of player notes.
+
+  ## Safety
+
+  The skill writes text only. It never publishes a release, tags a build, or
+  posts to an external service.

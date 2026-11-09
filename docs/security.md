@@ -1,6 +1,6 @@
 # Cockpit security model
 
-Status: Phase 7 (remote access). Branch `rewrite`.
+Status: Phase 8 (market and registry). Branch `rewrite`.
 This document describes what the current build protects, how, and what it does
 not protect yet. It is a working threat model, not a certification.
 
@@ -21,13 +21,18 @@ Assets worth protecting:
   them.
 - The remote audit log, which records who did what and when.
 - Notification content, which may be visible on a lock screen.
+- Market registry entries, pinned source archives, installed skill files, MCP
+  configuration, install manifests, and backups. The registry signing key is
+  kept offline by the maintainer and is not an asset on the user's machine.
 
 The main security promise is narrow: **the daemon can observe and nudge a
 terminal the user started, but it cannot start a command, read a credential
 store, or put prompts and code into a notification.** Remote access is opt-in
 and host-controlled: a paired device can see, respond, or prompt within its
 scopes, but it can never manage the host, reach the model proxy, or complete an
-authentication prompt.
+authentication prompt. The market is the one place Cockpit writes outside its
+own state: it copies files and edits agent configuration that the user
+previewed, and it never runs an installer, a package manager, or an MCP server.
 
 ## 2. Trust boundaries
 
@@ -40,6 +45,7 @@ authentication prompt.
 | Approval | A human reading the request | Any replayed, late, or cross-session answer |
 | Notification | The local daemon | The OS notification surface and any remote push service |
 | Audit | The local SQLite database | Anything outside the host process, including a paired device |
+| Market | The signed registry, the pinned commit, and a local user confirming a preview | Every registry entry, every downloaded archive, every MCP command, and every README |
 
 The daemon is not a sandbox. The agent runs as the user, in the user's chosen
 working directory, with the user's environment. Cockpit observes that process;
@@ -367,9 +373,117 @@ Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote::pairing::tests::a_new_code_replaces_the_old_one`, and
 `remote::pairing::tests::only_three_claims_wait_for_the_host_at_once`.
 
+### 3.10 Market installs are signed, previewed, and never executed
+
+Market is a catalogue of skills and MCP server recipes. It is treated as
+untrusted input, not as a package manager. The full user-facing model is in
+`docs/market.md`.
+
+- **Host-only.** `/api/market/*` is mounted on the loopback listener only. The
+  remote listener never mounts it, and the isolation test asserts that the
+  catalogue, preview, install, refresh, settings, and entry routes all return
+  404 there. A paired device cannot browse, install, uninstall, or change market
+  settings.
+- **Fail-closed signatures.** The index and revocation list are Ed25519-signed
+  over canonical JSON (recursively sorted object keys, no insignificant
+  whitespace) and verified against a public key embedded in the binary. The
+  key id must match. Every entry file must match the SHA-256 in the signed
+  index. Duplicate ids, an unknown path, or an index/YAML disagreement is
+  refused. A failed refresh never replaces the previous verified cache.
+- **Pinned sources.** A skill entry names exactly
+  `https://github.com/<owner>/<repo>` and a full 40-character lowercase commit
+  SHA. Cockpit downloads `codeload.github.com/<owner>/<repo>/tar.gz/<sha>`,
+  does not follow redirects, and verifies a SHA-256 over the normalized tree
+  (sorted path, path length, path, byte length, bytes). Branches, tags, ranges,
+  and URLs are rejected. Example fixtures use fake repositories and local trees
+  and are hidden in production builds.
+- **Safe extraction.** Absolute paths, `..`, NUL, drive/stream separators,
+  symlinks, hard links, unsupported entry types, Windows reserved names,
+  case-colliding paths, path components over 200 characters, full paths over
+  1,024 characters, archives over 20 MiB, extracted trees over 40 MiB, files
+  over 4 MiB, and trees over 1,000 files are refused. A gzip or tar bomb is
+  bounded while it is read, not after it is on disk.
+- **Preview, not a silent write.** The preview shows every planned file with
+  New/Overwrite/Unchanged/Conflict, a real line diff for existing text files,
+  the configuration path and key, permissions, source, license, tier, and the
+  exact MCP command. Conflicts block the install. A preview is held in memory
+  for ten minutes and can be used once.
+- **No execution.** Cockpit never runs a package manager, installer script, or
+  MCP server. For MCP it writes the agent configuration and displays the command
+  the agent will run, with a warning that the agent executes third-party code.
+- **Comment-preserving edits.** TOML is edited with `toml_edit`; JSON/JSONC
+  edits preserve comments and unknown keys. A key whose value is unchanged is
+  not rewritten. Configuration is backed up before the edit.
+- **Atomic writes and recovery.** Files are written to a temporary path and
+  renamed atomically. A journal is written before the first mutation. If the
+  process dies mid-install, the next start rolls the journal back. A manifest
+  records the install id, entry, version, trust, source, license, agent, scope,
+  target root, file hashes, config path and redacted value, backup id, and
+  permission and secret names.
+- **Secrets stay local.** The registry stores environment variable names, never
+  values. The UI asks for a required secret at install time. The value is
+  written only to the agent configuration where that agent expects a literal
+  value; OpenCode receives an `{env:NAME}` reference. Secret values are never
+  written to the registry, the database, or the install manifest.
+- **Uninstall and undo are narrow.** Uninstall removes only files Cockpit
+  created that still match the recorded hashes, and removes a configuration key
+  only if its current value still matches. Edited or missing files are listed
+  and require explicit confirmation; a file Cockpit cannot prove it owns is not
+  deleted. A backup is kept, and undo restores it. A same-user attacker can
+  rewrite the manifest too, so this is data-loss protection, not an integrity
+  boundary against malware.
+- **Revocation is explicit.** The signed `revoked.json` is checked on every
+  registry load. A revoked entry cannot be previewed or installed. An installed
+  copy is marked **Revoked** with the public reason and offered one-click
+  removal; Cockpit does not delete it silently. Offline clients keep the last
+  verified list until they refresh.
+- **README is untrusted text.** Markdown is rendered as sanitized plain text in
+  a `<pre>`. Raw HTML, scripts, dangerous schemes, and remote images are
+  removed. Images are blocked by default.
+- **Network is bounded.** The registry is fetched only on an explicit refresh
+  or install, or on the opt-in daily check. The refresh URL must be a GitHub
+  HTTPS URL. There is no telemetry, install count, or background ping. Offline
+  mode uses the last verified cache and says so.
+- **Trust is labeled honestly.** Every card is Official, Community-reviewed, or
+  Unreviewed. "Verified" is not a tier; "Signature verified" refers to the
+  index, not to a review. The UI and `docs/market.md` state that the static
+  scans are heuristics, not a guarantee.
+- **Registry CI.** Pull requests validate loose entries without the signing
+  key; protected branches verify the signed index. The checks cover schema,
+  SPDX allowlist, pinned SHA, content hash at the pinned commit, size limits,
+  duplicate ids, link checks, `curl|sh`, base64 blobs, credential/dotfile
+  access, exfiltration, prompt-injection text, and the reviewer fields required
+  for a promoted tier. CODEOWNERS covers the registry, the market code, and the
+  policy files.
+
+Evidence: `crates/cockpit-daemon/tests/market.rs`:
+`signed_registry_lists_only_verified_entries`,
+`signature_failure_and_tampered_index_are_refused`,
+`tampered_revocation_list_is_refused`,
+`entry_hash_mismatch_is_refused`,
+`revoked_entries_cannot_be_previewed_or_installed`,
+`content_tree_hash_mismatch_is_refused`,
+`archives_cannot_escape_or_smuggle_links`,
+`archive_bombs_are_refused`,
+`yaml_bombs_and_prompt_injection_text_are_refused`,
+`markdown_blocks_images_html_and_dangerous_schemes`,
+`skill_install_uninstall_and_undo_round_trip`,
+`uninstall_preserves_user_edited_files`,
+`mcp_install_edits_config_without_losing_comments_or_secrets`,
+`unverified_agents_get_manual_instructions_and_no_write`,
+`config_round_trip_preserves_comments_and_unknown_keys`,
+`offline_catalog_uses_the_verified_cache_and_fails_closed`,
+`interrupted_install_is_rolled_back_from_the_journal`,
+`manifest_fuzzing_never_panics_and_rejects_escapes`,
+`tree_hash_is_order_independent_and_verifies`, and
+`remote_listener_never_mounts_proxy_routes_or_host_management`.
+Unit tests: `market::registry_check::tests::*`,
+`market::archive::tests::*`, `market::config_edit::tests::*`, and
+`market::signing::tests::generated_keys_sign_and_verify`.
+
 ## 4. Tests that gate this phase
 
-Phase 7 is not considered done unless these pass:
+Phase 8 is not considered done unless these pass:
 
 - The remote listener never mounts proxy or host-management routes.
 - Every remote endpoint enforces its scope; the test iterates the same matrix
@@ -407,6 +521,21 @@ Phase 7 is not considered done unless these pass:
 - A foreign `Host` header is rejected.
 - The agent control endpoint sanitizes output and queues input without spawning
   anything.
+- A bad registry signature, a tampered index, a tampered revocation list, and an
+  entry hash mismatch are all refused.
+- A revoked entry cannot be previewed or installed; an installed copy is marked
+  and can be removed.
+- Zip-slip, symlink, hardlink, Windows reserved name, case collision, over-long
+  path, archive bomb, and YAML bomb inputs are refused.
+- Config edits preserve comments and unknown keys; installs are atomic and a
+  journal rolls back an interrupted install.
+- Uninstall preserves user-edited files, and a manifest that escapes the install
+  roots is rejected without a panic.
+- `/api/market/*` returns 404 on the remote listener.
+- Offline mode uses the last verified cache and fails closed instead of loading
+  an unverified registry.
+- Playwright covers search, filters, detail, install preview, install, undo,
+  uninstall, and the offline banner against a local mock registry.
 
 The full suite is `cargo test --workspace`, `cargo clippy --workspace
 --all-targets`, `pnpm check`, `pnpm test`, `pnpm build`, and `pnpm e2e`.
@@ -532,14 +661,20 @@ listed so a reviewer can decide whether a later phase must close them.
 8. **No Android or push notifications.** The companion app is Phase 11. There is
    no FCM/APNs path, no cloud relay, and no background update ping. ntfy is a
    user-configured third-party notification path, not a companion app.
-9. **No plugin runtime, market installs, or theme execution.** Those surfaces do
-   not exist in this build. Themes are validated JSON and are never executed.
+9. **Installed market entries are third-party code.** Cockpit verifies the
+   registry signature, the pinned commit, and the content hash, and it shows a
+   preview before writing. It does not sandbox the skill or the MCP server. A
+   skill can instruct the agent to do anything the agent can do, and an MCP
+   server is a process the agent starts with the user's privileges. The static
+   scans are heuristics, not a proof of safety. Read the source and the preview.
 10. **Same-user malware wins.** A process running as the user can read the
-    database, attach to the daemon, inspect the terminal, or read the remote
-    device token from the browser's local storage. The audit log is a hash chain,
-    so accidental or casual edits are detected, but same-user malware can rewrite
-    the whole chain or delete it. Keep exported copies if you need a record
-    outside the machine. Cockpit is not an anti-malware boundary.
+    database, attach to the daemon, inspect the terminal, read the remote device
+    token from the browser's local storage, or edit installed market files and
+    the install manifest. The audit log is a hash chain, so accidental or casual
+    edits are detected, but same-user malware can rewrite the whole chain or
+    delete it. The market's uninstall hash check catches ordinary edits, not an
+    attacker who can rewrite the manifest. Keep exported copies if you need a
+    record outside the machine. Cockpit is not an anti-malware boundary.
 11. **Remote rate limits are in-memory and device identity is self-asserted.**
     Lockouts and connection budgets reset when the daemon restarts, and there is
     no distributed brute-force protection. Device names are supplied by the
@@ -553,6 +688,27 @@ listed so a reviewer can decide whether a later phase must close them.
     revoked or reaches its per-device expiry. Turn on **Revoke all devices when
     remote is turned off** to revoke every device on disable, and review the
     device list before re-enabling.
+13. **Market trust depends on one offline signing key.** A malicious index is
+    refused unless it is signed by the embedded key. If that key is compromised,
+    an attacker can sign a malicious index until a release embeds a new key.
+    Key rotation therefore needs a Cockpit update, and old clients keep trusting
+    the old key. The private key is kept offline; the public key and key id are
+    in the binary. See `SECURITY.md` for the compromise process.
+14. **Revocation is learned only on refresh.** An offline client keeps the last
+    verified revocation list. It cannot discover a new revocation until it
+    refreshes. A signed entry can also remain installable until it is revoked,
+    even if its upstream repository disappears; the install then fails closed
+    because the pinned archive cannot be fetched.
+15. **MCP package provenance is not verified.** An exact `name@version` is
+    pinned, but Cockpit does not verify the npm, PyPI, or other package
+    registry's provenance, signatures, or ownership. The command is shown before
+    install; the agent runs it later. A compromised package registry can serve
+    different code for the same version.
+16. **MCP secrets are stored in the agent configuration.** Claude Code and Codex
+    receive a literal environment value; OpenCode receives an `{env:NAME}`
+    reference. Cockpit does not encrypt the agent's config file, and the agent
+    can read the value. Prefer an environment variable that the agent already
+    has, and rotate the key if the config is exposed.
 
 ## 7. Reporting a problem
 

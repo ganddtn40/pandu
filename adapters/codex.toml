@@ -21,3 +21,13 @@ roots = ["~/.codex/sessions"]
 include = ["**/*.jsonl"]
 parser = "codex-jsonl"
 verified = false
+
+# Codex keeps MCP servers under [mcp_servers.<name>] in config.toml.
+# Checked against https://developers.openai.com/codex/mcp
+[mcp]
+user_paths = ["~/.codex/config.toml"]
+project_paths = [".codex/config.toml"]
+format = "toml"
+style = "codex"
+key_path = ["mcp_servers"]
+verified = true

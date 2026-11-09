@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ganddtn40/cockpit/registry/schema/entry.schema.json",
+  "title": "Cockpit market entry",
+  "description": "One signed-registry entry. The index binds this file by SHA-256; the index and revocation list are bound by an Ed25519 signature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "kind",
+    "version",
+    "short_description",
+    "long_description",
+    "categories",
+    "agents",
+    "source",
+    "license",
+    "trust",
+    "readme"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,62}[a-z0-9]$",
+      "description": "Lowercase letters, digits, and single hyphens. Must match the index id."
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "kind": { "enum": ["skill", "mcp"] },
+    "version": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "short_description": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "long_description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "type": "string", "minLength": 1, "maxLength": 40 },
+      "uniqueItems": true
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "claude-code",
+          "codex",
+          "gemini-cli",
+          "opencode",
+          "cursor-cli",
+          "copilot-cli",
+          "cline",
+          "goose",
+          "aider",
+          "amp",
+          "crush",
+          "openhands",
+          "pi",
+          "qwen-code",
+          "roo-kilo"
+        ]
+      }
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "license": {
+      "enum": [
+        "0BSD",
+        "Apache-2.0",
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "CC0-1.0",
+        "CC-BY-4.0",
+        "ISC",
+        "MIT",
+        "MPL-2.0",
+        "Unlicense"
+      ]
+    },
+    "trust": { "enum": ["official", "community-reviewed", "unreviewed"] },
+    "reviewer": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/reviewer" }]
+    },
+    "reviewed_on": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+      ]
+    },
+    "example": { "type": "boolean", "default": false },
+    "permissions": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/permission" }
+    },
+    "homepage": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^https://" }
+      ]
+    },
+    "skills": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/skills" }]
+    },
+    "mcp": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/mcp" }]
+    },
+    "readme": {
+      "type": "string",
+      "maxLength": 102400,
+      "description": "Sanitized at display time: raw HTML, images, and script URLs are removed."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "skill" } } },
+      "then": {
+        "required": ["skills"],
+        "properties": { "skills": { "type": "object" }, "mcp": { "type": "null" } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "mcp" } } },
+      "then": {
+        "required": ["mcp"],
+        "properties": { "mcp": { "type": "object" }, "skills": { "type": "null" } }
+      }
+    },
+    {
+      "if": { "properties": { "trust": { "enum": ["official", "community-reviewed"] } } },
+      "then": {
+        "required": ["reviewer", "reviewed_on"],
+        "properties": {
+          "reviewer": { "$ref": "#/$defs/reviewer" },
+          "reviewed_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "commit", "content_sha256"],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Full commit SHA. Branches and tags are rejected."
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 over the normalized file tree: sorted path length, path, byte length, bytes."
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/path" }
+        }
+      }
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "date", "ci_passed"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "ci_passed": { "type": "boolean" },
+        "ci_url": { "type": "string", "pattern": "^https://" }
+      }
+    },
+    "permission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description"],
+      "properties": {
+        "id": {
+          "enum": [
+            "filesystem:read",
+            "filesystem:write",
+            "network",
+            "shell",
+            "secrets",
+            "clipboard"
+          ]
+        },
+        "description": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*:)(?!.*(?:^|/)(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|/|$)).+$"
+    },
+    "agentTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "scopes"],
+      "properties": {
+        "agent": {
+          "enum": [
+            "claude-code",
+            "codex",
+            "gemini-cli",
+            "opencode",
+            "cursor-cli",
+            "copilot-cli",
+            "cline",
+            "goose",
+            "aider",
+            "amp",
+            "crush",
+            "openhands",
+            "pi",
+            "qwen-code",
+            "roo-kilo"
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["user", "project"] }
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["install"],
+      "properties": {
+        "install": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/agentTarget" },
+              {
+                "type": "object",
+                "properties": {
+                  "subdir": {
+                    "oneOf": [
+                      { "type": "null" },
+                      { "$ref": "#/$defs/path" }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "install"],
+      "properties": {
+        "transport": { "enum": ["stdio", "http"] },
+        "command": { "type": "string", "maxLength": 64 },
+        "args": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "maxLength": 200 }
+        },
+        "url": { "type": "string", "pattern": "^https://" },
+        "env": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$" }
+        },
+        "secrets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,79}$" },
+          "description": "Names only. Values are asked for locally and never stored in the registry or manifest."
+        },
+        "install": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/agentTarget" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "transport": { "const": "stdio" } } },
+          "then": { "required": ["command"], "properties": { "url": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "transport": { "const": "http" } } },
+          "then": {
+            "required": ["url"],
+            "properties": {
+              "command": { "type": "null" },
+              "args": { "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

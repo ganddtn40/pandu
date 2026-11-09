@@ -23,7 +23,13 @@ bytes = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 toml = { workspace = true }
+toml_edit = { workspace = true }
+ed25519-dalek = { workspace = true }
+base64 = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 sha2 = { workspace = true }

@@ -1,0 +1,20 @@
+# Cockpit code owners.
+#
+# The default owner reviews everything. Security-sensitive paths are listed
+# explicitly so a change to a trust boundary cannot land without a review from
+# the owner who maintains that boundary.
+
+* @ganddtn40
+
+# Security policy, threat model, and the remote/market trust boundaries.
+/SECURITY.md @ganddtn40
+/docs/security.md @ganddtn40
+/docs/market.md @ganddtn40
+/docs/registry/ @ganddtn40
+/crates/cockpit-daemon/src/market/ @ganddtn40
+/crates/cockpit-daemon/tests/market.rs @ganddtn40
+/crates/cockpit-daemon/tests/remote.rs @ganddtn40
+
+# The signed registry, its schema, fixtures, and signing tooling.
+/registry/ @ganddtn40
+/.github/workflows/registry.yml @ganddtn40

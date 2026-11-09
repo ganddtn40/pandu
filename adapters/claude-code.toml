@@ -19,3 +19,20 @@ verified = false
 otlp_http = false
 hooks = ["session_start", "tool_call", "session_end"]
 verified = false
+
+# Skills live in ~/.claude/skills (user) and .claude/skills (project).
+# Checked against https://docs.claude.com/en/docs/claude-code/skills
+[skills]
+user_paths = ["~/.claude/skills"]
+project_paths = [".claude/skills"]
+verified = true
+
+# User-scope MCP servers live in ~/.claude.json; project scope uses .mcp.json.
+# Checked against https://docs.claude.com/en/docs/claude-code/mcp
+[mcp]
+user_paths = ["~/.claude.json"]
+project_paths = [".mcp.json"]
+format = "jsonc"
+style = "claude"
+key_path = ["mcpServers"]
+verified = true

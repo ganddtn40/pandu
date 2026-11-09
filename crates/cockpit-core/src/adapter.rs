@@ -121,6 +121,42 @@ pub struct HookOtelSpec {
     pub verified: bool,
 }
 
+/// Where this agent discovers skill folders. `user_paths` are relative to the
+/// real user home and must start with `~/`; `project_paths` are relative to the
+/// workspace. The first existing path wins, otherwise the first path is
+/// created. `verified` is false unless the paths were checked against the
+/// vendor's current documentation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct SkillsSpec {
+    #[serde(default)]
+    pub user_paths: Vec<String>,
+    #[serde(default)]
+    pub project_paths: Vec<String>,
+    #[serde(default)]
+    pub verified: bool,
+}
+
+/// Where this agent keeps MCP server configuration. `style` selects the fixed
+/// renderer that shapes a market entry into this agent's config format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct McpSpec {
+    #[serde(default)]
+    pub user_paths: Vec<String>,
+    #[serde(default)]
+    pub project_paths: Vec<String>,
+    /// `json`, `jsonc`, or `toml`.
+    pub format: String,
+    /// `claude`, `codex`, or `opencode`.
+    pub style: String,
+    /// Object path from the config root to the server map.
+    #[serde(default)]
+    pub key_path: Vec<String>,
+    #[serde(default)]
+    pub verified: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct Adapter {
@@ -138,6 +174,10 @@ pub struct Adapter {
     pub log_watch: Option<LogWatchSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook_otel: Option<HookOtelSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<SkillsSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpSpec>,
 }
 
 impl Adapter {
@@ -311,6 +351,63 @@ impl Adapter {
             }
         }
 
+        if let Some(skills) = &self.skills {
+            validate_market_paths(
+                "skills.user_paths",
+                &skills.user_paths,
+                MarketPathKind::User,
+            )?;
+            validate_market_paths(
+                "skills.project_paths",
+                &skills.project_paths,
+                MarketPathKind::Project,
+            )?;
+            if skills.user_paths.is_empty() && skills.project_paths.is_empty() {
+                return Err(AdapterError::new(
+                    "skills must list at least one user or project path",
+                ));
+            }
+        }
+
+        if let Some(mcp) = &self.mcp {
+            validate_market_paths("mcp.user_paths", &mcp.user_paths, MarketPathKind::User)?;
+            validate_market_paths(
+                "mcp.project_paths",
+                &mcp.project_paths,
+                MarketPathKind::Project,
+            )?;
+            if mcp.user_paths.is_empty() && mcp.project_paths.is_empty() {
+                return Err(AdapterError::new(
+                    "mcp must list at least one user or project path",
+                ));
+            }
+            if !matches!(mcp.format.as_str(), "json" | "jsonc" | "toml") {
+                return Err(AdapterError::new("mcp.format must be json, jsonc, or toml"));
+            }
+            if !matches!(mcp.style.as_str(), "claude" | "codex" | "opencode") {
+                return Err(AdapterError::new(
+                    "mcp.style must be claude, codex, or opencode",
+                ));
+            }
+            if mcp.key_path.is_empty() || mcp.key_path.len() > 8 {
+                return Err(AdapterError::new(
+                    "mcp.key_path must contain 1-8 object keys",
+                ));
+            }
+            for key in &mcp.key_path {
+                let valid = !key.is_empty()
+                    && key.len() <= 64
+                    && key.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+                    });
+                if !valid {
+                    return Err(AdapterError::new(
+                        "mcp.key_path keys must be letters, digits, `_`, or `-`",
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -322,7 +419,9 @@ impl Adapter {
                 .log_watch
                 .as_ref()
                 .is_none_or(|log_watch| log_watch.verified)
-            && self.hook_otel.as_ref().is_none_or(|hook| hook.verified);
+            && self.hook_otel.as_ref().is_none_or(|hook| hook.verified)
+            && self.skills.as_ref().is_none_or(|skills| skills.verified)
+            && self.mcp.as_ref().is_none_or(|mcp| mcp.verified);
         self.verified = self.verified && sections_verified;
     }
 
@@ -374,6 +473,63 @@ fn validate_command(command: &str) -> Result<(), AdapterError> {
         return Err(AdapterError::new(
             "detect.command must be a bare executable name, not a path or shell command",
         ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarketPathKind {
+    User,
+    Project,
+}
+
+fn validate_market_paths(
+    field: &str,
+    paths: &[String],
+    kind: MarketPathKind,
+) -> Result<(), AdapterError> {
+    if paths.len() > 8 {
+        return Err(AdapterError::new(format!(
+            "{field} accepts at most 8 paths"
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for path in paths {
+        if path.is_empty() || path.len() > 240 || path.contains('\0') {
+            return Err(AdapterError::new(format!(
+                "{field} contains an empty or over-long path"
+            )));
+        }
+        let normalized = path.replace('\\', "/");
+        if normalized.contains(':') || normalized.starts_with('/') || normalized.starts_with("//") {
+            return Err(AdapterError::new(format!(
+                "{field} path `{path}` must be relative, not absolute"
+            )));
+        }
+        if normalized.split('/').any(|part| part == "..") {
+            return Err(AdapterError::new(format!(
+                "{field} path `{path}` must not contain `..`"
+            )));
+        }
+        match kind {
+            MarketPathKind::User => {
+                if !normalized.starts_with("~/") {
+                    return Err(AdapterError::new(format!(
+                        "{field} path `{path}` must start with `~/`"
+                    )));
+                }
+            }
+            MarketPathKind::Project => {
+                if normalized.starts_with('~') {
+                    return Err(AdapterError::new(format!(
+                        "{field} path `{path}` is a project path and must not start with `~`"
+                    )));
+                }
+            }
+        }
+        if !seen.insert(normalized.to_ascii_lowercase()) {
+            return Err(AdapterError::new(format!("{field} lists `{path}` twice")));
+        }
     }
     Ok(())
 }
@@ -563,5 +719,45 @@ verified = false
         assert!(registry.get("example-agent").is_some());
         assert!(registry.find("Example Agent").is_some());
         assert_eq!(registry.verified_count(), 0);
+    }
+
+    #[test]
+    fn parses_market_sections_and_requires_them_to_be_verified() {
+        let contents = format!(
+            "{VALID}\n[skills]\nuser_paths = [\"~/.example-agent/skills\"]\nproject_paths = [\".example-agent/skills\"]\nverified = true\n\n[mcp]\nuser_paths = [\"~/.example-agent/config.json\"]\nproject_paths = [\".example-agent/config.json\"]\nformat = \"json\"\nstyle = \"claude\"\nkey_path = [\"mcpServers\"]\nverified = true\n"
+        );
+        let adapter = Adapter::from_toml("example-agent", &contents).unwrap();
+        assert!(adapter.skills.is_some());
+        assert!(adapter.mcp.is_some());
+        assert!(!adapter.verified);
+    }
+
+    #[test]
+    fn rejects_market_paths_that_escape_the_scope() {
+        for path in ["/etc/skills", "../skills", "C:/skills"] {
+            let contents =
+                format!("{VALID}\n[skills]\nproject_paths = [\"{path}\"]\nverified = false\n");
+            assert!(
+                Adapter::from_toml("example-agent", &contents).is_err(),
+                "{path}"
+            );
+        }
+        let contents = format!(
+            "{VALID}\n[skills]\nuser_paths = [\"~/.example-agent/skills\"]\nproject_paths = [\".example/skills\"]\nverified = true\n"
+        );
+        let adapter = Adapter::from_toml("example-agent", &contents).unwrap();
+        assert!(adapter.skills.is_some());
+    }
+
+    #[test]
+    fn rejects_unknown_mcp_formats_and_styles() {
+        let contents = format!(
+            "{VALID}\n[mcp]\nuser_paths = [\"~/.example/config.json\"]\nformat = \"yaml\"\nstyle = \"claude\"\nkey_path = [\"mcpServers\"]\nverified = false\n"
+        );
+        assert!(Adapter::from_toml("example-agent", &contents).is_err());
+        let contents = format!(
+            "{VALID}\n[mcp]\nuser_paths = [\"~/.example/config.json\"]\nformat = \"json\"\nstyle = \"unknown\"\nkey_path = [\"mcpServers\"]\nverified = false\n"
+        );
+        assert!(Adapter::from_toml("example-agent", &contents).is_err());
     }
 }

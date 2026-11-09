@@ -11,6 +11,7 @@ use crate::error::Result;
 use crate::guards::GuardService;
 use crate::live::LiveBus;
 use crate::logwatch::LogWatcher;
+use crate::market::service::MarketService;
 use crate::recorder::Recorder;
 use crate::remote::{PairingManager, RemoteAccess};
 use crate::sessions::SessionManager;
@@ -32,6 +33,8 @@ pub struct AppState {
     pub logwatch: Arc<LogWatcher>,
     pub pairing: Arc<PairingManager>,
     pub remote: Arc<RemoteAccess>,
+    /// Host-only skill and MCP market. Never mounted on the remote listener.
+    pub market: Arc<MarketService>,
     /// Per-process token that every state-changing host request must present.
     /// It is only handed to the UI served by this daemon and never stored.
     pub csrf: Arc<String>,
@@ -99,6 +102,21 @@ impl AppState {
             .connect_timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|error| crate::error::DaemonError::other(error.to_string()))?;
+        let user_home = if cfg!(debug_assertions) {
+            std::env::var_os("COCKPIT_USER_HOME")
+                .map(std::path::PathBuf::from)
+                .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()))
+        } else {
+            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+        }
+        .unwrap_or_else(|| config.home.clone());
+        let market = MarketService::new(
+            config.home.clone(),
+            user_home,
+            config.workspace_path.clone(),
+            adapters.clone(),
+            client.clone(),
+        );
 
         Ok(Self {
             config: Arc::new(config),
@@ -114,6 +132,7 @@ impl AppState {
             logwatch,
             pairing,
             remote,
+            market,
             csrf: Arc::new(crate::remote::auth::new_token()),
             client,
             started_at: Instant::now(),

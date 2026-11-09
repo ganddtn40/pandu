@@ -1,0 +1,66 @@
+schema_version: 1
+id: example-commit-messages
+name: "Example: Commit Message Coach"
+kind: skill
+version: 1.0.0
+short_description: Draft a Conventional Commits message from a staged diff without changing history.
+long_description: >-
+  An example fixture that shows how a skill entry is shaped. It reads a diff,
+  summarizes intent, and returns a subject line plus a short body. It requests
+  only read access and explicitly refuses to rewrite history. This entry is not
+  a real marketplace listing; it exists so the schema, CI checks, preview, and
+  install pipeline can be exercised without inventing a real author or project.
+categories:
+  - git
+  - writing
+agents:
+  - claude-code
+  - opencode
+source:
+  repo: https://github.com/cockpit-examples/commit-messages
+  commit: "1111111111111111111111111111111111111111"
+  content_sha256: 9c2240678e75338d8b079a83e5c3c8f60638b64c75eca9dad5acfdbcc4d0886e
+  files:
+    - SKILL.md
+    - references/style.md
+license: MIT
+trust: unreviewed
+example: true
+permissions:
+  - id: filesystem:read
+    description: Reads the diff and repository files the user points at.
+skills:
+  install:
+    - agent: claude-code
+      scopes:
+        - user
+        - project
+    - agent: opencode
+      scopes:
+        - user
+        - project
+readme: |
+  # Commit Message Coach
+
+  **This is an example fixture.** It is hidden from production builds and is
+  not a real marketplace listing.
+
+  The skill reads the staged diff, identifies the intent, and returns a
+  Conventional Commits subject line under 72 characters with a short body that
+  explains why the change exists.
+
+  ## What it reads
+
+  - The diff the user shares.
+  - Repository style notes the user points at.
+
+  ## What it never does
+
+  - It does not run `git commit`, `git reset`, or any history rewrite.
+  - It does not read credentials, dotfiles, or environment secrets.
+  - It does not send repository content anywhere.
+
+  ## Install notes
+
+  Cockpit copies the files into the agent's skill folder. The agent decides
+  when to load the skill; Cockpit never executes it.

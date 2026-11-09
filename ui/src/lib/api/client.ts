@@ -4,10 +4,19 @@ import type {
   AgentOutput,
   AgentSession,
   ApprovalDecision,
+  CatalogResponse,
   DemoSeedResponse,
   GuardEvent,
   GuardRule,
   Health,
+  InstallOutcome,
+  InstallPreview,
+  InstallScope,
+  InstalledResponse,
+  MarketDetail,
+  MarketKind,
+  MarketSettings,
+  MarketStatus,
   Overview,
   RemoteAuditResponse,
   RemoteClaimPoll,
@@ -30,6 +39,9 @@ import type {
   SnapshotDetailResponse,
   StepDetail,
   Step,
+  UndoOutcome,
+  UninstallOutcome,
+  UninstallPreview,
 } from './types';
 
 declare global {
@@ -299,6 +311,49 @@ export const daemonApi = {
     request<{ event: AgentEvent }>(`/agent-events/${encodeURIComponent(id)}/ack`, {
       method: 'POST',
     }),
+};
+
+/**
+ * Host-only skill and MCP market. Every install, uninstall, undo, and refresh
+ * call is a host mutation. The remote listener returns 404 for all of these.
+ */
+export const marketApi = {
+  catalog: () => request<CatalogResponse>('/market/catalog'),
+  refresh: () => request<CatalogResponse>('/market/refresh', { method: 'POST' }),
+  detail: (kind: MarketKind, id: string) =>
+    request<MarketDetail>(`/market/entries/${kind}/${encodeURIComponent(id)}`),
+  installed: () => request<InstalledResponse>('/market/installed'),
+  preview: (kind: MarketKind, id: string, agent: string, scope: InstallScope) =>
+    request<InstallPreview>('/market/preview', {
+      method: 'POST',
+      body: JSON.stringify({ kind, id, agent, scope }),
+    }),
+  install: (previewId: string, secrets: Record<string, string> = {}) =>
+    request<InstallOutcome>('/market/install', {
+      method: 'POST',
+      body: JSON.stringify({ previewId, secrets }),
+    }),
+  previewUninstall: (installId: string) =>
+    request<UninstallPreview>(
+      `/market/installed/${encodeURIComponent(installId)}/uninstall-preview`,
+    ),
+  uninstall: (installId: string, confirmEdited = false) =>
+    request<UninstallOutcome>(
+      `/market/installed/${encodeURIComponent(installId)}/uninstall`,
+      { method: 'POST', body: JSON.stringify({ confirmEdited }) },
+    ),
+  undo: (installId: string, confirmEdited = false) =>
+    request<UndoOutcome>(`/market/installed/${encodeURIComponent(installId)}/undo`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmEdited }),
+    }),
+  settings: () => request<MarketSettings>('/market/settings'),
+  updateSettings: (autoRefresh: boolean) =>
+    request<MarketSettings>('/market/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ autoRefresh }),
+    }),
+  status: () => request<MarketStatus>('/market/status'),
 };
 
 /**
