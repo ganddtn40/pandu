@@ -702,19 +702,17 @@
           type="button"
           aria-pressed={settings.autoRefresh}
           title={t('market.autoRefreshNote')}
+          data-testid="market-daily-refresh"
           onclick={toggleAutoRefresh}
         >
           <Icon name="clock" size={14} />
-          {t('market.autoRefresh')}
+          {t(settings.autoRefresh ? 'market.dailyRefreshOn' : 'market.dailyRefreshOff')}
         </button>
       </div>
-    {:else}
-      <div class="market-toolbar__right">
-        <button class="btn btn--ghost btn--small" type="button" onclick={loadInstalled}>
-          <Icon name="refresh" size={15} />
-          {t('common.retry')}
-        </button>
-      </div>
+      <p class="market-refresh-note" data-testid="market-refresh-note">
+        <Icon name="clock" size={13} />
+        {t('market.autoRefreshNote')}
+      </p>
     {/if}
   </div>
 
@@ -872,7 +870,6 @@
   {:else}
     <section class="market-installed-head">
       <div>
-        <h2>{t('market.installedTabTitle')}</h2>
         <p>{t('market.installedTabBody')}</p>
       </div>
       <span class="status-pill"><Icon name="shield" size={13} /> {t('market.hostOnly')}</span>
@@ -884,6 +881,14 @@
         <div>
           <strong>{t('market.installedError')}</strong>
           <p>{installedError}</p>
+          <button
+            class="btn btn--ghost btn--small market-banner__action"
+            type="button"
+            onclick={loadInstalled}
+          >
+            <Icon name="refresh" size={15} />
+            {t('common.retry')}
+          </button>
         </div>
       </section>
     {/if}

@@ -84,6 +84,17 @@ test('catalogue, instant search, filters and detail', async ({ page }) => {
   await shot(page, 'market-detail.png');
 });
 
+test('daily refresh shows its state and explains the GitHub request', async ({ page }) => {
+  await openMarket(page);
+  const toggle = page.getByTestId('market-daily-refresh');
+  await expect(toggle).toHaveText(/Daily refresh: Off/);
+  await expect(page.getByTestId('market-refresh-note')).toContainText('GitHub');
+  await toggle.click();
+  await expect(toggle).toHaveText(/Daily refresh: On/);
+  await toggle.click();
+  await expect(toggle).toHaveText(/Daily refresh: Off/);
+});
+
 test('skill install preview, installed tab, uninstall and undo', async ({ page }) => {
   await openMarket(page);
   await openDetail(page, SKILL_ID);
@@ -103,6 +114,10 @@ test('skill install preview, installed tab, uninstall and undo', async ({ page }
 
   await page.getByRole('button', { name: 'Done' }).click();
   await page.getByTestId('market-tab-installed').click();
+  await expect(
+    page.getByRole('heading', { name: 'Installed skills and MCP servers' }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry' })).toHaveCount(0);
   const installed = page
     .locator('[data-testid^="market-installed-"]')
     .filter({ hasText: SKILL_NAME });

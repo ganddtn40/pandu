@@ -6638,6 +6638,10 @@ html[data-glass-reason='reduced-transparency'] .panel {
   line-height: 1.55;
 }
 
+.market-banner__action {
+  margin-top: 8px;
+}
+
 .market-banner--danger {
   border-color: var(--danger-soft);
   background: var(--danger-soft);
@@ -6760,6 +6764,21 @@ html[data-glass-reason='reduced-transparency'] .panel {
   color: var(--text-faint);
   font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
   font-variant-numeric: tabular-nums;
+}
+
+.market-refresh-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -2px 0 12px;
+  color: var(--text-faint);
+  font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
+  line-height: 1.5;
+}
+
+.market-refresh-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .market-scroll {
