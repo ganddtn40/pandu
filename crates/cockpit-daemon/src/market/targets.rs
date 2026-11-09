@@ -236,18 +236,40 @@ fn resolve_mcp(
     let mut key_path = spec.key_path.clone();
     key_path.push(entry.id.clone());
     let snippet = manual_snippet(entry, format, &key_path)?;
-    let manual = (!spec.verified).then(|| ManualInstructions {
-        reason: format!(
-            "Cockpit has not verified {}'s MCP configuration for this build, so it will not write there.",
-            adapter.name
-        ),
-        path: display_path.clone(),
-        steps: vec![
-            format!("Open {display_path}."),
-            "Add the server entry below without removing existing keys.".to_string(),
-            "Restart the agent so it reads the new configuration.".to_string(),
-        ],
-        snippet,
+    let user_edit_blocked = scope == InstallScope::User && !spec.write_user_config;
+    let manual = (!spec.verified || user_edit_blocked).then(|| {
+        let project_path = spec
+            .project_paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| ".mcp.json".to_string());
+        let reason = if user_edit_blocked {
+            format!(
+                "{} keeps app state in {display_path}, so Cockpit will not edit it. Use the agent's own add command or install for the current project.",
+                adapter.name
+            )
+        } else {
+            format!(
+                "Cockpit has not verified {}'s MCP configuration for this build, so it will not write there.",
+                adapter.name
+            )
+        };
+        let mut steps = Vec::new();
+        if let Some(command) = add_command(entry, style) {
+            steps.push(format!("Run `{command}` with the real secret values."));
+        }
+        if !spec.project_paths.is_empty() {
+            steps.push(format!(
+                "Or choose Project scope; Cockpit writes {project_path} instead of touching {display_path}."
+            ));
+        }
+        steps.push("Restart the agent so it reads the new configuration.".to_string());
+        ManualInstructions {
+            reason,
+            path: display_path.clone(),
+            steps,
+            snippet,
+        }
     });
     Ok(ResolvedTarget {
         agent: adapter.id.clone(),
@@ -263,6 +285,58 @@ fn resolve_mcp(
         },
         manual,
     })
+}
+
+fn add_command(entry: &MarketEntry, style: McpStyle) -> Option<String> {
+    let recipe = entry.mcp.as_ref()?;
+    match style {
+        McpStyle::Claude => match recipe.transport {
+            McpTransport::Stdio => {
+                let command = recipe.command.as_deref()?;
+                let mut parts = vec![
+                    "claude".to_string(),
+                    "mcp".to_string(),
+                    "add".to_string(),
+                    entry.id.clone(),
+                ];
+                for name in &recipe.secrets {
+                    parts.push("-e".to_string());
+                    parts.push(format!("{name}=<value>"));
+                }
+                parts.push("--".to_string());
+                parts.push(command.to_string());
+                parts.extend(recipe.args.iter().cloned());
+                Some(parts.join(" "))
+            }
+            McpTransport::Http => {
+                let url = recipe.url.as_deref()?;
+                Some(format!(
+                    "claude mcp add --transport http {} {url}",
+                    entry.id
+                ))
+            }
+        },
+        McpStyle::Codex => match recipe.transport {
+            McpTransport::Stdio => {
+                let command = recipe.command.as_deref()?;
+                let mut parts = vec![
+                    "codex".to_string(),
+                    "mcp".to_string(),
+                    "add".to_string(),
+                    entry.id.clone(),
+                    "--".to_string(),
+                    command.to_string(),
+                ];
+                parts.extend(recipe.args.iter().cloned());
+                Some(parts.join(" "))
+            }
+            McpTransport::Http => recipe
+                .url
+                .as_deref()
+                .map(|url| format!("codex mcp add {} --url {url}", entry.id)),
+        },
+        McpStyle::OpenCode => None,
+    }
 }
 
 fn scope_label(scope: InstallScope) -> &'static str {
@@ -542,6 +616,7 @@ project_paths = [".mcp.json"]
 format = "json"
 style = "claude"
 key_path = ["mcpServers"]
+write_user_config = true
 verified = true
 "#;
 
@@ -668,6 +743,46 @@ verified = true
         assert!(!target.verified);
         assert!(target.manual.is_some());
         assert!(target.manual.unwrap().snippet.contains("mcpServers"));
+    }
+
+    #[test]
+    fn app_state_user_config_is_manual_but_project_scope_writes() {
+        let mut adapter = Adapter::from_toml("claude-code", ADAPTER).unwrap();
+        adapter.mcp.as_mut().unwrap().write_user_config = false;
+        let registry = AdapterRegistry::new(vec![adapter], Vec::new());
+        let context = TargetContext {
+            adapters: &registry,
+            user_home: Path::new("/home/tester"),
+            workspace: Some(Path::new("/work/project")),
+        };
+        let target = resolve(
+            &entry(MarketKind::Mcp),
+            "claude-code",
+            InstallScope::User,
+            &context,
+        )
+        .unwrap();
+        assert!(target.verified);
+        let manual = target.manual.as_ref().expect("manual instructions");
+        assert!(
+            manual
+                .steps
+                .iter()
+                .any(|step| step.contains("claude mcp add"))
+        );
+        assert!(manual.steps.iter().any(|step| step.contains(".mcp.json")));
+        assert_eq!(manual.path, "~/.claude.json");
+
+        let target = resolve(
+            &entry(MarketKind::Mcp),
+            "claude-code",
+            InstallScope::Project,
+            &context,
+        )
+        .unwrap();
+        assert!(target.manual.is_none());
+        let (path, _, _, _, _) = target.mcp().unwrap();
+        assert_eq!(path, Path::new("/work/project/.mcp.json"));
     }
 
     #[test]

@@ -29,7 +29,11 @@ mkdirSync(home, { recursive: true });
 
 const isMarket = mode === 'market' || mode === 'market-offline';
 const userHome = path.join(home, 'user');
-if (isMarket) mkdirSync(userHome, { recursive: true });
+const workspace = path.join(home, 'workspace');
+if (isMarket) {
+  mkdirSync(userHome, { recursive: true });
+  mkdirSync(workspace, { recursive: true });
+}
 
 const child = spawn(binary, ['serve'], {
   cwd: root,
@@ -46,6 +50,7 @@ const child = spawn(binary, ['serve'], {
           // Debug-only overrides: the market daemon reads its registry from the
           // repository and installs into a disposable home, never the real one.
           COCKPIT_USER_HOME: userHome,
+          COCKPIT_WORKSPACE: workspace,
           COCKPIT_MARKET_REGISTRY: path.join(root, 'registry'),
           COCKPIT_MARKET_LOCAL_SOURCE: path.join(root, 'registry', 'fixtures'),
           COCKPIT_MARKET_OFFLINE: mode === 'market-offline' ? '1' : '0',

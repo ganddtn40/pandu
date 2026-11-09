@@ -111,6 +111,7 @@ pub struct PlannedFile {
     pub bytes: Vec<u8>,
     pub sha256: String,
     pub action: PlannedAction,
+    pub snapshot: Option<FileSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +125,62 @@ pub struct PlannedConfig {
     pub after: Value,
     pub action: PlannedAction,
     pub secret_names: Vec<String>,
+    pub snapshot: Option<FileSnapshot>,
+    pub diff: String,
+}
+
+/// What the preview saw on disk. Re-checked before the first write and again
+/// immediately before the atomic rename so an editor save cannot be lost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileSnapshot {
+    pub sha256: String,
+    pub modified: Option<std::time::SystemTime>,
+    pub len: u64,
+}
+
+impl FileSnapshot {
+    fn capture(path: &Path) -> Result<Option<Self>, MarketError> {
+        match std::fs::metadata(path) {
+            Ok(metadata) if metadata.is_file() => {
+                let bytes = std::fs::read(path).map_err(|error| {
+                    MarketError::Install(format!("Could not read {}: {error}", path.display()))
+                })?;
+                Ok(Some(Self {
+                    sha256: hex(&Sha256::digest(&bytes)),
+                    modified: metadata.modified().ok(),
+                    len: metadata.len(),
+                }))
+            }
+            Ok(_) => Err(MarketError::Install(format!(
+                "{} is not a regular file.",
+                path.display()
+            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(MarketError::Install(format!(
+                "Could not inspect {}: {error}",
+                path.display()
+            ))),
+        }
+    }
+}
+
+fn ensure_unchanged(
+    path: &Path,
+    expected: Option<&FileSnapshot>,
+    display: &str,
+) -> Result<(), MarketError> {
+    let current = FileSnapshot::capture(path)?;
+    let unchanged = match (expected, current.as_ref()) {
+        (None, None) => true,
+        (Some(expected), Some(current)) => expected == current,
+        _ => false,
+    };
+    if !unchanged {
+        return Err(MarketError::Install(format!(
+            "{display} changed after the preview. Nothing was changed; preview the install again."
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -326,6 +383,7 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
                     let path = root.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
                     let display_path = format!("{display_root}/{relative}");
                     let sha256 = hex(&Sha256::digest(&bytes));
+                    let snapshot = FileSnapshot::capture(&path)?;
                     let (action, diff, content) =
                         preview_file(&path, &bytes, &sha256, inputs.existing)?;
                     if action == PlannedAction::Conflict {
@@ -339,6 +397,7 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
                         bytes,
                         sha256,
                         action,
+                        snapshot,
                     });
                     // Keep the serializable preview in the same order.
                     let _ = (diff, content, binary);
@@ -360,6 +419,7 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
                 let edited =
                     config_edit::apply_change(original.as_deref(), *format, key_path, &after)?;
                 total_bytes = total_bytes.saturating_add(edited.len() as u64);
+                let snapshot = FileSnapshot::capture(path)?;
                 let action = match (inputs.existing.and_then(|m| m.config.as_ref()), &before) {
                     (Some(installed), Some(current)) => {
                         if value_matches(current, &installed.value, &installed.secret_names, None) {
@@ -396,8 +456,13 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
                             .to_string(),
                     );
                 }
-                let diff = line_diff(original.as_deref(), &edited);
-                let _ = &diff;
+                let diff = preview_config_diff(
+                    display_path,
+                    key_path,
+                    before.as_ref(),
+                    &after,
+                    &secret_names,
+                );
                 config = Some(PlannedConfig {
                     path: path.clone(),
                     display_path: display_path.clone(),
@@ -408,8 +473,9 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
                     after: after.clone(),
                     action,
                     secret_names: secret_names.clone(),
+                    snapshot,
+                    diff,
                 });
-                let _ = secret_names;
             }
         }
     }
@@ -445,21 +511,19 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
         .collect::<Vec<_>>();
 
     let preview_config = config.as_ref().map(|config| {
-        let edited = config_edit::apply_change(
-            config.original.as_deref(),
-            config.format,
-            &config.key_path,
-            &config.after,
-        )
-        .unwrap_or_default();
+        let before = config
+            .before
+            .as_ref()
+            .map(|value| redact_value(value.clone(), &config.secret_names));
+        let after = redact_after(&config.after, &config.secret_names);
         PreviewConfig {
             path: config.path.display().to_string(),
             display_path: config.display_path.clone(),
             format: config.format,
             key_path: config.key_path.clone(),
-            before: config.before.clone(),
-            after: config.after.clone(),
-            diff: line_diff(config.original.as_deref(), &edited),
+            before,
+            after,
+            diff: config.diff.clone(),
             action: config.action.as_str().to_string(),
             secret_names: config.secret_names.clone(),
         }
@@ -509,6 +573,157 @@ pub fn build_preview(inputs: PreviewInputs<'_>) -> Result<PreviewPlan, MarketErr
             conflicts,
         },
     })
+}
+
+/// Build a preview diff that contains only the edited key subtree. Values that
+/// look like secrets, and every value under `env`/`environment`, are redacted so
+/// an unrelated credential in the same file never reaches the UI or logs.
+fn preview_config_diff(
+    display_path: &str,
+    key_path: &[String],
+    before: Option<&Value>,
+    after: &Value,
+    secret_names: &[String],
+) -> String {
+    let key = key_path.join(".");
+    let mut output = format!("--- a/{display_path}\n+++ b/{display_path}\n@@ {key} @@\n");
+    match before {
+        Some(before) => {
+            let redacted = redact_value(before.clone(), secret_names);
+            for line in pretty_lines(&redacted) {
+                output.push('-');
+                output.push_str(&line);
+                output.push('\n');
+            }
+        }
+        None => output.push_str("-(not set)\n"),
+    }
+    let redacted = redact_after(after, secret_names);
+    for line in pretty_lines(&redacted) {
+        output.push('+');
+        output.push_str(&line);
+        output.push('\n');
+    }
+    output
+}
+
+fn pretty_lines(value: &Value) -> Vec<String> {
+    serde_json::to_string_pretty(value)
+        .unwrap_or_else(|_| "null".into())
+        .lines()
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn is_secret_key(key: &str, secret_names: &[String]) -> bool {
+    if secret_names.iter().any(|name| name == key) {
+        return true;
+    }
+    let lower = key.to_ascii_lowercase();
+    [
+        "secret",
+        "token",
+        "password",
+        "credential",
+        "api_key",
+        "apikey",
+        "private_key",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn redact_value(value: Value, secret_names: &[String]) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| {
+                    let lower = key.to_ascii_lowercase();
+                    if lower == "env" || lower == "environment" {
+                        let redacted = match value {
+                            Value::Object(entries) => Value::Object(
+                                entries
+                                    .into_iter()
+                                    .map(|(name, _)| (name, json!("<redacted>")))
+                                    .collect(),
+                            ),
+                            _ => json!("<redacted>"),
+                        };
+                        (key, redacted)
+                    } else if is_secret_key(&key, secret_names) {
+                        (key, json!("<redacted>"))
+                    } else {
+                        (key, redact_value(value, secret_names))
+                    }
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| redact_value(item, secret_names))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn redact_after(value: &Value, secret_names: &[String]) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    let lower = key.to_ascii_lowercase();
+                    if lower == "env" || lower == "environment" {
+                        let redacted = match value {
+                            Value::Object(entries) => Value::Object(
+                                entries
+                                    .iter()
+                                    .map(|(name, value)| {
+                                        let placeholder = value.as_str().is_some_and(|text| {
+                                            text.starts_with("<secret:")
+                                                || text.starts_with("{env:")
+                                        });
+                                        (
+                                            name.clone(),
+                                            if placeholder {
+                                                value.clone()
+                                            } else {
+                                                json!("<redacted>")
+                                            },
+                                        )
+                                    })
+                                    .collect(),
+                            ),
+                            _ => json!("<redacted>"),
+                        };
+                        (key.clone(), redacted)
+                    } else if is_secret_key(key, secret_names) {
+                        let placeholder = value
+                            .as_str()
+                            .is_some_and(|text| text.starts_with("<secret:"));
+                        (
+                            key.clone(),
+                            if placeholder {
+                                value.clone()
+                            } else {
+                                json!("<redacted>")
+                            },
+                        )
+                    } else {
+                        (key.clone(), redact_after(value, secret_names))
+                    }
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| redact_after(item, secret_names))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 fn preview_file(
@@ -585,7 +800,8 @@ pub fn apply_plan(
 ) -> Result<InstallOutcome, MarketError> {
     if plan.preview.manual.is_some() {
         return Err(MarketError::Install(
-            "This target is unverified. Cockpit will not write it; follow the manual steps.".into(),
+            "This target is manual-only. Cockpit will not write it; follow the manual steps."
+                .into(),
         ));
     }
     if !plan.preview.conflicts.is_empty() {
@@ -621,6 +837,7 @@ pub fn apply_plan(
                 }
             }
             PlannedAction::Overwrite => {
+                ensure_unchanged(&file.path, file.snapshot.as_ref(), &file.display_path)?;
                 let current = std::fs::read(&file.path).map_err(|error| {
                     MarketError::Install(format!("Could not read {}: {error}", file.display_path))
                 })?;
@@ -642,13 +859,7 @@ pub fn apply_plan(
         }
     }
     if let Some(config) = &plan.config {
-        let current = read_config(&config.path)?;
-        if current != config.original {
-            return Err(MarketError::Install(format!(
-                "{} changed after the preview. Nothing was changed.",
-                config.display_path
-            )));
-        }
+        ensure_unchanged(&config.path, config.snapshot.as_ref(), &config.display_path)?;
     }
 
     let install_id = plan
@@ -727,7 +938,17 @@ fn apply_inner(
 
     for file in &plan.files {
         if file.action != PlannedAction::Unchanged {
-            atomic_write(&file.path, &file.bytes, roots)?;
+            let expected = match file.action {
+                PlannedAction::Overwrite => file.snapshot.as_ref(),
+                _ => None,
+            };
+            if file.action == PlannedAction::Create && file.path.exists() {
+                return Err(MarketError::Install(format!(
+                    "{} appeared after the preview. Nothing was changed.",
+                    file.display_path
+                )));
+            }
+            atomic_write_checked(&file.path, &file.bytes, roots, expected)?;
             files_written += 1;
             if file.action == PlannedAction::Create {
                 created_files.push(file.path.clone());
@@ -778,6 +999,7 @@ fn apply_inner(
             .target
             .mcp()
             .ok_or_else(|| MarketError::Install("The MCP target is invalid.".into()))?;
+        ensure_unchanged(&config.path, config.snapshot.as_ref(), &config.display_path)?;
         let value = targets::render_mcp_value(&plan.entry, style, Some(secrets))?;
         let contents = config_edit::apply_change(
             config.original.as_deref(),
@@ -785,7 +1007,12 @@ fn apply_inner(
             &config.key_path,
             &value,
         )?;
-        atomic_write(&config.path, contents.as_bytes(), roots)?;
+        atomic_write_checked(
+            &config.path,
+            contents.as_bytes(),
+            roots,
+            config.snapshot.as_ref(),
+        )?;
         installed_config = Some(InstalledConfig {
             path: config.path.display().to_string(),
             display_path: config.display_path.clone(),
@@ -1380,7 +1607,7 @@ fn create_backup(
     previous_manifest: Option<&InstallManifest>,
     roots: &[PathBuf],
 ) -> Result<(), MarketError> {
-    let dir = backup_dir(home, backup_id);
+    let dir = new_backup_dir(home, backup_id);
     let files_dir = dir.join("files");
     std::fs::create_dir_all(&files_dir).map_err(|error| {
         MarketError::Install(format!("Could not create the backup folder: {error}"))
@@ -1396,7 +1623,7 @@ fn create_backup(
             std::fs::copy(path, &target).map_err(|error| {
                 MarketError::Install(format!("Could not back up {}: {error}", path.display()))
             })?;
-            set_file_permissions(&target);
+            copy_permissions(path, &target);
             let bytes = std::fs::read(&target).map_err(|error| {
                 MarketError::Install(format!("Could not read the backup: {error}"))
             })?;
@@ -1423,7 +1650,7 @@ fn create_backup(
                 std::fs::copy(path, &target).map_err(|error| {
                     MarketError::Install(format!("Could not back up {}: {error}", path.display()))
                 })?;
-                set_file_permissions(&target);
+                copy_permissions(path, &target);
                 let bytes = std::fs::read(&target).map_err(|error| {
                     MarketError::Install(format!("Could not read the config backup: {error}"))
                 })?;
@@ -1549,6 +1776,15 @@ fn restore_backup(
 }
 
 fn atomic_write(path: &Path, bytes: &[u8], roots: &[PathBuf]) -> Result<(), MarketError> {
+    atomic_write_checked(path, bytes, roots, None)
+}
+
+fn atomic_write_checked(
+    path: &Path,
+    bytes: &[u8],
+    roots: &[PathBuf],
+    expected: Option<&FileSnapshot>,
+) -> Result<(), MarketError> {
     ensure_allowed(path, roots)?;
     let parent = path.parent().ok_or_else(|| {
         MarketError::Install(format!("{} has no parent directory.", path.display()))
@@ -1557,6 +1793,9 @@ fn atomic_write(path: &Path, bytes: &[u8], roots: &[PathBuf]) -> Result<(), Mark
         MarketError::Install(format!("Could not create {}: {error}", parent.display()))
     })?;
     set_dir_permissions(parent);
+    let existing_permissions = std::fs::metadata(path)
+        .ok()
+        .map(|metadata| metadata.permissions());
     let suffix = rand::random::<u64>();
     let file_name = path
         .file_name()
@@ -1574,6 +1813,17 @@ fn atomic_write(path: &Path, bytes: &[u8], roots: &[PathBuf]) -> Result<(), Mark
         file.sync_all().ok();
     }
     set_file_permissions(&temp);
+    if let Some(expected) = expected {
+        let current = FileSnapshot::capture(path)?;
+        let unchanged = current.as_ref().is_some_and(|current| current == expected);
+        if !unchanged {
+            let _ = std::fs::remove_file(&temp);
+            return Err(MarketError::Install(format!(
+                "{} changed after the preview. Nothing was changed; preview the install again.",
+                path.display()
+            )));
+        }
+    }
     #[cfg(windows)]
     {
         if path.exists() {
@@ -1607,6 +1857,11 @@ fn atomic_write(path: &Path, bytes: &[u8], roots: &[PathBuf]) -> Result<(), Mark
             let _ = std::fs::remove_file(&temp);
             MarketError::Install(format!("Could not write {}: {error}", path.display()))
         })?;
+    }
+    if let Some(permissions) = existing_permissions {
+        let _ = std::fs::set_permissions(path, permissions);
+    } else {
+        set_file_permissions(path);
     }
     Ok(())
 }
@@ -1707,7 +1962,24 @@ fn prune_backups(home: &Path) {
 }
 
 fn backup_dir(home: &Path, backup_id: &str) -> PathBuf {
-    home.join("market").join("backups").join(backup_id)
+    let root = home.join("market").join("backups");
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == backup_id || name.ends_with(&format!("-{backup_id}")) {
+                return entry.path();
+            }
+        }
+    }
+    root.join(backup_id)
+}
+
+fn new_backup_dir(home: &Path, backup_id: &str) -> PathBuf {
+    let stamp = Utc::now().format("%Y-%m-%dT%H-%M-%S%.3fZ");
+    home.join("market")
+        .join("backups")
+        .join(format!("{stamp}-{backup_id}"))
 }
 
 fn manifest_path(home: &Path, install_id: &str) -> PathBuf {
@@ -1759,6 +2031,12 @@ fn ensure_allowed(path: &Path, roots: &[PathBuf]) -> Result<(), MarketError> {
         )));
     }
     Ok(())
+}
+
+fn copy_permissions(source: &Path, target: &Path) {
+    if let Ok(metadata) = std::fs::metadata(source) {
+        let _ = std::fs::set_permissions(target, metadata.permissions());
+    }
 }
 
 fn set_file_permissions(path: &Path) {
@@ -2107,5 +2385,253 @@ mod tests {
         let after =
             apply_change(Some(before), ConfigFormat::Jsonc, &["b".into()], &json!(2)).unwrap();
         assert!(after.contains("\"b\": 2"));
+    }
+
+    fn secrets() -> BTreeMap<String, String> {
+        let mut secrets = BTreeMap::new();
+        secrets.insert("DEMO_KEY".to_string(), "value".to_string());
+        secrets
+    }
+
+    fn mcp_plan(config: &Path) -> PreviewPlan {
+        let entry = entry(MarketKind::Mcp);
+        let target = mcp_target(config);
+        build_preview(PreviewInputs {
+            entry: &entry,
+            target: &target,
+            tree: None,
+            existing: None,
+            preview_id: "preview".into(),
+        })
+        .unwrap()
+    }
+
+    fn mcp_preview_error(config: &Path) -> MarketError {
+        let entry = entry(MarketKind::Mcp);
+        let target = mcp_target(config);
+        build_preview(PreviewInputs {
+            entry: &entry,
+            target: &target,
+            tree: None,
+            existing: None,
+            preview_id: "preview".into(),
+        })
+        .unwrap_err()
+    }
+
+    #[test]
+    fn preview_aborts_when_the_config_changes_before_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        std::fs::write(&config, "{\n  \"unknown\": true\n}\n").unwrap();
+        let plan = mcp_plan(&config);
+        std::fs::write(&config, "{\n  \"unknown\": false\n}\n").unwrap();
+        let error = apply_plan(&home, &user_home, None, &plan, &secrets()).unwrap_err();
+        assert!(
+            error.to_string().contains("changed after the preview"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            "{\n  \"unknown\": false\n}\n"
+        );
+    }
+
+    #[test]
+    fn preview_refuses_a_config_that_does_not_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        let broken = "{\n  \"a\": \n}\n";
+        std::fs::write(&config, broken).unwrap();
+        let error = mcp_preview_error(&config);
+        assert!(error.to_string().contains("could not be parsed"), "{error}");
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), broken);
+    }
+
+    #[test]
+    fn preview_refuses_a_config_over_five_megabytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        std::fs::write(&config, vec![b' '; 5 * 1024 * 1024 + 1]).unwrap();
+        let error = mcp_preview_error(&config);
+        assert!(error.to_string().contains("larger than 2 MiB"), "{error}");
+        assert_eq!(
+            std::fs::metadata(&config).unwrap().len(),
+            5 * 1024 * 1024 + 1
+        );
+    }
+
+    #[test]
+    fn install_and_uninstall_preserve_crlf_bom_and_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        let before = "\u{feff}{\r\n  // keep me\r\n  \"unknown\": {\"a\": 1},\r\n  \"mcpServers\": {\"other\": {\"command\": \"x\"}}\r\n}\r\n";
+        std::fs::write(&config, before).unwrap();
+        let plan = mcp_plan(&config);
+        let outcome = apply_plan(&home, &user_home, None, &plan, &secrets()).unwrap();
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert!(text.starts_with('\u{feff}'), "{text:?}");
+        assert!(text.contains("// keep me\r\n"), "{text:?}");
+        assert!(text.contains("\"unknown\": {\"a\": 1},\r\n"), "{text:?}");
+        assert!(text.contains("\"other\""), "{text:?}");
+        assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
+        assert_eq!(
+            read_value(
+                &text,
+                ConfigFormat::Jsonc,
+                &["mcpServers".into(), "demo".into()],
+            )
+            .unwrap()
+            .unwrap()["env"]["DEMO_KEY"],
+            "value"
+        );
+
+        let manifest = load_manifest(&home, &user_home, None, &outcome.install_id).unwrap();
+        uninstall(&home, &user_home, None, &manifest, false).unwrap();
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert!(text.starts_with('\u{feff}'), "{text:?}");
+        assert!(text.contains("// keep me\r\n"), "{text:?}");
+        assert!(text.contains("\"unknown\": {\"a\": 1},\r\n"), "{text:?}");
+        assert!(!text.contains("\"demo\""), "{text:?}");
+        assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
+    }
+
+    #[test]
+    fn preview_diff_shows_only_the_changed_key_and_redacts_other_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        std::fs::write(
+            &config,
+            r#"{
+  "apiKey": "unrelated-secret-value",
+  "mcpServers": {
+    "other": {"command": "other", "env": {"OTHER_TOKEN": "other-secret"}},
+    "demo": {"command": "npx", "env": {"DEMO_KEY": "old-demo-secret"}}
+  },
+  "unknown": {"token": "unknown-secret"}
+}
+"#,
+        )
+        .unwrap();
+        let plan = mcp_plan(&config);
+        let preview = plan.preview.config.as_ref().expect("config preview");
+        assert!(
+            preview.diff.contains("@@ mcpServers.demo @@"),
+            "{}",
+            preview.diff
+        );
+        for secret in [
+            "unrelated-secret-value",
+            "other-secret",
+            "old-demo-secret",
+            "unknown-secret",
+        ] {
+            assert!(!preview.diff.contains(secret), "{}", preview.diff);
+        }
+        assert!(!preview.diff.contains("\"other\""), "{}", preview.diff);
+        assert!(!preview.diff.contains("unknown"), "{}", preview.diff);
+        let before = preview.before.as_ref().expect("before");
+        assert_eq!(before["env"]["DEMO_KEY"], "<redacted>");
+        assert_eq!(preview.after["env"]["DEMO_KEY"], "<secret:DEMO_KEY>");
+        assert_eq!(
+            plan.config.as_ref().unwrap().before.as_ref().unwrap()["env"]["DEMO_KEY"],
+            "old-demo-secret",
+            "the internal plan keeps the real value for verification"
+        );
+    }
+
+    #[test]
+    fn backups_are_timestamped_and_hold_the_original_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        let before = "{\n  \"unknown\": true\n}\n";
+        std::fs::write(&config, before).unwrap();
+        let plan = mcp_plan(&config);
+        let outcome = apply_plan(&home, &user_home, None, &plan, &secrets()).unwrap();
+        let root = home.join("market").join("backups");
+        let entries: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().collect();
+        assert_eq!(entries.len(), 1);
+        let name = entries[0].file_name().to_string_lossy().to_string();
+        assert!(name.ends_with(&format!("-{}", outcome.backup_id)), "{name}");
+        let stamp = &name[..name.len() - outcome.backup_id.len() - 1];
+        assert!(stamp.starts_with("20"), "{stamp}");
+        assert!(stamp.contains('T') && stamp.ends_with('Z'), "{stamp}");
+        assert_eq!(
+            std::fs::read_to_string(entries[0].path().join("config")).unwrap(),
+            before
+        );
+        assert!(entries[0].path().join("backup.json").exists());
+    }
+
+    #[test]
+    fn installs_into_a_user_home_with_spaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let user_home = dir.path().join("user home with spaces");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        let plan = mcp_plan(&config);
+        apply_plan(&home, &user_home, None, &plan, &secrets()).unwrap();
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert_eq!(
+            read_value(
+                &text,
+                ConfigFormat::Jsonc,
+                &["mcpServers".into(), "demo".into()],
+            )
+            .unwrap()
+            .unwrap()["command"],
+            "npx"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_config_permissions_survive_the_write_and_backup() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let user_home = dir.path().join("user");
+        std::fs::create_dir_all(&user_home).unwrap();
+        let config = user_home.join(".claude.json");
+        std::fs::write(&config, "{\n  \"unknown\": true\n}\n").unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let plan = mcp_plan(&config);
+        let outcome = apply_plan(&home, &user_home, None, &plan, &secrets()).unwrap();
+        let mode = std::fs::metadata(&config).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
+        let backups = home.join("market").join("backups");
+        let backup_dir = std::fs::read_dir(&backups)
+            .unwrap()
+            .flatten()
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(&outcome.backup_id)
+            })
+            .expect("timestamped backup");
+        let backup_mode = std::fs::metadata(backup_dir.path().join("config"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(backup_mode, 0o640);
     }
 }

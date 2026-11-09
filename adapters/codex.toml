@@ -30,4 +30,5 @@ project_paths = [".codex/config.toml"]
 format = "toml"
 style = "codex"
 key_path = ["mcp_servers"]
+write_user_config = true
 verified = true

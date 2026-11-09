@@ -411,22 +411,33 @@ untrusted input, not as a package manager. The full user-facing model is in
   over 4 MiB, and trees over 1,000 files are refused. A gzip or tar bomb is
   bounded while it is read, not after it is on disk.
 - **Preview, not a silent write.** The preview shows every planned file with
-  New/Overwrite/Unchanged/Conflict, a real line diff for existing text files,
-  the configuration path and key, permissions, source, license, tier, and the
-  exact MCP command. Conflicts block the install. A preview is held in memory
-  for ten minutes and can be used once.
+  New/Overwrite/Unchanged/Conflict, a compact diff of only the configuration key
+  being edited, the resolved absolute path with a `~` display path, permissions,
+  source, license, tier, and the exact MCP command. Values under
+  `env`/`environment` and values with secret-like names are redacted from the
+  preview diff. Conflicts block the install. A preview is held in memory for ten
+  minutes and can be used once.
 - **No execution.** Cockpit never runs a package manager, installer script, or
   MCP server. For MCP it writes the agent configuration and displays the command
   the agent will run, with a warning that the agent executes third-party code.
+  User-level files that double as app state (Claude Code's `~/.claude.json`) are
+  never edited: the adapter sets `write_user_config = false`, and Cockpit shows
+  the agent's add command or the project-scope `.mcp.json`.
 - **Comment-preserving edits.** TOML is edited with `toml_edit`; JSON/JSONC
-  edits preserve comments and unknown keys. A key whose value is unchanged is
-  not rewritten. Configuration is backed up before the edit.
+  edits preserve comments, unknown keys, trailing commas, CRLF, and a UTF-8 BOM.
+  A key whose value is unchanged is not rewritten, and a file that does not
+  parse is refused instead of replaced.
+- **Concurrent edits are detected.** The preview records each file's SHA-256,
+  size, and modification time. The same snapshot is checked before the first
+  write and again immediately before the atomic rename. If an editor saves in
+  between, the install aborts and asks for a new preview; nothing is overwritten.
 - **Atomic writes and recovery.** Files are written to a temporary path and
   renamed atomically. A journal is written before the first mutation. If the
-  process dies mid-install, the next start rolls the journal back. A manifest
-  records the install id, entry, version, trust, source, license, agent, scope,
-  target root, file hashes, config path and redacted value, backup id, and
-  permission and secret names.
+  process dies mid-install, the next start rolls the journal back. Backups live
+  in a timestamped folder and copy the source permissions. A manifest records
+  the install id, entry, version, trust, source, license, agent, scope, target
+  root, file hashes, config path and redacted value, backup id, and permission
+  and secret names.
 - **Secrets stay local.** The registry stores environment variable names, never
   values. The UI asks for a required secret at install time. The value is
   written only to the agent configuration where that agent expects a literal
@@ -476,7 +487,8 @@ Evidence: `crates/cockpit-daemon/tests/market.rs`:
 `markdown_blocks_images_html_and_dangerous_schemes`,
 `skill_install_uninstall_and_undo_round_trip`,
 `uninstall_preserves_user_edited_files`,
-`mcp_install_edits_config_without_losing_comments_or_secrets`,
+`mcp_install_edits_project_config_without_losing_comments_or_secrets`,
+`claude_user_scope_mcp_is_manual_and_never_touches_app_state`,
 `unverified_agents_get_manual_instructions_and_no_write`,
 `config_round_trip_preserves_comments_and_unknown_keys`,
 `offline_catalog_uses_the_verified_cache_and_fails_closed`,
@@ -485,7 +497,8 @@ Evidence: `crates/cockpit-daemon/tests/market.rs`:
 `tree_hash_is_order_independent_and_verifies`, and
 `remote_listener_never_mounts_proxy_routes_or_host_management`.
 Unit tests: `market::registry_check::tests::*`,
-`market::archive::tests::*`, `market::config_edit::tests::*`, and
+`market::archive::tests::*`, `market::config_edit::tests::*`,
+`market::install::tests::*`, `market::targets::tests::*`, and
 `market::signing::tests::generated_keys_sign_and_verify`.
 
 ## 4. Tests that gate this phase

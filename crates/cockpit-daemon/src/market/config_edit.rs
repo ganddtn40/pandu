@@ -12,6 +12,114 @@ use toml_edit::{Array, DocumentMut, Item, Table, Value as TomlValue};
 
 use super::MarketError;
 
+/// UTF-8 byte-order mark. Some Windows editors add it; both parsers reject it,
+/// so Cockpit strips it before parsing and writes it back afterwards.
+const UTF8_BOM: char = '\u{feff}';
+
+fn split_bom(contents: &str) -> (bool, &str) {
+    match contents.strip_prefix(UTF8_BOM) {
+        Some(rest) => (true, rest),
+        None => (false, contents),
+    }
+}
+
+fn join_bom(bom: bool, text: String) -> String {
+    if bom {
+        let mut output = String::with_capacity(text.len() + 3);
+        output.push(UTF8_BOM);
+        output.push_str(&text);
+        output
+    } else {
+        text
+    }
+}
+
+fn detect_newline(text: &str) -> &'static str {
+    let bytes = text.as_bytes();
+    let mut crlf = 0usize;
+    let mut lf = 0usize;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            lf += 1;
+            if index > 0 && bytes[index - 1] == b'\r' {
+                crlf += 1;
+            }
+        }
+    }
+    if crlf > lf - crlf { "\r\n" } else { "\n" }
+}
+
+fn normalize_newlines(text: &str) -> String {
+    if text.contains("\r\n") {
+        text.replace("\r\n", "\n")
+    } else {
+        text.to_string()
+    }
+}
+
+fn line_content(line: &str) -> &str {
+    line.trim_end_matches(['\r', '\n'])
+}
+
+/// Splice the edited lines into the original text so every line outside the
+/// changed region keeps its exact bytes, including CRLF endings and comments.
+fn preserve_lines(original: &str, edited: &str) -> String {
+    let newline = detect_newline(original);
+    let old_lines: Vec<&str> = original.split_inclusive('\n').collect();
+    let new_lines: Vec<&str> = edited.split_inclusive('\n').collect();
+    let mut prefix = 0usize;
+    while prefix < old_lines.len()
+        && prefix < new_lines.len()
+        && line_content(old_lines[prefix]) == line_content(new_lines[prefix])
+    {
+        prefix += 1;
+    }
+    let max_suffix = old_lines
+        .len()
+        .saturating_sub(prefix)
+        .min(new_lines.len().saturating_sub(prefix));
+    let mut suffix = 0usize;
+    while suffix < max_suffix
+        && line_content(old_lines[old_lines.len() - 1 - suffix])
+            == line_content(new_lines[new_lines.len() - 1 - suffix])
+    {
+        suffix += 1;
+    }
+    let mut output = String::with_capacity(original.len().max(edited.len()) + 64);
+    for line in &old_lines[..prefix] {
+        output.push_str(line);
+    }
+    let middle = &new_lines[prefix..new_lines.len() - suffix];
+    for (index, line) in middle.iter().enumerate() {
+        output.push_str(line_content(line));
+        let last = index + 1 == middle.len();
+        if !last || edited.ends_with('\n') {
+            output.push_str(newline);
+        }
+    }
+    for line in &old_lines[old_lines.len() - suffix..] {
+        output.push_str(line);
+    }
+    output
+}
+
+fn verify_value(
+    contents: &str,
+    format: ConfigFormat,
+    key_path: &[String],
+    expected: &Value,
+) -> Result<(), MarketError> {
+    match read_value(contents, format, key_path)? {
+        Some(actual) if actual == *expected => Ok(()),
+        Some(_) => Err(MarketError::Config(
+            "The edited configuration did not keep the requested value.".into(),
+        )),
+        None => Err(MarketError::Config(
+            "The edited configuration lost the requested key.".into(),
+        )),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConfigFormat {
@@ -55,6 +163,10 @@ pub fn read_value(
     format: ConfigFormat,
     key_path: &[String],
 ) -> Result<Option<Value>, MarketError> {
+    let (_, contents) = split_bom(contents);
+    if contents.trim().is_empty() {
+        return Ok(None);
+    }
     match format {
         ConfigFormat::Toml => {
             let document: DocumentMut = contents.parse().map_err(|error| {
@@ -97,31 +209,41 @@ pub fn apply_change(
     if key_path.is_empty() {
         return Err(MarketError::Config("A config key is required.".into()));
     }
+    let (bom, body) = split_bom(contents.unwrap_or(""));
     match format {
         ConfigFormat::Toml => {
-            let mut document: DocumentMut = match contents {
-                Some(contents) if !contents.trim().is_empty() => {
-                    contents.parse().map_err(|error| {
-                        MarketError::Config(format!("The TOML file could not be parsed: {error}"))
-                    })?
-                }
-                _ => DocumentMut::new(),
+            let normalized = normalize_newlines(body);
+            let mut document: DocumentMut = if normalized.trim().is_empty() {
+                DocumentMut::new()
+            } else {
+                normalized.parse().map_err(|error| {
+                    MarketError::Config(format!("The TOML file could not be parsed: {error}"))
+                })?
             };
             set_toml_path(&mut document, key_path, value)?;
-            let output = document.to_string();
-            output.parse::<DocumentMut>().map_err(|error| {
+            let edited = document.to_string();
+            edited.parse::<DocumentMut>().map_err(|error| {
                 MarketError::Config(format!("The edited TOML is not valid: {error}"))
             })?;
-            Ok(output)
+            let output = if body.trim().is_empty() {
+                edited
+            } else {
+                preserve_lines(body, &edited)
+            };
+            verify_value(&output, format, key_path, value)?;
+            Ok(join_bom(bom, output))
         }
         ConfigFormat::Json | ConfigFormat::Jsonc => {
-            let text = match contents {
-                Some(contents) if !contents.trim().is_empty() => contents.to_string(),
-                _ => "{\n}\n".to_string(),
+            let newline = detect_newline(body);
+            let text = if body.trim().is_empty() {
+                "{\n}\n".to_string()
+            } else {
+                body.to_string()
             };
-            let output = set_jsonc_path(&text, key_path, value)?;
+            let output = set_jsonc_path(&text, key_path, value, newline)?;
             parse_jsonc(&output)?;
-            Ok(output)
+            verify_value(&output, format, key_path, value)?;
+            Ok(join_bom(bom, output))
         }
     }
 }
@@ -134,22 +256,35 @@ pub fn remove_change(
     if key_path.is_empty() {
         return Err(MarketError::Config("A config key is required.".into()));
     }
+    let (bom, body) = split_bom(contents);
     match format {
         ConfigFormat::Toml => {
-            let mut document: DocumentMut = contents.parse().map_err(|error| {
+            let normalized = normalize_newlines(body);
+            let mut document: DocumentMut = normalized.parse().map_err(|error| {
                 MarketError::Config(format!("The TOML file could not be parsed: {error}"))
             })?;
             remove_toml_path(&mut document, key_path)?;
-            let output = document.to_string();
-            output.parse::<DocumentMut>().map_err(|error| {
+            let edited = document.to_string();
+            edited.parse::<DocumentMut>().map_err(|error| {
                 MarketError::Config(format!("The edited TOML is not valid: {error}"))
             })?;
-            Ok(output)
+            let output = preserve_lines(body, &edited);
+            if read_value(&output, format, key_path)?.is_some() {
+                return Err(MarketError::Config(
+                    "The edited configuration still contains the removed key.".into(),
+                ));
+            }
+            Ok(join_bom(bom, output))
         }
         ConfigFormat::Json | ConfigFormat::Jsonc => {
-            let output = remove_jsonc_path(contents, key_path)?;
+            let output = remove_jsonc_path(body, key_path)?;
             parse_jsonc(&output)?;
-            Ok(output)
+            if read_value(&output, format, key_path)?.is_some() {
+                return Err(MarketError::Config(
+                    "The edited configuration still contains the removed key.".into(),
+                ));
+            }
+            Ok(join_bom(bom, output))
         }
     }
 }
@@ -284,6 +419,7 @@ fn toml_value_to_json(value: &TomlValue) -> Result<Value, MarketError> {
 
 /// Parse JSON or JSONC after blanking comments and trailing commas.
 pub fn parse_jsonc(contents: &str) -> Result<Value, MarketError> {
+    let (_, contents) = split_bom(contents);
     let stripped = strip_jsonc(contents)?;
     serde_json::from_str(&stripped).map_err(|error| {
         MarketError::Config(format!("The JSON/JSONC file could not be parsed: {error}"))
@@ -512,9 +648,14 @@ fn value_end(bytes: &[u8], start: usize) -> Result<usize, MarketError> {
     }
 }
 
-fn set_jsonc_path(text: &str, key_path: &[String], value: &Value) -> Result<String, MarketError> {
+fn set_jsonc_path(
+    text: &str,
+    key_path: &[String],
+    value: &Value,
+    newline: &str,
+) -> Result<String, MarketError> {
     let (open, close) = top_object_span(text)?;
-    set_in_object(text, open, close, key_path, value, 0)
+    set_in_object(text, open, close, key_path, value, 0, newline)
 }
 
 fn set_in_object(
@@ -524,6 +665,7 @@ fn set_in_object(
     key_path: &[String],
     value: &Value,
     depth: usize,
+    newline: &str,
 ) -> Result<String, MarketError> {
     let bytes = text.as_bytes();
     let members = parse_members(bytes, open)?;
@@ -532,38 +674,33 @@ fn set_in_object(
     if rest.is_empty() {
         if let Some(member) = member {
             let indentation = line_indent(text, member.key_start, depth + 1);
-            let rendered = render_json(value, &indentation);
+            let rendered = render_json(value, &indentation, newline);
             let mut output = String::with_capacity(text.len() + rendered.len());
             output.push_str(&text[..member.value_start]);
             output.push_str(&rendered);
             output.push_str(&text[member.value_end..]);
             return Ok(output);
         }
-        let insertion = insertion_text(text, open, close, &members, key, value, depth);
-        return Ok(format!("{}{}{}", &text[..close], insertion, &text[close..]));
+        return Ok(insert_in_object(
+            text, close, &members, key, value, depth, newline,
+        ));
     }
     if let Some(member) = member {
         if bytes.get(member.value_start) == Some(&b'{') {
             let nested_close = matching_close(bytes, member.value_start)?;
-            let nested = set_in_object(
+            return set_in_object(
                 text,
                 member.value_start,
                 nested_close,
                 rest,
                 value,
                 depth + 1,
-            )?;
-            let delta = nested.len() as isize - text.len() as isize;
-            let new_close = (nested_close as isize + delta) as usize;
-            let mut output = String::with_capacity(nested.len());
-            output.push_str(&nested[..member.value_start]);
-            output.push_str(&nested[member.value_start..=new_close]);
-            output.push_str(&nested[new_close + 1..]);
-            return Ok(output);
+                newline,
+            );
         }
         let indentation = line_indent(text, member.key_start, depth + 1);
         let nested_value = nested_json(rest, value);
-        let rendered = render_json(&nested_value, &indentation);
+        let rendered = render_json(&nested_value, &indentation, newline);
         let mut output = String::with_capacity(text.len() + rendered.len());
         output.push_str(&text[..member.value_start]);
         output.push_str(&rendered);
@@ -571,8 +708,15 @@ fn set_in_object(
         return Ok(output);
     }
     let nested_value = nested_json(rest, value);
-    let insertion = insertion_text(text, open, close, &members, key, &nested_value, depth);
-    Ok(format!("{}{}{}", &text[..close], insertion, &text[close..]))
+    Ok(insert_in_object(
+        text,
+        close,
+        &members,
+        key,
+        &nested_value,
+        depth,
+        newline,
+    ))
 }
 
 fn nested_json(path: &[String], value: &Value) -> Value {
@@ -585,49 +729,79 @@ fn nested_json(path: &[String], value: &Value) -> Value {
     current
 }
 
-fn insertion_text(
+fn insert_in_object(
     text: &str,
-    _open: usize,
     close: usize,
     members: &[Member],
     key: &str,
     value: &Value,
     depth: usize,
+    newline: &str,
 ) -> String {
     let closing_indent = line_indent(text, close, depth);
-    let member_indent = if let Some(first) = members.first() {
-        line_indent(text, first.key_start, depth + 1)
+    let member_indent = members
+        .first()
+        .map(|first| line_indent(text, first.key_start, depth + 1))
+        .unwrap_or_else(|| format!("{closing_indent}  "));
+    let rendered = render_json(value, &member_indent, newline);
+    let line_start = text[..close]
+        .rfind('\n')
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let closing_on_own_line = text[line_start..close].trim().is_empty();
+    let entry = format!("\"{key}\": {rendered}");
+    let mut output = String::with_capacity(text.len() + entry.len() + 16);
+    if members.is_empty() {
+        output.push_str(&text[..close]);
+        if closing_on_own_line {
+            output.push_str(newline);
+            output.push_str(&member_indent);
+            output.push_str(&entry);
+            output.push_str(newline);
+            output.push_str(&closing_indent);
+        } else {
+            if !text[..close].ends_with('{') && !text[..close].ends_with(' ') {
+                output.push(' ');
+            }
+            output.push_str(&entry);
+        }
+        output.push_str(&text[close..]);
+        return output;
+    }
+    let last = members.last().expect("member");
+    let trailing_comma = text[last.value_end..close].contains(',');
+    if closing_on_own_line {
+        output.push_str(&text[..last.value_end]);
+        if !trailing_comma {
+            output.push(',');
+        }
+        output.push_str(&text[last.value_end..line_start]);
+        output.push_str(&member_indent);
+        output.push_str(&entry);
+        if trailing_comma {
+            output.push(',');
+        }
+        output.push_str(newline);
+        output.push_str(&text[line_start..]);
     } else {
-        format!("{closing_indent}  ")
-    };
-    let rendered = render_json(value, &member_indent);
-    let comma = if members.is_empty()
-        || text[members.last().expect("member").value_end..close].contains(',')
-    {
-        String::new()
-    } else {
-        ",".to_string()
-    };
-    format!(
-        "\n{member_indent}{}{comma}\n{member_indent}\"{}\": {rendered}",
-        "", key
-    )
-    .replace(
-        &format!("{member_indent}\n{member_indent}\""),
-        &format!("{member_indent}\""),
-    )
-    .replace(
-        &format!("{comma}\n{member_indent}\"{key}\": {rendered}\n{member_indent}"),
-        "",
-    )
+        output.push_str(&text[..last.value_end]);
+        if !trailing_comma {
+            output.push_str(", ");
+        } else {
+            output.push(' ');
+        }
+        output.push_str(&entry);
+        output.push_str(&text[close..]);
+    }
+    output
 }
 
-fn render_json(value: &Value, indent: &str) -> String {
+fn render_json(value: &Value, indent: &str, newline: &str) -> String {
     let pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".into());
     let mut output = String::new();
     for (index, line) in pretty.lines().enumerate() {
         if index > 0 {
-            output.push('\n');
+            output.push_str(newline);
             output.push_str(indent);
         }
         output.push_str(line);
@@ -679,7 +853,8 @@ fn remove_in_object(
     while start > 0 && matches!(bytes[start - 1], b' ' | b'\t') {
         start -= 1;
     }
-    if start > 0 && bytes[start - 1] == b'\n' {
+    let at_line_start = start > 0 && bytes[start - 1] == b'\n';
+    if at_line_start {
         start -= 1;
         if start > 0 && bytes[start - 1] == b'\r' {
             start -= 1;
@@ -703,14 +878,11 @@ fn remove_in_object(
         while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
             end += 1;
         }
-        if end < bytes.len() && bytes[end] == b'\n' {
+        if end + 1 < bytes.len() && bytes[end] == b'\r' && bytes[end + 1] == b'\n' {
+            end += 2;
+        } else if end < bytes.len() && bytes[end] == b'\n' {
             end += 1;
-            if end < bytes.len() && bytes[end - 2] == b'\r' {
-                // Already consumed by the slice; keep it simple.
-            }
         }
-    } else if start > 0 && bytes[start] == b'\n' {
-        // Removing the last member: keep the closing brace on its own line.
     }
     let mut output = String::with_capacity(text.len());
     output.push_str(&text[..start]);
@@ -846,5 +1018,115 @@ mod tests {
         .unwrap();
         assert!(!removed.contains("\"new\""));
         assert!(removed.contains("\"old\""));
+    }
+
+    #[test]
+    fn toml_preserves_crlf_comments_and_bom() {
+        let before = "\u{feff}# keep me\r\nmodel = \"x\"\r\n\r\n[mcp_servers.other]\r\ncommand = \"other\"\r\n";
+        let after = apply_change(
+            Some(before),
+            ConfigFormat::Toml,
+            &["mcp_servers".into(), "demo".into()],
+            &json!({"command": "npx", "args": ["-y", "pkg@1.2.3"]}),
+        )
+        .unwrap();
+        assert!(after.starts_with('\u{feff}'));
+        assert!(after.contains("# keep me\r\n"));
+        assert!(after.contains("[mcp_servers.other]\r\ncommand = \"other\"\r\n"));
+        assert!(!after.replace("\r\n", "").contains('\n'), "{after:?}");
+        let value = read_value(
+            &after,
+            ConfigFormat::Toml,
+            &["mcp_servers".into(), "demo".into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(value["command"], "npx");
+
+        let removed = remove_change(
+            &after,
+            ConfigFormat::Toml,
+            &["mcp_servers".into(), "demo".into()],
+        )
+        .unwrap();
+        assert!(removed.starts_with('\u{feff}'));
+        assert!(removed.contains("[mcp_servers.other]\r\ncommand = \"other\"\r\n"));
+        assert!(!removed.replace("\r\n", "").contains('\n'), "{removed:?}");
+    }
+
+    #[test]
+    fn jsonc_preserves_crlf_comments_and_bom() {
+        let before = "\u{feff}{\r\n  // keep me\r\n  \"model\": \"x\",\r\n  \"unknown\": {\"a\": 1},\r\n}\r\n";
+        let after = apply_change(
+            Some(before),
+            ConfigFormat::Jsonc,
+            &["mcp".into(), "servers".into(), "demo".into()],
+            &json!({"type": "local", "command": ["npx", "-y", "pkg@1.2.3"]}),
+        )
+        .unwrap();
+        assert!(after.starts_with('\u{feff}'));
+        assert!(after.contains("// keep me\r\n"));
+        assert!(after.contains("\"unknown\": {\"a\": 1},\r\n"));
+        assert!(!after.replace("\r\n", "").contains('\n'), "{after:?}");
+        let value = read_value(
+            &after,
+            ConfigFormat::Jsonc,
+            &["mcp".into(), "servers".into(), "demo".into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(value["type"], "local");
+
+        let removed = remove_change(
+            &after,
+            ConfigFormat::Jsonc,
+            &["mcp".into(), "servers".into(), "demo".into()],
+        )
+        .unwrap();
+        assert!(removed.starts_with('\u{feff}'));
+        assert!(removed.contains("// keep me\r\n"));
+        assert!(!removed.contains("\"demo\""));
+        assert!(!removed.replace("\r\n", "").contains('\n'), "{removed:?}");
+    }
+
+    #[test]
+    fn jsonc_inserts_into_empty_and_inline_objects() {
+        for before in ["{}", "{ }", "{\n}"] {
+            let after = apply_change(
+                Some(before),
+                ConfigFormat::Jsonc,
+                &["demo".into()],
+                &json!(1),
+            )
+            .unwrap();
+            let value = read_value(&after, ConfigFormat::Jsonc, &["demo".into()])
+                .unwrap()
+                .unwrap();
+            assert_eq!(value, json!(1), "{before} -> {after}");
+        }
+        let before = "{\n  \"a\": 1\n}";
+        let after =
+            apply_change(Some(before), ConfigFormat::Json, &["b".into()], &json!(2)).unwrap();
+        assert_eq!(after, "{\n  \"a\": 1,\n  \"b\": 2\n}");
+    }
+
+    #[test]
+    fn invalid_documents_are_refused() {
+        let error = apply_change(
+            Some("{\n  \"a\": \n}"),
+            ConfigFormat::Jsonc,
+            &["b".into()],
+            &json!(1),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("could not be parsed"), "{error}");
+        let error = apply_change(
+            Some("[not = toml"),
+            ConfigFormat::Toml,
+            &["b".into()],
+            &json!(1),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("could not be parsed"), "{error}");
     }
 }

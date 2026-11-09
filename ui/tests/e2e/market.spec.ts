@@ -9,7 +9,7 @@ const MARKET_DAEMON = 'http://127.0.0.1:4323';
 const OFFLINE_DAEMON = 'http://127.0.0.1:4324';
 const MARKET_HOME = path.resolve('.tmp', 'e2e-market-4323');
 const USER_HOME = path.join(MARKET_HOME, 'user');
-const CLAUDE_CONFIG = path.join(USER_HOME, '.claude.json');
+const PROJECT_CONFIG = path.join(MARKET_HOME, 'workspace', '.mcp.json');
 const MANIFEST_DIR = path.join(MARKET_HOME, 'market', 'installed');
 const SECRET_VALUE = 'e2e-secret-value';
 
@@ -136,6 +136,7 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
   await page.getByTestId('market-tab-mcp').click();
   await expect(page.getByTestId(`market-card-${MCP_ID}`)).toBeVisible();
   await openDetail(page, MCP_ID);
+  await page.getByLabel('Scope').selectOption('project');
   await previewInstall(page);
 
   const sheet = page.getByTestId('market-sheet');
@@ -153,9 +154,10 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
     sheet.getByRole('heading', { level: 3, name: `Installed ${MCP_NAME}` }),
   ).toBeVisible();
 
-  const config = readFileSync(CLAUDE_CONFIG, 'utf8');
+  const config = readFileSync(PROJECT_CONFIG, 'utf8');
   expect(config).toContain('example-weather');
   expect(config).toContain(SECRET_VALUE);
+  expect(existsSync(path.join(USER_HOME, '.claude.json'))).toBe(false);
   for (const file of readdirSync(MANIFEST_DIR)) {
     expect(readFileSync(path.join(MANIFEST_DIR, file), 'utf8')).not.toContain(SECRET_VALUE);
   }
@@ -166,7 +168,7 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
   await expect(
     page.locator('[data-testid^="market-installed-"]').filter({ hasText: MCP_NAME }),
   ).toHaveCount(0);
-  const after = existsSync(CLAUDE_CONFIG) ? readFileSync(CLAUDE_CONFIG, 'utf8') : '';
+  const after = existsSync(PROJECT_CONFIG) ? readFileSync(PROJECT_CONFIG, 'utf8') : '';
   expect(after).not.toContain('example-weather');
 });
 

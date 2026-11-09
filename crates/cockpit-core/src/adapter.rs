@@ -153,6 +153,11 @@ pub struct McpSpec {
     /// Object path from the config root to the server map.
     #[serde(default)]
     pub key_path: Vec<String>,
+    /// Whether Cockpit may edit the user-scope file. Some agents keep app state
+    /// there; those adapters set this to false and Cockpit offers the agent's
+    /// own add command or the project-scope file instead.
+    #[serde(default)]
+    pub write_user_config: bool,
     #[serde(default)]
     pub verified: bool,
 }

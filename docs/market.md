@@ -151,7 +151,10 @@ can be undone.
 2. **Resolve the target.** The entry must name the chosen agent. The adapter
    must have a verified `[skills]` or `[mcp]` section. If the target is not
    verified, Cockpit writes nothing and shows manual instructions with a copy
-   button.
+   button. Some agents keep app state in their user-level MCP file; those
+   adapters set `write_user_config = false` and Cockpit offers the agent's own
+   add command or the project-scope file instead. Claude Code's `~/.claude.json`
+   is one of these files.
 3. **Fetch the pinned source.** For a skill, Cockpit downloads
    `https://codeload.github.com/<owner>/<repo>/tar.gz/<commit>`. Redirects are
    not followed; the host is GitHub. The archive is capped at 20 MiB and the
@@ -163,14 +166,21 @@ can be undone.
    `source.content_sha256`.
 5. **Build the plan.** Cockpit plans file writes and a configuration edit. TOML
    edits use `toml_edit`; JSON/JSONC edits preserve comments and unknown keys.
-   Existing values are compared so an unchanged key is not rewritten.
-6. **Preview and confirm.** The user sees the real diff and permissions. A
-   conflict blocks the install.
+   BOM, CRLF, trailing commas, and everything outside the edited key keep their
+   exact bytes. Existing values are compared so an unchanged key is not
+   rewritten. A file that does not parse is refused instead of being replaced.
+6. **Preview and confirm.** The preview shows the resolved absolute path and a
+   compact diff of only the edited key, not the whole file. Values under
+   `env`/`environment` and values with secret-like names are redacted. A
+   conflict blocks the install. Cockpit records the file hash, size, and
+   modification time at preview time.
 7. **Back up and write.** Existing files and configuration are backed up under
-   the Cockpit home. A journal is written, files are written to a temporary
-   path and renamed atomically, permissions are tightened, and the manifest is
-   recorded. If the process dies mid-install, the journal is rolled back on the
-   next start.
+   the Cockpit home in a timestamped folder. Before writing, Cockpit re-checks
+   that every previewed file still matches; if an editor saved in between, the
+   install aborts and asks for a new preview. A journal is written, files are
+   written to a temporary path and renamed atomically, and the target's existing
+   permissions are preserved. If the process dies mid-install, the journal is
+   rolled back on the next start.
 8. **Record the manifest.** The manifest stores the entry id, version, trust
    tier, source, license, agent, scope, target root, file hashes, config path and
    redacted value, backup id, permissions, and secret **names**. Secret values
@@ -189,7 +199,7 @@ manual-only, with the exact path and steps shown in the UI.
 
 | Agent | Skills | MCP | Verified locations |
 | --- | --- | --- | --- |
-| **Claude Code** | Yes | Yes | Skills: `~/.claude/skills`, `.claude/skills`. MCP: `~/.claude.json`, `.mcp.json` (`mcpServers`). |
+| **Claude Code** | Yes | Yes | Skills: `~/.claude/skills`, `.claude/skills`. MCP: `.mcp.json` (`mcpServers`). User-scope `~/.claude.json` is manual-only because it also holds app state. |
 | **OpenCode** | Yes | Yes | Skills: `~/.config/opencode/skills`, `.opencode/skills`. MCP: `~/.config/opencode/opencode.json(c)`, `opencode.json(c)`, `.opencode/opencode.json(c)` (`mcp.servers`, JSONC). |
 | **Codex CLI** | Manual only | Yes | MCP: `~/.codex/config.toml`, `.codex/config.toml` (`[mcp_servers.<name>]`). No verified skill folder in this build. |
 | Other adapters | Manual only | Manual only | No verified market target; Cockpit refuses to guess. |
@@ -197,6 +207,9 @@ manual-only, with the exact path and steps shown in the UI.
 Scope:
 
 - **User** writes to the user's home and affects every project for that agent.
+  If the adapter sets `write_user_config = false`, user-scope MCP shows the
+  agent's add command and a project-scope alternative instead of editing an
+  app-state file.
 - **Project** writes inside the current workspace and affects that project.
   Cockpit only offers project scope when the daemon knows a workspace.
 
@@ -373,8 +386,9 @@ The scans are heuristics. A reviewer still has to read the code.
 | --- | --- | --- |
 | "Cockpit refused the registry" | A signature, index hash, or revocation signature failed. | Refresh again. If it persists, the registry is compromised or broken; do not install. Check the advisory. |
 | "This preview expired" | The preview is older than ten minutes or was already used. | Preview again. |
+| "changed after the preview" | A file or config was edited after Cockpit captured its hash and modification time. | Preview the install again; nothing was overwritten. |
 | "Cockpit will not overwrite these files" | A planned file conflicts with a file Cockpit did not create or cannot prove it owns. | Move the file, choose another scope, or install manually. |
-| "Manual install only" | The adapter has no verified target for this agent. | Follow the exact path and steps shown; Cockpit writes nothing. |
+| "Manual install only" | The adapter has no verified target for this agent, or the user-level file also holds app state. | Follow the add command and project-scope alternative shown; Cockpit writes nothing. |
 | "Revoked" | The signed revocation list marks the entry. | Read the reason, then remove it from the Installed tab. |
 | "Needs attention" | A file or config key changed on disk. | Review the diff, then uninstall with the edited-file confirmation or repair the file. |
 | Offline banner | The registry cannot be reached. | Keep using the verified cache or reconnect and refresh. |

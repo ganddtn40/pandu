@@ -37,4 +37,5 @@ project_paths = ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", "
 format = "jsonc"
 style = "opencode"
 key_path = ["mcp", "servers"]
+write_user_config = true
 verified = true

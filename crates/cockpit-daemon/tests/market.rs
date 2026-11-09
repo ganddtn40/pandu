@@ -47,10 +47,20 @@ fn service(
     registry: Option<LoadedRegistry>,
     local_source: Option<PathBuf>,
 ) -> Arc<MarketService> {
+    service_in(home, user_home, None, registry, local_source)
+}
+
+fn service_in(
+    home: &Path,
+    user_home: &Path,
+    workspace: Option<&Path>,
+    registry: Option<LoadedRegistry>,
+    local_source: Option<PathBuf>,
+) -> Arc<MarketService> {
     MarketService::for_test(
         home.to_path_buf(),
         user_home.to_path_buf(),
-        None,
+        workspace.map(Path::to_path_buf),
         adapter_registry(home),
         registry,
         local_source,
@@ -474,19 +484,21 @@ async fn uninstall_preserves_user_edited_files() {
 }
 
 #[tokio::test]
-async fn mcp_install_edits_config_without_losing_comments_or_secrets() {
+async fn mcp_install_edits_project_config_without_losing_comments_or_secrets() {
     let home = tempfile::tempdir().unwrap();
     let user_home = tempfile::tempdir().unwrap();
-    let config_path = user_home.path().join(".claude.json");
+    let workspace = tempfile::tempdir().unwrap();
+    let config_path = workspace.path().join(".mcp.json");
     std::fs::write(
         &config_path,
         "{\n  // keep this comment\n  \"unknown\": {\"a\": 1},\n  \
          \"mcpServers\": {\n    \"existing\": {\"command\": \"existing\"}\n  }\n}\n",
     )
     .unwrap();
-    let service = service(
+    let service = service_in(
         home.path(),
         user_home.path(),
+        Some(workspace.path()),
         Some(load_registry(true)),
         Some(fixture_source()),
     );
@@ -495,12 +507,12 @@ async fn mcp_install_edits_config_without_losing_comments_or_secrets() {
             MarketKind::Mcp,
             "example-weather",
             "claude-code",
-            InstallScope::User,
+            InstallScope::Project,
         )
         .await
         .unwrap();
     let config = preview.config.as_ref().expect("MCP preview has a config");
-    assert_eq!(config.display_path, "~/.claude.json");
+    assert_eq!(config.display_path, ".mcp.json");
     assert_eq!(config.secret_names, vec!["WEATHER_API_KEY".to_string()]);
     assert_eq!(
         preview.command.as_deref(),
@@ -521,7 +533,8 @@ async fn mcp_install_edits_config_without_losing_comments_or_secrets() {
         "local-secret-value".to_string(),
     );
     let installed = service.install(&preview.preview_id, secrets).unwrap();
-    assert_eq!(installed.config_path.as_deref(), Some("~/.claude.json"));
+    assert_eq!(installed.config_path.as_deref(), Some(".mcp.json"));
+    assert!(!user_home.path().join(".claude.json").exists());
 
     let contents = std::fs::read_to_string(&config_path).unwrap();
     assert!(contents.contains("// keep this comment"));
@@ -555,6 +568,57 @@ async fn mcp_install_edits_config_without_losing_comments_or_secrets() {
     service.undo(&installed.install_id, false).unwrap();
     let contents = std::fs::read_to_string(&config_path).unwrap();
     assert!(contents.contains("example-weather"));
+}
+
+#[tokio::test]
+async fn claude_user_scope_mcp_is_manual_and_never_touches_app_state() {
+    let home = tempfile::tempdir().unwrap();
+    let user_home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        user_home.path().join(".claude.json"),
+        "{\n  \"numStartups\": 12\n}\n",
+    )
+    .unwrap();
+    let service = service(
+        home.path(),
+        user_home.path(),
+        Some(load_registry(true)),
+        Some(fixture_source()),
+    );
+    let preview = service
+        .preview(
+            MarketKind::Mcp,
+            "example-weather",
+            "claude-code",
+            InstallScope::User,
+        )
+        .await
+        .unwrap();
+    let manual = preview.manual.as_ref().expect("manual instructions");
+    assert!(
+        manual
+            .steps
+            .iter()
+            .any(|step| step.contains("claude mcp add")),
+        "{:?}",
+        manual.steps
+    );
+    assert!(
+        manual.steps.iter().any(|step| step.contains(".mcp.json")),
+        "{:?}",
+        manual.steps
+    );
+    assert_eq!(manual.path, "~/.claude.json");
+    assert!(preview.config.is_none());
+    assert!(preview.files.is_empty());
+    let error = service
+        .install(&preview.preview_id, BTreeMap::new())
+        .unwrap_err();
+    assert!(error.to_string().contains("manual-only"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(user_home.path().join(".claude.json")).unwrap(),
+        "{\n  \"numStartups\": 12\n}\n"
+    );
 }
 
 #[tokio::test]
@@ -628,7 +692,7 @@ verified = false
     let error = service
         .install(&preview.preview_id, BTreeMap::new())
         .unwrap_err();
-    assert!(error.to_string().contains("unverified"), "{error}");
+    assert!(error.to_string().contains("manual-only"), "{error}");
     assert!(!user_home.path().join(".custom/skills").exists());
 }
 
