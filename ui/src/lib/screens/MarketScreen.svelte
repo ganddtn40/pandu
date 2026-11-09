@@ -329,6 +329,15 @@
     return t(keys[source]);
   }
 
+  function cacheAgeLabel(seconds: number): string {
+    if (seconds < 60) return t('common.justNow');
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return t('market.minutesAgo', { count: minutes });
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return t('market.hoursAgo', { count: hours });
+    return t('market.daysAgo', { count: Math.round(hours / 24) });
+  }
+
   function scopeLabel(scope: InstallScope): string {
     return t(scope === 'user' ? 'market.scopeUser' : 'market.scopeProject');
   }
@@ -610,6 +619,16 @@
     <div>
       <strong>{t('market.offlineTitle')}</strong>
       <p>{t('market.offlineBody')}</p>
+      {#if catalog.cacheAgeSeconds != null}
+        <p class="market-offline-age" data-testid="market-cache-age">
+          {t('market.lastVerified', { age: cacheAgeLabel(catalog.cacheAgeSeconds) })}
+        </p>
+      {/if}
+      {#if catalog.cacheStale}
+        <p class="market-offline-stale" data-testid="market-cache-stale">
+          {t('market.cacheStale')}
+        </p>
+      {/if}
     </div>
   </section>
 {/if}

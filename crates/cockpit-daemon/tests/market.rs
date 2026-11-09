@@ -13,6 +13,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::{Duration, Utc};
+
 use cockpit_daemon::adapters;
 use cockpit_daemon::market::archive::{ExtractedFile, extract_tar_gz, tree_hash, verify_tree};
 use cockpit_daemon::market::config_edit::{self, ConfigFormat};
@@ -789,6 +791,89 @@ async fn offline_catalog_uses_the_verified_cache_and_fails_closed() {
         error,
         cockpit_daemon::market::MarketError::Signature(_)
     ));
+}
+
+#[tokio::test]
+async fn cache_age_is_reported_and_old_caches_warn_about_revocations() {
+    let home = tempfile::tempdir().unwrap();
+    let user_home = tempfile::tempdir().unwrap();
+    copy_dir(&registry_dir(), &home.path().join("market/registry"));
+    std::fs::create_dir_all(home.path().join("market")).unwrap();
+    let now = Utc::now();
+
+    let recent = now - Duration::days(3);
+    let recent_iso = recent.to_rfc3339();
+    std::fs::write(
+        home.path().join("market/settings.json"),
+        serde_json::to_vec(&json!({
+            "autoRefresh": false,
+            "lastRefresh": recent_iso,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let recent_service = service(home.path(), user_home.path(), None, None);
+    let catalog = recent_service.catalog(false).await.unwrap();
+    assert_eq!(catalog.source, RegistrySource::Cache);
+    assert!(catalog.offline);
+    assert_eq!(
+        catalog.cache_verified_at.as_deref(),
+        Some(recent_iso.as_str())
+    );
+    let age = catalog.cache_age_seconds.expect("cache age");
+    assert!((age - 3 * 86_400).abs() < 120, "{age}");
+    assert!(!catalog.cache_stale);
+    assert!(
+        !catalog
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("revocations"))
+    );
+
+    let old = now - Duration::days(8);
+    std::fs::write(
+        home.path().join("market/settings.json"),
+        serde_json::to_vec(&json!({
+            "autoRefresh": false,
+            "lastRefresh": old.to_rfc3339(),
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let stale = service(home.path(), user_home.path(), None, None);
+    let catalog = stale.catalog(false).await.unwrap();
+    let age = catalog.cache_age_seconds.expect("cache age");
+    assert!((age - 8 * 86_400).abs() < 120, "{age}");
+    assert!(catalog.cache_stale);
+    assert!(
+        catalog
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("New revocations may be missed"))
+    );
+}
+
+#[tokio::test]
+async fn failed_refresh_never_deletes_the_verified_cache() {
+    let home = tempfile::tempdir().unwrap();
+    let user_home = tempfile::tempdir().unwrap();
+    let cache = home.path().join("market/registry");
+    copy_dir(&registry_dir(), &cache);
+    let before = std::fs::read(cache.join(ACTIVE_INDEX_FILE)).unwrap();
+
+    let service = service(home.path(), user_home.path(), None, None);
+    let error = service.refresh().await.unwrap_err();
+    assert!(error.to_string().contains("offline"), "{error}");
+    assert_eq!(
+        std::fs::read(cache.join(ACTIVE_INDEX_FILE)).unwrap(),
+        before
+    );
+
+    let catalog = service.catalog(false).await.unwrap();
+    assert_eq!(catalog.source, RegistrySource::Cache);
+    assert_eq!(catalog.entries.len(), 3);
 }
 
 #[tokio::test]

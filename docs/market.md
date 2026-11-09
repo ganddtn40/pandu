@@ -237,11 +237,16 @@ When it cannot reach the registry, it loads that cache and shows a banner:
 
 > Showing the cached registry. Cockpit cannot reach the registry right now, so
 > this is the last verified copy. Refreshing and updates need a connection.
+> Last verified 3 days ago.
 
-The catalogue and detail views still work. Refresh is disabled. A skill install
-still needs the pinned archive, so it fails cleanly if the source is not already
-available; an MCP configuration edit can be previewed from the cached entry. A
-failed refresh never replaces the cache.
+The age comes from the last successful refresh time, or the cache index file's
+mtime for older caches. Once the cache is more than seven days old, the banner
+adds: **This cache is more than 7 days old. New revocations may be missed until
+Cockpit refreshes online.** The catalogue and detail views still work. Refresh
+is disabled. A skill install still needs the pinned archive, so it fails cleanly
+if the source is not already available; an MCP configuration edit can be
+previewed from the cached entry. A failed refresh never replaces or deletes the
+cache.
 
 ![Offline cache](screenshots/phase8/market-offline.png)
 

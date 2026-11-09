@@ -34,6 +34,8 @@ pub const SETTINGS_FILE: &str = "settings.json";
 pub const DEFAULT_REGISTRY_URL: &str =
     "https://raw.githubusercontent.com/ganddtn40/cockpit/main/registry";
 pub const DAILY_REFRESH_SECS: i64 = 24 * 60 * 60;
+/// A cached registry older than this may miss new revocations.
+pub const CACHE_STALE_AFTER_SECS: i64 = 7 * 24 * 60 * 60;
 
 #[cfg(debug_assertions)]
 const BUNDLED_INDEX: &str = include_str!("../../../../registry/index.test.json");
@@ -136,6 +138,9 @@ pub struct CatalogResponse {
     pub last_error: Option<String>,
     pub settings: MarketSettings,
     pub counts: CatalogCounts,
+    pub cache_verified_at: Option<String>,
+    pub cache_age_seconds: Option<i64>,
+    pub cache_stale: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -324,7 +329,7 @@ impl MarketService {
         let mut state = self.state.lock().expect("market state");
         state.registry = Some(registry.clone());
         state.source = source;
-        state.offline = self.forced_offline;
+        state.offline = self.forced_offline || (source == RegistrySource::Cache && state.offline);
         state.warnings = warnings;
         Ok(registry)
     }
@@ -374,6 +379,31 @@ impl MarketService {
             },
         )?;
         Ok((Arc::new(registry), RegistrySource::Bundled, Vec::new()))
+    }
+
+    /// When the catalogue comes from the on-disk cache, report when that cache
+    /// was last verified. A successful refresh records `last_refresh`; older
+    /// caches without that setting fall back to the index file's mtime.
+    fn cache_verified_at(
+        &self,
+        source: RegistrySource,
+        last_refresh: Option<&str>,
+    ) -> Option<String> {
+        if source != RegistrySource::Cache {
+            return None;
+        }
+        if let Some(last) = last_refresh {
+            if DateTime::parse_from_rfc3339(last).is_ok() {
+                return Some(last.to_string());
+            }
+        }
+        let index = self
+            .home
+            .join("market")
+            .join("registry")
+            .join(ACTIVE_INDEX_FILE);
+        let modified = std::fs::metadata(index).ok()?.modified().ok()?;
+        Some(DateTime::<Utc>::from(modified).to_rfc3339())
     }
 
     async fn refresh_inner(&self) -> Result<(), MarketError> {
@@ -474,7 +504,32 @@ impl MarketService {
                 agents.insert(agent.clone());
             }
         }
-        let state = self.state.lock().expect("market state");
+        let (source, offline, mut warnings, settings, last_error) = {
+            let state = self.state.lock().expect("market state");
+            (
+                state.source,
+                state.offline || self.forced_offline,
+                state.warnings.clone(),
+                state.settings.clone(),
+                state.last_error.clone(),
+            )
+        };
+        let cache_verified_at = self.cache_verified_at(source, settings.last_refresh.as_deref());
+        let cache_age_seconds = cache_verified_at.as_deref().and_then(|value| {
+            DateTime::parse_from_rfc3339(value).ok().map(|time| {
+                Utc::now()
+                    .signed_duration_since(time.with_timezone(&Utc))
+                    .num_seconds()
+                    .max(0)
+            })
+        });
+        let cache_stale = cache_age_seconds.is_some_and(|age| age >= CACHE_STALE_AFTER_SECS);
+        if cache_stale {
+            let days = cache_age_seconds.unwrap_or_default() / 86_400;
+            warnings.push(format!(
+                "The cached registry was last verified {days} days ago. New revocations may be missed until Cockpit refreshes online."
+            ));
+        }
         let installed = manifests
             .iter()
             .filter(|manifest| manifest.state == InstallState::Installed)
@@ -488,11 +543,11 @@ impl MarketService {
                 .collect(),
             agents: agents.into_iter().collect(),
             generated_at: Some(registry.index.generated_at.clone()),
-            source: state.source,
-            offline: state.offline || self.forced_offline,
-            warnings: state.warnings.clone(),
-            last_error: state.last_error.clone(),
-            settings: state.settings.clone(),
+            source,
+            offline,
+            warnings,
+            last_error,
+            settings,
             counts: CatalogCounts {
                 skills: registry
                     .entries
@@ -506,6 +561,9 @@ impl MarketService {
                     .count(),
                 installed,
             },
+            cache_verified_at,
+            cache_age_seconds,
+            cache_stale,
         })
     }
 

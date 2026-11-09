@@ -21,7 +21,11 @@ const MCP_ID = 'example-weather';
 const SKILL_NAME = 'Example: Changelog Writer';
 const MCP_NAME = 'Example: Weather MCP';
 
-async function openMarket(page: Page, daemon = MARKET_DAEMON): Promise<void> {
+async function openMarket(
+  page: Page,
+  daemon = MARKET_DAEMON,
+  { devOverride = true }: { devOverride?: boolean } = {},
+): Promise<void> {
   await page.addInitScript((daemonUrl) => {
     window.__cockpitDaemonUrl = daemonUrl;
     try {
@@ -32,7 +36,11 @@ async function openMarket(page: Page, daemon = MARKET_DAEMON): Promise<void> {
   }, daemon);
   await page.goto('/market');
   await expect(page.getByRole('heading', { name: 'Skills and MCP servers' })).toBeVisible();
-  await expect(page.getByTestId('market-dev-override')).toHaveText('Dev registry override');
+  if (devOverride) {
+    await expect(page.getByTestId('market-dev-override')).toHaveText('Dev registry override');
+  } else {
+    await expect(page.getByTestId('market-dev-override')).toHaveCount(0);
+  }
   await expect(page.getByTestId(`market-card-${SKILL_ID}`)).toBeVisible();
 }
 
@@ -223,9 +231,13 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
 });
 
 test('offline registry shows the cached banner and blocks refresh', async ({ page }) => {
-  await openMarket(page, OFFLINE_DAEMON);
+  await openMarket(page, OFFLINE_DAEMON, { devOverride: false });
   await expect(page.getByTestId('market-offline')).toBeVisible();
   await expect(page.getByTestId('market-offline')).toContainText('Showing the cached registry');
+  await expect(page.getByTestId('market-cache-age')).toContainText('Last verified 8 days ago');
+  await expect(page.getByTestId('market-cache-stale')).toContainText(
+    'New revocations may be missed',
+  );
   await expect(page.getByRole('button', { name: 'Refresh registry' })).toBeDisabled();
   await shot(page, 'market-offline.png');
 });

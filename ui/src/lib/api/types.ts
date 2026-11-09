@@ -608,6 +608,9 @@ export interface CatalogResponse {
   lastError?: string | null;
   settings: MarketSettings;
   counts: CatalogCounts;
+  cacheVerifiedAt?: string | null;
+  cacheAgeSeconds?: number | null;
+  cacheStale: boolean;
 }
 
 export interface ManualInstructions {

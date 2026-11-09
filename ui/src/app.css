@@ -6642,6 +6642,15 @@ html[data-glass-reason='reduced-transparency'] .panel {
   margin-top: 8px;
 }
 
+.market-banner .market-offline-age {
+  color: var(--text-faint);
+}
+
+.market-banner .market-offline-stale {
+  color: var(--warn);
+  font-weight: 600;
+}
+
 .market-banner--danger {
   border-color: var(--danger-soft);
   background: var(--danger-soft);

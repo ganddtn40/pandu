@@ -389,7 +389,9 @@ untrusted input, not as a package manager. The full user-facing model is in
   whitespace) and verified against a public key embedded in the binary. The
   key id must match. Every entry file must match the SHA-256 in the signed
   index. Duplicate ids, an unknown path, or an index/YAML disagreement is
-  refused. A failed refresh never replaces the previous verified cache.
+  refused. A failed refresh never replaces or deletes the previous verified
+  cache, and an offline cache reports its age. After seven days the UI warns
+  that new revocations may be missed until the next successful refresh.
 - **Two trust roots.** Debug and test builds embed only the test public key and
   load `index.test.json` / `revoked.test.json`. Release builds embed only the
   production public key and load `index.json` / `revoked.json`. A release build
@@ -492,6 +494,8 @@ Evidence: `crates/cockpit-daemon/tests/market.rs`:
 `unverified_agents_get_manual_instructions_and_no_write`,
 `config_round_trip_preserves_comments_and_unknown_keys`,
 `offline_catalog_uses_the_verified_cache_and_fails_closed`,
+`cache_age_is_reported_and_old_caches_warn_about_revocations`,
+`failed_refresh_never_deletes_the_verified_cache`,
 `interrupted_install_is_rolled_back_from_the_journal`,
 `manifest_fuzzing_never_panics_and_rejects_escapes`,
 `tree_hash_is_order_independent_and_verifies`, and

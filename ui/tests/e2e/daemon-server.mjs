@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,6 +35,21 @@ if (isMarket) {
   mkdirSync(workspace, { recursive: true });
 }
 
+if (mode === 'market-offline') {
+  // Build a verified cache with a known age so the UI can prove that it shows
+  // cache age and warns when revocations could be stale.
+  const cache = path.join(home, 'market', 'registry');
+  mkdirSync(path.dirname(cache), { recursive: true });
+  cpSync(path.join(root, 'registry'), cache, { recursive: true });
+  writeFileSync(
+    path.join(home, 'market', 'settings.json'),
+    JSON.stringify({
+      autoRefresh: false,
+      lastRefresh: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    }),
+  );
+}
+
 const child = spawn(binary, ['serve'], {
   cwd: root,
   env: {
@@ -49,9 +64,13 @@ const child = spawn(binary, ['serve'], {
       ? {
           // Debug-only overrides: the market daemon reads its registry from the
           // repository and installs into a disposable home, never the real one.
+          // Offline mode loads the pre-populated cache instead, so cache age is
+          // part of the fixture rather than an environment-registry shortcut.
           COCKPIT_USER_HOME: userHome,
           COCKPIT_WORKSPACE: workspace,
-          COCKPIT_MARKET_REGISTRY: path.join(root, 'registry'),
+          ...(mode === 'market-offline'
+            ? {}
+            : { COCKPIT_MARKET_REGISTRY: path.join(root, 'registry') }),
           COCKPIT_MARKET_LOCAL_SOURCE: path.join(root, 'registry', 'fixtures'),
           COCKPIT_MARKET_OFFLINE: mode === 'market-offline' ? '1' : '0',
         }
