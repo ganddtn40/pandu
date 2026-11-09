@@ -18,7 +18,7 @@ agents:
   - claude-code
   - opencode
 source:
-  repo: https://github.com/cockpit-examples/changelog-writer
+  repo: https://example.invalid/cockpit-examples/changelog-writer
   commit: "2222222222222222222222222222222222222222"
   content_sha256: 7d32ebd2318b918e765204471e0f9189e921e3adaf76f8269335ef6a94bba5e8
   files:

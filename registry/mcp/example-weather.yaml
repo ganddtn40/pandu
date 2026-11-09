@@ -18,7 +18,7 @@ agents:
   - codex
   - opencode
 source:
-  repo: https://github.com/cockpit-examples/weather-mcp
+  repo: https://example.invalid/cockpit-examples/weather-mcp
   commit: "3333333333333333333333333333333333333333"
   content_sha256: 74c3e17aacd5a76e1291ac92f5072aa8b2a73a31229ff533fcc2c59d9ae7b973
   files:

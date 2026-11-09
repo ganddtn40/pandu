@@ -19,7 +19,7 @@ agents:
   - claude-code
   - opencode
 source:
-  repo: https://github.com/cockpit-examples/commit-messages
+  repo: https://example.invalid/cockpit-examples/commit-messages
   commit: "1111111111111111111111111111111111111111"
   content_sha256: 9c2240678e75338d8b079a83e5c3c8f60638b64c75eca9dad5acfdbcc4d0886e
   files:

@@ -156,6 +156,31 @@
           "reviewed_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
         }
       }
+    },
+    {
+      "if": { "properties": { "example": { "const": true } }, "required": ["example"] },
+      "then": {
+        "properties": {
+          "source": {
+            "properties": {
+              "repo": {
+                "pattern": "^https://example\\.invalid/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "source": {
+            "properties": {
+              "repo": {
+                "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -166,7 +191,8 @@
       "properties": {
         "repo": {
           "type": "string",
-          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          "pattern": "^https://(?:github\\.com|example\\.invalid)/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "GitHub for real entries. Example fixtures must use https://example.invalid/<owner>/<repo>, a reserved non-registrable host."
         },
         "commit": {
           "type": "string",

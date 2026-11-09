@@ -404,8 +404,9 @@ untrusted input, not as a package manager. The full user-facing model is in
   SHA. Cockpit downloads `codeload.github.com/<owner>/<repo>/tar.gz/<sha>`,
   does not follow redirects, and verifies a SHA-256 over the normalized tree
   (sorted path, path length, path, byte length, bytes). Branches, tags, ranges,
-  and URLs are rejected. Example fixtures use fake repositories and local trees
-  and are hidden in production builds.
+  and URLs are rejected. Example fixtures must use the reserved, non-registrable
+  `https://example.invalid/<owner>/<repo>` host and local trees; a real entry
+  may never use that host, and example entries are hidden in production builds.
 - **Safe extraction.** Absolute paths, `..`, NUL, drive/stream separators,
   symlinks, hard links, unsupported entry types, Windows reserved names,
   case-colliding paths, path components over 200 characters, full paths over

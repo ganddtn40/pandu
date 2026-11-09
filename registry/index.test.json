@@ -7,23 +7,23 @@
       "kind": "skill",
       "id": "example-changelog-writer",
       "path": "skills/example-changelog-writer.yaml",
-      "sha256": "2561db01b40d955d34baeb2246efaafbaba8788f14b18d6e11a630336306eb58",
+      "sha256": "6be9ad7343553c5f3fee0a5175c9a42a37d6b01400fc0186e21f0e5da5cb67f8",
       "version": "1.0.0"
     },
     {
       "kind": "skill",
       "id": "example-commit-messages",
       "path": "skills/example-commit-messages.yaml",
-      "sha256": "2ebb10c3738389416f765aad3180c0107d9baf55db7009688bb78a2759edaae5",
+      "sha256": "553a61fec57da14b45c71b473b7a8f880b039a0664a8c7a77903c2b7a7342195",
       "version": "1.0.0"
     },
     {
       "kind": "mcp",
       "id": "example-weather",
       "path": "mcp/example-weather.yaml",
-      "sha256": "8afcf722255b73dae7607163b6ded7765a255e38ae334b5381ef53566c62e183",
+      "sha256": "363f4dded5cc6e876cf1b43642727b9419b7b5dd0aff4e1b1a3ade2eb65ebee5",
       "version": "1.0.0"
     }
   ],
-  "signature": "Q6RNxge5ea1UT9Z93CQDmFTk3tEdP5In8Sn1OKEKQRcX/qYtRLCxNQHwB7CfBxJ2rhSFBEf0XrS4oS0N6sQ4Aw=="
+  "signature": "5TwDvXgGF2dj99SWTJmjIg97pKH4c8Tz1ebWSC73vo7yw9Cs2X6BUHuCFLotsb5YBRLDOeGJvPFjVigGEFqKAg=="
 }

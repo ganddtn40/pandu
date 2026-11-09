@@ -2094,7 +2094,7 @@ mod tests {
             tags: Vec::new(),
             agents: vec!["claude-code".into()],
             source: MarketSource {
-                repo: "https://github.com/example/demo".into(),
+                repo: "https://example.invalid/example/demo".into(),
                 commit: "1".repeat(40),
                 content_sha256: "2".repeat(64),
                 files: Vec::new(),
@@ -2335,7 +2335,7 @@ mod tests {
             agent: "claude-code".into(),
             scope: InstallScope::User,
             source: MarketSource {
-                repo: "https://github.com/example/demo".into(),
+                repo: "https://example.invalid/example/demo".into(),
                 commit: "1".repeat(40),
                 content_sha256: "2".repeat(64),
                 files: Vec::new(),

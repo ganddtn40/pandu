@@ -449,7 +449,7 @@ impl MarketEntry {
                 )));
             }
         }
-        validate_source(&self.source)?;
+        validate_source(&self.source, self.example)?;
         if !SPDX_ALLOWLIST.contains(&self.license.as_str()) {
             return Err(MarketError::Entry(format!(
                 "entry {} uses license `{}`, which is not on the SPDX allowlist",
@@ -693,13 +693,31 @@ fn validate_https_url(field: &str, value: &str) -> Result<(), MarketError> {
     Ok(())
 }
 
-fn validate_source(source: &MarketSource) -> Result<(), MarketError> {
-    let rest = source
-        .repo
-        .strip_prefix("https://github.com/")
-        .ok_or_else(|| {
-            MarketError::Entry("source.repo must be https://github.com/<owner>/<repo>".to_string())
-        })?;
+fn validate_source(source: &MarketSource, example: bool) -> Result<(), MarketError> {
+    // Real entries must point at GitHub, which is the only host Cockpit
+    // downloads pinned tarballs from. Example fixtures must use the reserved,
+    // non-registrable `example.invalid` host so a fixture can never look like
+    // a real GitHub project.
+    let rest = if let Some(rest) = source.repo.strip_prefix("https://github.com/") {
+        if example {
+            return Err(MarketError::Entry(
+                "example entries must use https://example.invalid/<owner>/<repo>, not GitHub"
+                    .to_string(),
+            ));
+        }
+        rest
+    } else if let Some(rest) = source.repo.strip_prefix("https://example.invalid/") {
+        if !example {
+            return Err(MarketError::Entry(
+                "only example entries may use https://example.invalid/<owner>/<repo>".to_string(),
+            ));
+        }
+        rest
+    } else {
+        return Err(MarketError::Entry(
+            "source.repo must be https://github.com/<owner>/<repo> (example entries use https://example.invalid/<owner>/<repo>)".to_string(),
+        ));
+    };
     let rest = rest.trim_end_matches('/');
     let mut parts = rest.split('/');
     let owner = parts.next().unwrap_or_default();
@@ -713,7 +731,7 @@ fn validate_source(source: &MarketSource) -> Result<(), MarketError> {
         || rest.contains(char::is_whitespace)
     {
         return Err(MarketError::Entry(
-            "source.repo must be exactly https://github.com/<owner>/<repo>".to_string(),
+            "source.repo must be exactly https://<host>/<owner>/<repo>".to_string(),
         ));
     }
     if rest.len() > 140 {
@@ -1434,6 +1452,26 @@ mod tests {
     }
 
     #[test]
+    fn example_fixtures_use_the_reserved_invalid_host() {
+        let mut example = entry_value();
+        example["example"] = json!(true);
+        example["source"]["repo"] = json!("https://example.invalid/cockpit-examples/demo");
+        let entry: MarketEntry = serde_json::from_value(example.clone()).unwrap();
+        assert!(entry.validate().is_ok());
+
+        example["source"]["repo"] = json!("https://github.com/cockpit-examples/demo");
+        let entry: MarketEntry = serde_json::from_value(example.clone()).unwrap();
+        let error = entry.validate().unwrap_err().to_string();
+        assert!(error.contains("example.invalid"), "{error}");
+
+        let mut real = entry_value();
+        real["source"]["repo"] = json!("https://example.invalid/example/demo");
+        let entry: MarketEntry = serde_json::from_value(real).unwrap();
+        let error = entry.validate().unwrap_err().to_string();
+        assert!(error.contains("only example entries"), "{error}");
+    }
+
+    #[test]
     fn schema_category_vocabulary_matches_the_market() {
         let schema: Value = serde_json::from_str(include_str!(
             "../../../../registry/schema/entry.schema.json"
@@ -1447,5 +1485,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(values.as_slice(), MARKET_CATEGORIES);
         assert_eq!(schema["properties"]["tags"]["maxItems"], 12);
+        let repo_pattern = schema["$defs"]["source"]["properties"]["repo"]["pattern"]
+            .as_str()
+            .expect("source.repo pattern");
+        assert!(repo_pattern.contains("example\\.invalid"), "{repo_pattern}");
     }
 }

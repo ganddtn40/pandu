@@ -54,7 +54,7 @@ The schema is authoritative. The highlights:
 | `categories` | 1-8 values from the controlled vocabulary: `coding`, `testing`, `security`, `docs`, `devops`, `data`, `design`, `productivity`, `other`. These drive the catalogue filter. |
 | `tags` | Optional free-form labels for search and display: at most 12, 1-40 characters each. Tags never become filter categories. |
 | `agents` | At least one supported agent id. Do not list an agent you have not tested. |
-| `source.repo` | Exactly `https://github.com/<owner>/<repo>`. |
+| `source.repo` | Real entries: exactly `https://github.com/<owner>/<repo>`. Example fixtures: exactly `https://example.invalid/<owner>/<repo>`, a reserved non-registrable host. |
 | `source.commit` | Full lowercase 40-character commit SHA. |
 | `source.content_sha256` | Hash of the pinned tree, computed with `registry/hash.mjs`. |
 | `source.files` | At most 500 paths. This is a review aid, not an install filter: Cockpit installs every file in the pinned tree. |

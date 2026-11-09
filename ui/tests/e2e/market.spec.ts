@@ -103,10 +103,10 @@ test('catalogue, instant search, filters and detail', async ({ page }) => {
   await expect(sheet.getByText(CONTENT_SHA)).toBeVisible();
   await expect(sheet.getByText('MIT', { exact: true })).toBeVisible();
   const repo = sheet.getByRole('link', {
-    name: /https:\/\/github\.com\/cockpit-examples\/commit-messages/,
+    name: /https:\/\/example\.invalid\/cockpit-examples\/commit-messages/,
   });
   await expect(repo).toHaveAttribute('rel', 'noopener');
-  await expect(repo).toHaveText('https://github.com/cockpit-examples/commit-messages');
+  await expect(repo).toHaveText('https://example.invalid/cockpit-examples/commit-messages');
   await sheet.getByText('Pinned commit').scrollIntoViewIfNeeded();
   await shot(page, 'market-detail.png');
 });
