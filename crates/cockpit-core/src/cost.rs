@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::provider::ProviderProtocol;
@@ -164,6 +165,25 @@ impl EffortControl {
     }
 }
 
+/// The kind of reasoning-effort control a model exposes.
+///
+/// Every bundled row declares one. `None` is an explicit "this model has no
+/// effort control" (for example a deprecated generation); it is different from
+/// a missing declaration, which [`audit_pricing_rows`] rejects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelControl {
+    /// Discrete named levels in `effort.levels`.
+    Levels,
+    /// A numeric thinking-token budget in `effort.budget`.
+    Budget,
+    /// The model has no reasoning-effort control.
+    None,
+    /// An unrecognized value. Only reachable from bad data; the audit rejects it.
+    #[serde(other)]
+    Unknown,
+}
+
 /// A model row. Rates are US dollars per million tokens.
 ///
 /// Prices are optional on purpose: an unverified row must stay explicitly
@@ -183,6 +203,10 @@ pub struct ModelPricing {
     pub max_output: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<EffortControl>,
+    /// How reasoning effort is controlled. Missing is an audit failure;
+    /// `none` is an explicit declaration that the model has no control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ModelControl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_per_mtok: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -267,6 +291,106 @@ pub static BUILT_IN_PRICING: LazyLock<Vec<ModelPricing>> = LazyLock::new(|| {
     let raw = include_str!("../../../models.json");
     serde_json::from_str(raw).expect("bundled models.json must be valid pricing data")
 });
+
+/// One reason a bundled model row is not publishable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelAuditIssue {
+    pub provider: String,
+    pub model: String,
+    pub issue: String,
+}
+
+/// Audit a model table against the registry rules.
+///
+/// Every row must declare a control type, a source URL, and price evidence.
+/// Every row must also carry a `verifiedOn` date, except a row that is
+/// explicitly `deprecated`: a retired model is kept only so historical flights
+/// stay priced, and claiming a fresh verification for it would be false.
+///
+/// An empty result means the table is publishable. The CLI runs the same
+/// function in CI, so a local `cargo test` and `cockpit models audit` cannot
+/// disagree.
+pub fn audit_pricing_rows(rows: &[ModelPricing]) -> Vec<ModelAuditIssue> {
+    let mut issues = Vec::new();
+    for row in rows {
+        let mut report = |issue: String| {
+            issues.push(ModelAuditIssue {
+                provider: row.provider.clone(),
+                model: row.model.clone(),
+                issue,
+            });
+        };
+
+        match row.control {
+            None => report("missing control type".to_string()),
+            Some(ModelControl::Unknown) => report("unknown control type".to_string()),
+            Some(ModelControl::None) => {
+                if row.effort.is_some() {
+                    report("control is none but an effort control is declared".to_string());
+                }
+            }
+            Some(ModelControl::Levels) => match &row.effort {
+                None => report("control is levels but no effort control is declared".to_string()),
+                Some(effort) => {
+                    if effort.parameter.trim().is_empty() {
+                        report("effort control has no parameter".to_string());
+                    }
+                    if effort.levels.is_empty() {
+                        report("control is levels but no levels are listed".to_string());
+                    }
+                    if effort.budget.is_some() {
+                        report("control is levels but a budget is also declared".to_string());
+                    }
+                }
+            },
+            Some(ModelControl::Budget) => match &row.effort {
+                None => report("control is budget but no effort control is declared".to_string()),
+                Some(effort) => {
+                    if effort.parameter.trim().is_empty() {
+                        report("effort control has no parameter".to_string());
+                    }
+                    if !effort.levels.is_empty() {
+                        report("control is budget but levels are also listed".to_string());
+                    }
+                    match &effort.budget {
+                        None => report("control is budget but no budget is declared".to_string()),
+                        Some(budget) if budget.max == 0 || budget.min > budget.max => {
+                            report("budget range is empty or inverted".to_string())
+                        }
+                        Some(_) => {}
+                    }
+                }
+            },
+        }
+
+        if !row.source.starts_with("https://") {
+            report("missing or non-HTTPS source URL".to_string());
+        }
+
+        match row.verified_on.as_deref() {
+            Some(date) => {
+                if NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
+                    report(format!("verifiedOn {date:?} is not a YYYY-MM-DD date"));
+                }
+            }
+            None if row.deprecated => {}
+            None => report("missing verifiedOn".to_string()),
+        }
+
+        match (row.input_per_mtok, row.output_per_mtok) {
+            (Some(input), Some(output))
+                if input.is_finite() && output.is_finite() && input >= 0.0 && output >= 0.0 => {}
+            _ => report("missing price evidence (inputPerMtok and outputPerMtok)".to_string()),
+        }
+    }
+    issues
+}
+
+/// Audit the bundled `models.json` table.
+pub fn audit_built_in_pricing() -> Vec<ModelAuditIssue> {
+    audit_pricing_rows(&BUILT_IN_PRICING)
+}
 
 /// Normalize a provider name so `google` and `gemini` resolve to the same rows.
 pub fn canonical_provider(provider: &str) -> String {
@@ -677,6 +801,7 @@ mod tests {
             context_window: Some(1_000_000),
             max_output: Some(32_768),
             effort: None,
+            control: Some(ModelControl::None),
             input_per_mtok: input,
             output_per_mtok: output,
             cache_read_per_mtok: None,
@@ -691,33 +816,82 @@ mod tests {
     }
 
     #[test]
-    fn every_bundled_row_carries_price_evidence() {
-        for row in BUILT_IN_PRICING.iter() {
+    fn every_bundled_row_passes_the_audit() {
+        let issues = audit_built_in_pricing();
+        assert!(
+            issues.is_empty(),
+            "the bundled model table failed its audit: {issues:#?}"
+        );
+    }
+
+    #[test]
+    fn the_retired_row_is_the_only_one_without_a_verification_date() {
+        let undated: Vec<&str> = BUILT_IN_PRICING
+            .iter()
+            .filter(|row| row.verified_on.is_none())
+            .map(|row| row.model.as_str())
+            .collect();
+        assert_eq!(undated, vec!["claude-sonnet-4"]);
+        let retired = BUILT_IN_PRICING
+            .iter()
+            .find(|row| row.model == "claude-sonnet-4")
+            .unwrap();
+        assert!(
+            retired.deprecated,
+            "an undated row must be explicitly deprecated"
+        );
+        assert_eq!(retired.control, Some(ModelControl::None));
+    }
+
+    #[test]
+    fn the_audit_rejects_every_missing_piece_of_evidence() {
+        let mut row = override_row(Some(1.0), Some(2.0));
+        row.source = "https://example.com/pricing".into();
+        row.verified_on = Some("2026-11-10".into());
+        assert!(audit_pricing_rows(&[row.clone()]).is_empty());
+
+        let mut missing_control = row.clone();
+        missing_control.control = None;
+        let mut unknown_control = row.clone();
+        unknown_control.control = Some(ModelControl::Unknown);
+        let mut wrong_control = row.clone();
+        wrong_control.control = Some(ModelControl::Levels);
+        let mut missing_source = row.clone();
+        missing_source.source = "http://example.com/pricing".into();
+        let mut missing_date = row.clone();
+        missing_date.verified_on = None;
+        let mut bad_date = row.clone();
+        bad_date.verified_on = Some("2026-13-01".into());
+        let mut missing_price = row.clone();
+        missing_price.output_per_mtok = None;
+
+        for (label, candidate) in [
+            ("missing control", missing_control),
+            ("unknown control", unknown_control),
+            ("levels without levels", wrong_control),
+            ("non-HTTPS source", missing_source),
+            ("missing verifiedOn", missing_date),
+            ("invalid verifiedOn", bad_date),
+            ("missing price", missing_price),
+        ] {
             assert!(
-                row.source.starts_with("https://"),
-                "{} has no source URL",
-                row.model
-            );
-            if row.model == "claude-sonnet-4" {
-                assert!(
-                    row.verified_on.is_none(),
-                    "the retired row must not claim a fresh verification"
-                );
-                continue;
-            }
-            let verified = row.verified_on.as_deref().unwrap_or("");
-            assert_eq!(verified.len(), 10, "{} has no verifiedOn date", row.model);
-            assert!(
-                verified.as_bytes()[4] == b'-' && verified.as_bytes()[7] == b'-',
-                "{} has a malformed verifiedOn date",
-                row.model
-            );
-            assert!(
-                row.input_per_mtok.is_some() && row.output_per_mtok.is_some(),
-                "{} has no price evidence",
-                row.model
+                !audit_pricing_rows(&[candidate]).is_empty(),
+                "the audit accepted {label}"
             );
         }
+    }
+
+    #[test]
+    fn a_deprecated_row_may_omit_its_verification_date() {
+        let mut row = override_row(Some(1.0), Some(2.0));
+        row.source = "https://example.com/pricing".into();
+        row.verified_on = None;
+        row.deprecated = true;
+        assert!(audit_pricing_rows(&[row.clone()]).is_empty());
+
+        // Deprecated does not excuse a missing source or a missing price.
+        row.source = String::new();
+        assert!(!audit_pricing_rows(&[row]).is_empty());
     }
 
     #[test]

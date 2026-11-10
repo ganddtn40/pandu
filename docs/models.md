@@ -11,7 +11,8 @@ runtime.
 Every value in the table was read from the provider's own documentation on
 `2026-11-10`. Each row carries its own `source` URL and `verifiedOn` date, and
 section 1.1 lists both for every model. The **Model & effort** card shows
-**Price verified <date>** and links to that source. When a value could not be
+**Price verified <date>** and links to that source. Once that date is more than
+60 days old the card adds **, may be outdated**. When a value could not be
 verified it is stored as `"unknown"` (JSON `null`), never as a plausible number.
 A model with an unknown input or output price is shown as **Price unknown** and
 is never counted as `$0.00`.
@@ -97,8 +98,9 @@ Anthropic-compatible endpoint, the effort field is `output_config.effort`.
 
 Every row in `models.json` appears below with the URL it was read from, the
 `verifiedOn` date, and the rates that date supports. The UI shows the date as
-**Price verified <date>**; a row with no date is shown as **Price not
-re-verified**. Amounts are USD per million tokens.
+**Price verified <date>**; after 60 days it becomes **Price verified <date>, may
+be outdated**. A row with no date is shown as **Price not re-verified**. Amounts
+are USD per million tokens.
 
 | Model | Source | Verified on | Price evidence |
 | --- | --- | --- | --- |
@@ -318,18 +320,27 @@ percentage only.
 1. Read the provider's current documentation. Do not infer a price, a limit, or
    an effort level from a model name.
 2. Edit `models.json`. Keep the existing schema: `provider`, `model`,
-   `displayName`, `aliases`, `contextWindow`, `maxOutput`, `effort`
-   (`parameter`, optional `anthropicParameter` and `responsesParameter`, exactly
-   one of `levels` or `budget`, `default`), `inputPerMtok`, `outputPerMtok`,
-   optional `cacheReadPerMtok` and `cacheWritePerMtok`, `currency`, `source`,
-   `verifiedOn`, optional `note`, and `deprecated`. A budget control declares
-   `min`, `max`, `canDisable`, `dynamic`, and `step`.
+   `displayName`, `aliases`, `contextWindow`, `maxOutput`, `control` (`levels`,
+   `budget`, or `none`), `effort` (`parameter`, optional `anthropicParameter` and
+   `responsesParameter`, exactly one of `levels` or `budget`, `default`),
+   `inputPerMtok`, `outputPerMtok`, optional `cacheReadPerMtok` and
+   `cacheWritePerMtok`, `currency`, `source`, `verifiedOn`, optional `note`, and
+   `deprecated`. A budget control declares `min`, `max`, `canDisable`, `dynamic`,
+   and `step`. `control` must agree with `effort`: `levels` needs `effort.levels`,
+   `budget` needs `effort.budget`, and `none` must not declare an effort control.
 3. Store an unknown value as `null` (or omit the field), not as a plausible
    number or `0`. The UI renders a missing price as **Price unknown**. Only use
    `0` when the provider genuinely charges zero.
-4. Run `cargo test -p cockpit-core cost::` and
+4. A row that is explicitly `"deprecated": true` may omit `verifiedOn`: it is
+   kept only to price historical flights, and claiming a fresh verification for
+   a retired model would be false. Every row, deprecated included, still needs a
+   control type, an HTTPS source, and both input and output prices.
+5. Run `cargo run -p cockpit-cli -- models audit`. It fails on a missing control
+   type, source, `verifiedOn` (except a deprecated row), or price evidence. CI
+   runs the same command, so a local pass and CI cannot disagree.
+6. Run `cargo test -p cockpit-core cost::` and
    `cargo test -p cockpit-daemon --test integration override`.
-5. Re-check the demo seed's single unknown-cost call and the cost fixtures before
+7. Re-check the demo seed's single unknown-cost call and the cost fixtures before
    changing a price.
 
 The compiled table is a convenience, not a billing system. Provider prices and

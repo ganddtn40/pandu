@@ -28,6 +28,7 @@
   } from '../format';
   import { copyText } from '../clipboard';
   import { t } from '../i18n/i18n.svelte';
+  import { priceIsStale } from '../model-freshness';
   import { openQuickPrompt } from '../quick-prompt.svelte';
   import { navigate, routeParam } from '../router.svelte';
   import { toast } from '../toast-store.svelte';
@@ -924,7 +925,11 @@
                 {#if currentPricing}
                   <p class="model-card__evidence" data-model-evidence>
                     {#if currentPricing.verifiedOn}
-                      {t('model.verified', { date: currentPricing.verifiedOn })}
+                      {#if priceIsStale(currentPricing.verifiedOn)}
+                        {t('model.verifiedStale', { date: currentPricing.verifiedOn })}
+                      {:else}
+                        {t('model.verified', { date: currentPricing.verifiedOn })}
+                      {/if}
                     {:else}
                       {t('model.notVerified')}
                     {/if}

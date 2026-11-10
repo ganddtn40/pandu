@@ -437,6 +437,7 @@ export interface ModelPricingRow {
   contextWindow?: number;
   maxOutput?: number;
   effort?: EffortControl;
+  control?: 'levels' | 'budget' | 'none' | 'unknown';
   inputPerMtok?: number;
   outputPerMtok?: number;
   cacheReadPerMtok?: number;

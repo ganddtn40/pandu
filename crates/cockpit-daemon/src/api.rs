@@ -434,6 +434,7 @@ fn model_payload(row: &ModelPricing) -> Value {
         "contextWindow": row.context_window,
         "maxOutput": row.max_output,
         "effort": row.effort,
+        "control": row.control,
         "inputPerMtok": row.input_per_mtok,
         "outputPerMtok": row.output_per_mtok,
         "cacheReadPerMtok": row.cache_read_per_mtok,

@@ -55,6 +55,8 @@ enum Command {
     Pair(PairArgs),
     /// Inspect and verify the local audit log.
     Audit(AuditArgs),
+    /// Inspect the bundled model registry.
+    Models(ModelsArgs),
     /// Maintain the signed skill and MCP registry. Maintainer tooling only.
     Market(MarketArgs),
 }
@@ -211,6 +213,26 @@ struct AuditVerifyArgs {
 }
 
 #[derive(Debug, Args)]
+struct ModelsArgs {
+    #[command(subcommand)]
+    action: ModelsAction,
+}
+
+#[derive(Debug, Subcommand)]
+enum ModelsAction {
+    /// Fail when a bundled model row lacks control type, source, verifiedOn,
+    /// or price evidence.
+    Audit(ModelsAuditArgs),
+}
+
+#[derive(Debug, Args, Default)]
+struct ModelsAuditArgs {
+    /// Print JSON instead of a human-readable summary.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
 struct MarketArgs {
     #[command(subcommand)]
     action: MarketAction,
@@ -310,6 +332,9 @@ fn main() -> anyhow::Result<()> {
                 let config = apply_local_args(config, args.home, None, None);
                 audit_verify(config, args.database, args.json)
             }
+        },
+        Command::Models(args) => match args.action {
+            ModelsAction::Audit(args) => models_audit(args),
         },
         Command::Market(args) => match args.action {
             MarketAction::Keygen(args) => market_keygen(args),
@@ -485,6 +510,48 @@ fn verify_audit_database(path: &Path, as_json: bool) -> anyhow::Result<()> {
 
     if !report.valid {
         bail!("the audit log hash chain is broken");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// models
+// ---------------------------------------------------------------------------
+
+fn models_audit(args: ModelsAuditArgs) -> anyhow::Result<()> {
+    let rows = cockpit_core::cost::BUILT_IN_PRICING.len();
+    let issues = cockpit_core::cost::audit_built_in_pricing();
+    let deprecated_without_date = cockpit_core::cost::BUILT_IN_PRICING
+        .iter()
+        .filter(|row| row.deprecated && row.verified_on.is_none())
+        .count();
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "rows": rows,
+                "deprecatedWithoutVerifiedOn": deprecated_without_date,
+                "issues": issues,
+            }))?
+        );
+    } else if issues.is_empty() {
+        println!(
+            "Model registry verified: {rows} rows, every row has a control type, source, \
+             and price evidence ({deprecated_without_date} deprecated without a verification date)."
+        );
+    } else {
+        for issue in &issues {
+            eprintln!("{} {}: {}", issue.provider, issue.model, issue.issue);
+        }
+        eprintln!(
+            "Model registry FAILED: {} issue(s) in {rows} rows.",
+            issues.len()
+        );
+    }
+
+    if !issues.is_empty() {
+        bail!("the model registry audit failed");
     }
     Ok(())
 }

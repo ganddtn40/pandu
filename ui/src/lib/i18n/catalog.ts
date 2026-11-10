@@ -248,6 +248,7 @@ const en = {
   'model.contextWindow': '{tokens} context',
   'model.maxOutput': '{tokens} max output',
   'model.verified': 'Price verified {date}',
+  'model.verifiedStale': 'Price verified {date}, may be outdated',
   'model.notVerified': 'Price not re-verified',
   'model.source': 'Source',
   'model.deprecated': 'Deprecated',

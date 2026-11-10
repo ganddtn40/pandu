@@ -36,3 +36,6 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Audit the model registry
+        run: cargo run --quiet -p cockpit-cli -- models audit

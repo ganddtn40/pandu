@@ -835,9 +835,11 @@ listed so a reviewer can decide whether a later phase must close them.
 17. **Model prices, limits, and effort levels go stale.** The table is a verified
     snapshot, not a live feed. A provider can change a price, a context window, a
     model id, or an effort level without notice. Cost totals and the relative-cost
-    preview are estimates; the `verifiedOn` date is the only freshness claim. An
-    unknown price stays unknown rather than becoming `$0.00`, but a stale known
-    price is still wrong.
+    preview are estimates; the `verifiedOn` date is the only freshness claim. The
+    UI adds **may be outdated** once that date is more than 60 days old, and
+    `cockpit models audit` (run in CI) fails if a row loses its control type,
+    source, verification date, or price evidence. An unknown price stays unknown
+    rather than becoming `$0.00`, but a stale known price is still wrong.
 18. **The context meter can be wrong.** Provider-reported usage is authoritative
     for the total, but the system/tools/history/files breakdown is estimated from
     the request body, and the estimator is approximate. An unknown model has no
