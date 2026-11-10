@@ -581,8 +581,8 @@ async fn remote_listener_never_mounts_proxy_routes_or_host_management() {
 }
 
 /// Model, override, and context-management routes live on the loopback listener
-/// only. A paired device must get the same 404 as an unknown path, even though
-/// the remote listener does mount two explicit `host-only` rejection routes.
+/// only. A paired device must get the same 404 as an unknown path: the remote
+/// listener does not mount them at all.
 #[tokio::test(flavor = "multi_thread")]
 async fn remote_listener_never_mounts_model_or_context_management() {
     let mock = MockUpstream::start().await;
@@ -668,21 +668,6 @@ async fn every_remote_endpoint_enforces_its_scope() {
                 "{path} must require a token"
             );
             daemon.state.remote.clear_auth_failures("auth:127.0.0.1");
-        }
-
-        if endpoint.scope == "host-only" {
-            for token in [&viewer.token, &full.token] {
-                let response =
-                    send_remote(&client, endpoint.method, &url, Some(token), body_ref).await;
-                assert_eq!(
-                    response.status(),
-                    StatusCode::FORBIDDEN,
-                    "{path} must always reject remote devices"
-                );
-                let payload: Value = response.json().await.unwrap();
-                assert_eq!(payload["error"]["code"], "host_only");
-            }
-            continue;
         }
 
         let as_viewer = send_remote(

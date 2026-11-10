@@ -6,7 +6,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{MethodRouter, delete, get, patch, post, put};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
@@ -27,136 +27,462 @@ use crate::remote::{RemoteMode, RemoteServerHandle, host};
 use crate::state::AppState;
 use crate::ui;
 
+/// One method and path the host listener mounts.
+///
+/// This table is the single source of truth for [`build_router`]. Axum merges
+/// method routers that share a path, so there is one row per method. The remote
+/// isolation test walks this table and asserts each path is a 404 on the remote
+/// listener unless it also appears in `remote::api::REMOTE_ROUTES`.
+pub(crate) struct HostRoute {
+    pub method: &'static str,
+    pub path: &'static str,
+    build: fn() -> MethodRouter<AppState>,
+}
+
+pub(crate) const HOST_ROUTES: &[HostRoute] = &[
+    // Recording API
+    HostRoute {
+        method: "GET",
+        path: "/health",
+        build: || get(api::health),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/csrf",
+        build: || get(csrf_token),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/overview",
+        build: || get(api::overview),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/stats",
+        build: || get(api::stats),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions",
+        build: || get(api::list_sessions),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions/{id}",
+        build: || get(api::get_session),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions/{id}/steps",
+        build: || get(api::list_steps),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/sessions/{id}/end",
+        build: || post(api::end_session),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions/{id}/model",
+        build: || get(api::get_session_model),
+    },
+    HostRoute {
+        method: "PUT",
+        path: "/sessions/{id}/model",
+        build: || put(api::put_session_model),
+    },
+    HostRoute {
+        method: "DELETE",
+        path: "/sessions/{id}/model",
+        build: || delete(api::delete_session_model),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions/{id}/model/preview",
+        build: || get(api::preview_session_model),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/sessions/{id}/model/switch",
+        build: || post(api::switch_session_model),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/models",
+        build: || get(api::list_models),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions/{id}/replay",
+        build: || get(api::session_replay),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/sessions/{id}/scan",
+        build: || post(api::session_scan),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/sessions/{id}/budgets",
+        build: || get(api::session_budgets),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/steps/{id}",
+        build: || get(api::get_step),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/snapshots/{id}",
+        build: || get(api::snapshot_detail),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/guards/rules",
+        build: || get(api::list_guard_rules),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/guards/rules",
+        build: || post(api::create_guard_rule),
+    },
+    HostRoute {
+        method: "PATCH",
+        path: "/guards/rules/{id}",
+        build: || patch(api::update_guard_rule),
+    },
+    HostRoute {
+        method: "DELETE",
+        path: "/guards/rules/{id}",
+        build: || delete(api::delete_guard_rule),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/guards/events",
+        build: || get(api::list_guard_events),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/guards/events/{id}/decision",
+        build: || post(api::guard_decision),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/budgets",
+        build: || get(api::list_budgets),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/budgets",
+        build: || post(api::create_budget),
+    },
+    HostRoute {
+        method: "PATCH",
+        path: "/budgets/{id}",
+        build: || patch(api::update_budget),
+    },
+    HostRoute {
+        method: "DELETE",
+        path: "/budgets/{id}",
+        build: || delete(api::delete_budget),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/settings",
+        build: || get(api::get_settings),
+    },
+    HostRoute {
+        method: "PUT",
+        path: "/settings",
+        build: || put(api::put_settings),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/adapters",
+        build: || get(api::list_adapters),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/adapters/{id}",
+        build: || get(api::get_adapter),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/logwatch",
+        build: || get(api::log_watch_status),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/logwatch/scan",
+        build: || post(api::scan_log_watch),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/agents",
+        build: || get(api::list_agents),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/agents/register",
+        build: || post(api::register_agent),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/agents/{id}",
+        build: || get(api::get_agent),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/agents/{id}/output",
+        build: || post(api::agent_output),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/agents/{id}/input",
+        build: || get(api::agent_input_poll),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/agents/{id}/input",
+        build: || post(api::agent_input),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/agents/{id}/events",
+        build: || post(api::record_agent_event),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/agents/{id}/end",
+        build: || post(api::end_agent),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/agent-events",
+        build: || get(api::list_agent_events),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/agent-events/{id}/ack",
+        build: || post(api::acknowledge_agent_event),
+    },
+    // Remote access management is host-only: these routes exist on the
+    // loopback listener and never on the remote listener.
+    HostRoute {
+        method: "GET",
+        path: "/remote/status",
+        build: || get(host::status),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/settings",
+        build: || get(host::settings),
+    },
+    HostRoute {
+        method: "PUT",
+        path: "/remote/settings",
+        build: || put(host::update_settings),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/enable",
+        build: || post(host::enable),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/disable",
+        build: || post(host::disable),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/panic",
+        build: || post(host::panic),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/pair/code",
+        build: || post(host::pair_code),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/pair/pending",
+        build: || get(host::pending_pairings),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/pair/pending/{id}/confirm",
+        build: || post(host::confirm_pairing),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/pair/pending/{id}/deny",
+        build: || post(host::deny_pairing),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/devices",
+        build: || get(host::devices),
+    },
+    HostRoute {
+        method: "PATCH",
+        path: "/remote/devices/{id}",
+        build: || patch(host::update_device),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/devices/{id}/revoke",
+        build: || post(host::revoke_device),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/devices/{id}/rotate",
+        build: || post(host::rotate_device),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/devices/{id}/reset-respond",
+        build: || post(host::reset_device_respond),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/audit",
+        build: || get(host::audit),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/audit/export",
+        build: || get(host::audit_export),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/prompts",
+        build: || get(host::pending_prompts),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/prompts/{id}/approve",
+        build: || post(host::approve_prompt),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/prompts/{id}/deny",
+        build: || post(host::deny_prompt),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/tools",
+        build: || get(host::tools),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/matrix",
+        build: || get(host::matrix),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/remote/notifications",
+        build: || get(host::notifications),
+    },
+    HostRoute {
+        method: "PUT",
+        path: "/remote/notifications",
+        build: || put(host::update_notifications),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/remote/notifications/test",
+        build: || post(host::test_notification),
+    },
+    // The skill and MCP market is host-only. The remote listener never
+    // mounts these routes; the remote isolation test asserts the 404.
+    HostRoute {
+        method: "GET",
+        path: "/market/catalog",
+        build: || get(market::catalog),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/market/refresh",
+        build: || post(market::refresh),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/market/entries/{kind}/{id}",
+        build: || get(market::detail),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/market/installed",
+        build: || get(market::installed),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/market/preview",
+        build: || post(market::preview),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/market/install",
+        build: || post(market::install),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/market/installed/{id}/uninstall-preview",
+        build: || get(market::preview_uninstall),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/market/installed/{id}/uninstall",
+        build: || post(market::uninstall),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/market/installed/{id}/undo",
+        build: || post(market::undo),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/market/settings",
+        build: || get(market::settings),
+    },
+    HostRoute {
+        method: "PUT",
+        path: "/market/settings",
+        build: || put(market::update_settings),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/market/status",
+        build: || get(market::status),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/demo/seed",
+        build: || post(api::seed_demo),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/live",
+        build: || get(api::live),
+    },
+];
+
 /// Build the complete HTTP surface: API, UI, and the catch-all proxy.
 pub fn build_router(state: AppState, bound_port: u16) -> Router {
-    let api = Router::new()
-        .route("/health", get(api::health))
-        .route("/csrf", get(csrf_token))
-        .route("/overview", get(api::overview))
-        .route("/stats", get(api::stats))
-        .route("/sessions", get(api::list_sessions))
-        .route("/sessions/{id}", get(api::get_session))
-        .route("/sessions/{id}/steps", get(api::list_steps))
-        .route("/sessions/{id}/end", post(api::end_session))
-        .route(
-            "/sessions/{id}/model",
-            get(api::get_session_model)
-                .put(api::put_session_model)
-                .delete(api::delete_session_model),
-        )
-        .route(
-            "/sessions/{id}/model/preview",
-            get(api::preview_session_model),
-        )
-        .route(
-            "/sessions/{id}/model/switch",
-            post(api::switch_session_model),
-        )
-        .route("/models", get(api::list_models))
-        .route("/sessions/{id}/replay", get(api::session_replay))
-        .route("/sessions/{id}/scan", post(api::session_scan))
-        .route("/sessions/{id}/budgets", get(api::session_budgets))
-        .route("/steps/{id}", get(api::get_step))
-        .route("/snapshots/{id}", get(api::snapshot_detail))
-        .route(
-            "/guards/rules",
-            get(api::list_guard_rules).post(api::create_guard_rule),
-        )
-        .route(
-            "/guards/rules/{id}",
-            patch(api::update_guard_rule).delete(api::delete_guard_rule),
-        )
-        .route("/guards/events", get(api::list_guard_events))
-        .route("/guards/events/{id}/decision", post(api::guard_decision))
-        .route("/budgets", get(api::list_budgets).post(api::create_budget))
-        .route(
-            "/budgets/{id}",
-            patch(api::update_budget).delete(api::delete_budget),
-        )
-        .route("/settings", get(api::get_settings).put(api::put_settings))
-        .route("/adapters", get(api::list_adapters))
-        .route("/adapters/{id}", get(api::get_adapter))
-        .route("/logwatch", get(api::log_watch_status))
-        .route("/logwatch/scan", post(api::scan_log_watch))
-        .route("/agents", get(api::list_agents))
-        .route("/agents/register", post(api::register_agent))
-        .route("/agents/{id}", get(api::get_agent))
-        .route("/agents/{id}/output", post(api::agent_output))
-        .route(
-            "/agents/{id}/input",
-            get(api::agent_input_poll).post(api::agent_input),
-        )
-        .route("/agents/{id}/events", post(api::record_agent_event))
-        .route("/agents/{id}/end", post(api::end_agent))
-        .route("/agent-events", get(api::list_agent_events))
-        .route("/agent-events/{id}/ack", post(api::acknowledge_agent_event))
-        // Remote access management is host-only: these routes exist on the
-        // loopback listener and never on the remote listener.
-        .route("/remote/status", get(host::status))
-        .route(
-            "/remote/settings",
-            get(host::settings).put(host::update_settings),
-        )
-        .route("/remote/enable", post(host::enable))
-        .route("/remote/disable", post(host::disable))
-        .route("/remote/panic", post(host::panic))
-        .route("/remote/pair/code", post(host::pair_code))
-        .route("/remote/pair/pending", get(host::pending_pairings))
-        .route(
-            "/remote/pair/pending/{id}/confirm",
-            post(host::confirm_pairing),
-        )
-        .route("/remote/pair/pending/{id}/deny", post(host::deny_pairing))
-        .route("/remote/devices", get(host::devices))
-        .route("/remote/devices/{id}", patch(host::update_device))
-        .route("/remote/devices/{id}/revoke", post(host::revoke_device))
-        .route("/remote/devices/{id}/rotate", post(host::rotate_device))
-        .route(
-            "/remote/devices/{id}/reset-respond",
-            post(host::reset_device_respond),
-        )
-        .route("/remote/audit", get(host::audit))
-        .route("/remote/audit/export", get(host::audit_export))
-        .route("/remote/prompts", get(host::pending_prompts))
-        .route(
-            "/remote/prompts/{id}/approve",
-            post(host::approve_prompt),
-        )
-        .route("/remote/prompts/{id}/deny", post(host::deny_prompt))
-        .route("/remote/tools", get(host::tools))
-        .route("/remote/matrix", get(host::matrix))
-        .route(
-            "/remote/notifications",
-            get(host::notifications).put(host::update_notifications),
-        )
-        .route(
-            "/remote/notifications/test",
-            post(host::test_notification),
-        )
-        // The skill and MCP market is host-only. The remote listener never
-        // mounts these routes; the remote isolation test asserts the 404.
-        .route("/market/catalog", get(market::catalog))
-        .route("/market/refresh", post(market::refresh))
-        .route("/market/entries/{kind}/{id}", get(market::detail))
-        .route("/market/installed", get(market::installed))
-        .route("/market/preview", post(market::preview))
-        .route("/market/install", post(market::install))
-        .route(
-            "/market/installed/{id}/uninstall-preview",
-            get(market::preview_uninstall),
-        )
-        .route(
-            "/market/installed/{id}/uninstall",
-            post(market::uninstall),
-        )
-        .route("/market/installed/{id}/undo", post(market::undo))
-        .route(
-            "/market/settings",
-            get(market::settings).put(market::update_settings),
-        )
-        .route("/market/status", get(market::status))
-        .route("/demo/seed", post(api::seed_demo))
-        .route("/live", get(api::live))
+    let mut api = Router::new();
+    for route in HOST_ROUTES {
+        // The method is the table's documentation and what the isolation test
+        // enumerates; the handler builder decides what is actually mounted.
+        // Catch a typo in the table early.
+        debug_assert!(
+            matches!(route.method, "GET" | "POST" | "PUT" | "PATCH" | "DELETE"),
+            "unknown method {} for host route {}",
+            route.method,
+            route.path
+        );
+        api = api.route(route.path, (route.build)());
+    }
+    let api = api
         .fallback(api::not_found)
         .route_layer(middleware::from_fn_with_state(
             HostGuard {
@@ -808,6 +1134,60 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The host and remote listeners are separate surfaces. Every route the
+    /// host mounts must be a 404 on the remote listener unless the remote route
+    /// table deliberately mounts the same method and path. This is the generic
+    /// guard behind the hand-written isolation tests: adding a host route can
+    /// never silently expose it to a paired device.
+    #[tokio::test]
+    async fn the_remote_listener_404s_every_host_route_it_does_not_mount() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let home = tempfile::tempdir().unwrap();
+        let state = AppState::new(Config::for_home(home.path())).unwrap();
+        let remote = crate::remote::api::build_remote_router(state);
+
+        let remote_rows: std::collections::HashSet<(&str, &str)> =
+            crate::remote::api::REMOTE_ROUTES
+                .iter()
+                .map(|route| (route.method, route.path))
+                .collect();
+
+        for route in HOST_ROUTES {
+            let path = route
+                .path
+                .replace("{id}", "00000000-0000-0000-0000-000000000000")
+                .replace("{kind}", "skill");
+            let request = Request::builder()
+                .method(route.method)
+                .uri(format!("/api{path}"))
+                .header(header::HOST, "127.0.0.1:4320")
+                .body(Body::empty())
+                .unwrap();
+            let status = remote.clone().oneshot(request).await.unwrap().status();
+
+            if remote_rows.contains(&(route.method, route.path)) {
+                assert_ne!(
+                    status,
+                    StatusCode::NOT_FOUND,
+                    "{} {} is in REMOTE_ROUTES but the remote listener does not mount it",
+                    route.method,
+                    route.path
+                );
+            } else {
+                assert_eq!(
+                    status,
+                    StatusCode::NOT_FOUND,
+                    "{} {} leaked onto the remote listener",
+                    route.method,
+                    route.path
+                );
+            }
+        }
+    }
 
     #[test]
     fn tunnel_urls_must_name_one_https_hostname() {

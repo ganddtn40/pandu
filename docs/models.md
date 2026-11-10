@@ -165,10 +165,10 @@ no setting that turns them on globally.
   `GET/PUT/DELETE /api/sessions/{id}/model`,
   `GET /api/sessions/{id}/model/preview`, `POST /api/sessions/{id}/model/switch`,
   and `GET /api/models` all return `404 not_found` to a paired device. It mounts
-  only `POST /api/remote/sessions/{id}/model` and
-  `POST /api/remote/sessions/{id}/model/switch`, which always return
-  `403 host_only` even for a fully scoped device, and the attempt is written to
-  the audit log. The scope matrix lists both rejection routes as `host-only`.
+  no remote model route at all: model and effort changes are a host action, and
+  the remote scope table has no `host-only` scope. The generic isolation test
+  walks every host route and requires a 404 on the remote listener unless the
+  route is explicitly listed in `REMOTE_ROUTES`.
 - Setting, clearing, denying, and switching write hash-chained audit entries:
   `model.override.set`, `model.override.cleared`, `model.override.denied`,
   `model.switch`, `model.switch.manual`, and `model.switch.denied`. The entry

@@ -520,18 +520,15 @@ general request editor.
 - **Host-only.** `GET /api/models`, `GET/PUT/DELETE /api/sessions/{id}/model`,
   `GET /api/sessions/{id}/model/preview`, and
   `POST /api/sessions/{id}/model/switch` are mounted on the loopback listener
-  only. The remote listener exposes
-  `POST /api/remote/sessions/{id}/model` and
-  `POST /api/remote/sessions/{id}/model/switch` solely to reject them with
-  `403 host_only`; the rejection is audited. The remote scope matrix lists both
-  as `host-only`, and `every_remote_endpoint_enforces_its_scope` asserts the
-  rejection for a paired device. The scope matrix is generated from
-  `remote::api::REMOTE_ROUTES`, the same table `build_remote_router` mounts, so
-  a route cannot exist without a scope. `scope_matrix_never_uses_a_wildcard`
-  checks every table row, and
-  `remote_listener_never_mounts_model_or_context_management` probes every
-  loopback model/override route and `/api/models` with a paired device and
-  requires a `404 not_found`.
+  only. The remote listener mounts no model route at all and has no `host-only`
+  scope: a paired device gets the same `404 not_found` as an unknown path. The
+  scope matrix is generated from `remote::api::REMOTE_ROUTES`, the same table
+  `build_remote_router` mounts, so a route cannot exist without a scope.
+  `scope_matrix_never_uses_a_wildcard` checks every table row,
+  `scope_none_is_an_explicit_allowlist` pins the unscoped routes to health and
+  pairing, and `the_remote_listener_404s_every_host_route_it_does_not_mount`
+  walks every host route and requires a 404 on the remote listener unless the
+  remote table deliberately mounts it.
 - **Opt-in and ephemeral.** There is no global switch. An override exists only
   while the flight is active and lives in daemon memory. It clears when the
   flight ends and when the daemon restarts. With no override the proxy forwards
@@ -652,8 +649,8 @@ gates still apply):
 - With the override off, the forwarded bytes are identical to the agent's bytes.
 - An unknown model, a cross-provider model, and an unsupported effort are
   rejected and audited; a forward-time failure is flagged and fails open.
-- A remote device cannot set, clear, or switch a model; both routes return
-  `403 host_only` and are audited.
+- A remote device cannot set, clear, or switch a model: the remote listener does
+  not mount a model route, so every attempt is a `404 not_found`.
 - A PTY model switch is sent only for an adapter with a verified
   `[model_switch]` command; every other case returns manual instructions.
 - Unknown prices stay unknown in cost math and are never rendered as `$0.00`.
@@ -726,8 +723,6 @@ matrix, and the integration test iterates it.
 | GET | `/api/remote/sessions` | view:status | Flight list |
 | GET | `/api/remote/sessions/{id}` | view:status | Flight detail |
 | GET | `/api/remote/sessions/{id}/steps` | view:content | Captured steps, prompts, and responses |
-| POST | `/api/remote/sessions/{id}/model` | host-only | Always rejected; model and effort overrides are host-only |
-| POST | `/api/remote/sessions/{id}/model/switch` | host-only | Always rejected; PTY model switches are host-only |
 | GET | `/api/remote/guards/events` | view:status | Pending and past approvals |
 | GET | `/api/remote/agents` | view:status | Running agent sessions |
 | GET | `/api/remote/agents/{id}` | view:content | Sanitized terminal output |

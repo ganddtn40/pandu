@@ -111,8 +111,8 @@ Remote access is off by default and is enabled only from the host UI.
   output. Prompt can type into a running agent.
 - The status view includes `contextPercent` only. It does not include token
   counts, the model window, the breakdown, or the model's source URL.
-- A remote device cannot change the model or send a PTY model switch. Both routes
-  return `403 host_only` and are audited.
+- A remote device cannot change the model or send a PTY model switch: the remote
+  listener mounts no model route, so every attempt is a `404 not_found`.
 - The audit log stores prompt size and a SHA-256 hash, never the prompt text. It
   stores no tokens, passwords, PINs, or terminal output.
 - Revoking a device closes its live socket immediately. Panic revokes every

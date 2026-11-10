@@ -198,7 +198,7 @@ test.describe('remote access', () => {
     const matrix = card.locator('.remote-section').filter({ hasText: 'Endpoints and scopes' });
     // Every route the remote listener mounts is listed, including the
     // unauthenticated health probe that the connection check uses.
-    await expect(matrix.locator('.remote-matrix tbody tr')).toHaveCount(19);
+    await expect(matrix.locator('.remote-matrix tbody tr')).toHaveCount(17);
     await expect(page.locator('.toast')).toBeHidden({ timeout: 10_000 });
     await page.setViewportSize({ width: 1440, height: 1200 });
     await shotOf(matrix.locator('.remote-matrix-wrap'), '07-endpoints-scopes.png');

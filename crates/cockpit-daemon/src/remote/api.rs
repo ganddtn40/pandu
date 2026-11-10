@@ -122,20 +122,6 @@ pub(crate) const REMOTE_ROUTES: &[RemoteRoute] = &[
         auth: RemoteAuthClass::Bearer,
     },
     RemoteRoute {
-        method: "POST",
-        path: "/remote/sessions/{id}/model",
-        scope: "host-only",
-        note: "Always rejected: model and effort overrides are host-only",
-        auth: RemoteAuthClass::Bearer,
-    },
-    RemoteRoute {
-        method: "POST",
-        path: "/remote/sessions/{id}/model/switch",
-        scope: "host-only",
-        note: "Always rejected: PTY model switches are host-only",
-        auth: RemoteAuthClass::Bearer,
-    },
-    RemoteRoute {
         method: "GET",
         path: "/remote/guards/events",
         scope: "view:status",
@@ -212,8 +198,6 @@ fn mount(route: &RemoteRoute) -> MethodRouter<AppState> {
         ("GET", "/remote/sessions") => get(list_sessions),
         ("GET", "/remote/sessions/{id}") => get(get_session),
         ("GET", "/remote/sessions/{id}/steps") => get(list_steps),
-        ("POST", "/remote/sessions/{id}/model") => post(reject_model_override),
-        ("POST", "/remote/sessions/{id}/model/switch") => post(reject_model_switch),
         ("GET", "/remote/guards/events") => get(list_guard_events),
         ("POST", "/remote/guards/events/{id}/decision") => post(guard_decision),
         ("GET", "/remote/agents") => get(list_agents),
@@ -506,61 +490,6 @@ async fn list_steps(
         Ok(Json(value)) => Json(value).into_response(),
         Err(error) => error.into_response(),
     }
-}
-
-/// Model and effort overrides are host-only. The route exists on the remote
-/// listener only so a paired device gets an explicit refusal and an audit row,
-/// never a silent 404 that hides the security boundary.
-async fn reject_model_override(
-    State(state): State<AppState>,
-    Extension(principal): Extension<RemotePrincipal>,
-    Path(id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    state.remote.audit(
-        "model.override.denied",
-        Some((&principal.device_id, &principal.device_name)),
-        None,
-        json!({
-            "sessionId": id,
-            "reason": "remote_host_only",
-            "model": body.get("model").cloned().unwrap_or(Value::Null),
-        }),
-        None,
-        None,
-    );
-    api_error(
-        StatusCode::FORBIDDEN,
-        "host_only",
-        "Model and effort changes are host-only. Use the Cockpit desktop UI.",
-    )
-}
-
-/// PTY model switches are host-only for the same reason overrides are: a
-/// paired device must never type into the host's terminal.
-async fn reject_model_switch(
-    State(state): State<AppState>,
-    Extension(principal): Extension<RemotePrincipal>,
-    Path(id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    state.remote.audit(
-        "model.switch.denied",
-        Some((&principal.device_id, &principal.device_name)),
-        None,
-        json!({
-            "sessionId": id,
-            "reason": "remote_host_only",
-            "model": body.get("model").cloned().unwrap_or(Value::Null),
-        }),
-        None,
-        None,
-    );
-    api_error(
-        StatusCode::FORBIDDEN,
-        "host_only",
-        "Model changes are host-only. Use the Cockpit desktop UI.",
-    )
 }
 
 async fn list_guard_events(

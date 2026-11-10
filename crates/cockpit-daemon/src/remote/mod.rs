@@ -1179,7 +1179,7 @@ mod tests {
             assert!(
                 matches!(
                     route.scope,
-                    "view:status" | "view:content" | "respond" | "prompt" | "none" | "host-only"
+                    "view:status" | "view:content" | "respond" | "prompt" | "none"
                 ),
                 "unexpected scope {} on {} {}",
                 route.scope,
@@ -1200,6 +1200,28 @@ mod tests {
                 route.path
             );
         }
+    }
+
+    #[test]
+    fn scope_none_is_an_explicit_allowlist() {
+        // `none` means "no scope check", so it must stay an exhaustive
+        // allowlist rather than a label any future route can adopt. The two
+        // pairing endpoints and health are the only routes a device can reach
+        // without a scope; health validates itself (paired bearer or loopback).
+        let none: Vec<(&str, &str)> = crate::remote::api::REMOTE_ROUTES
+            .iter()
+            .filter(|route| route.scope == "none")
+            .map(|route| (route.method, route.path))
+            .collect();
+        assert_eq!(
+            none,
+            vec![
+                ("GET", "/remote/health"),
+                ("POST", "/remote/pair/claim"),
+                ("POST", "/remote/pair/claim/{id}"),
+            ],
+            "the unscoped allowlist changed; review it before adding a route"
+        );
     }
 
     #[test]
