@@ -1,0 +1,84 @@
+schema_version: 1
+id: "skill-creator"
+name: "Skill Creator"
+kind: "skill"
+version: "2c5958e"
+short_description: "Create, edit, evaluate, and package agent skills, including test cases, benchmarks, and description tuning."
+long_description: "Creates, edits, evaluates, and packages agent skills. It helps draft SKILL.md, build test cases, run benchmarks with variance analysis, review results, and tune the description for better triggering."
+categories:
+  - "productivity"
+  - "coding"
+tags:
+  - "skills"
+  - "evals"
+  - "benchmarks"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/skill-creator/LICENSE.txt"
+    - "skills/skill-creator/SKILL.md"
+    - "skills/skill-creator/agents/analyzer.md"
+    - "skills/skill-creator/agents/comparator.md"
+    - "skills/skill-creator/agents/grader.md"
+    - "skills/skill-creator/assets/eval_review.html"
+    - "skills/skill-creator/eval-viewer/generate_review.py"
+    - "skills/skill-creator/eval-viewer/viewer.html"
+    - "skills/skill-creator/references/schemas.md"
+    - "skills/skill-creator/scripts/__init__.py"
+    - "skills/skill-creator/scripts/aggregate_benchmark.py"
+    - "skills/skill-creator/scripts/generate_report.py"
+    - "skills/skill-creator/scripts/improve_description.py"
+    - "skills/skill-creator/scripts/package_skill.py"
+    - "skills/skill-creator/scripts/quick_validate.py"
+    - "skills/skill-creator/scripts/run_eval.py"
+    - "skills/skill-creator/scripts/run_loop.py"
+    - "skills/skill-creator/scripts/utils.py"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads the skill folder, eval data, and review output."
+  - id: "filesystem:write"
+    description: "Writes SKILL.md, eval cases, reports, and packaged skill files."
+  - id: "shell"
+    description: "Runs the bundled Python scripts for evals, reports, and packaging."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/skill-creator"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/skill-creator"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/skill-creator"
+readme: |
+  # Skill Creator
+
+  Helps create a new skill, improve an existing one, and measure whether it works. The workflow covers drafting SKILL.md, writing test prompts, running evals, reviewing results, and packaging the skill.
+
+  The skill includes Python helpers for aggregation, reporting, description improvement, and packaging. It writes eval data and reports into the workspace. It does not publish anything.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

@@ -1,0 +1,73 @@
+schema_version: 1
+id: "webapp-testing"
+name: "Web App Testing"
+kind: "skill"
+version: "2c5958e"
+short_description: "Test local web apps with Playwright: verify frontend behavior, capture screenshots, and inspect browser logs."
+long_description: "Tests local web applications with Playwright. It starts one or more dev servers, drives a browser, verifies frontend behavior, captures screenshots, and reads browser logs and DOM state."
+categories:
+  - "testing"
+tags:
+  - "playwright"
+  - "browser"
+  - "screenshots"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/webapp-testing/LICENSE.txt"
+    - "skills/webapp-testing/SKILL.md"
+    - "skills/webapp-testing/examples/console_logging.py"
+    - "skills/webapp-testing/examples/element_discovery.py"
+    - "skills/webapp-testing/examples/static_html_automation.py"
+    - "skills/webapp-testing/scripts/with_server.py"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads the web app and the bundled Playwright examples."
+  - id: "filesystem:write"
+    description: "Writes test scripts, screenshots, and browser artifacts."
+  - id: "shell"
+    description: "Starts local dev servers and runs Python Playwright scripts."
+  - id: "network"
+    description: "Connects to local web servers over HTTP."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/webapp-testing"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/webapp-testing"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/webapp-testing"
+readme: |
+  # Web App Testing
+
+  Tests a local web application with Playwright. The skill starts one or more dev servers, waits for the ports, drives a browser, checks frontend behavior, captures screenshots, and reads console logs and DOM state.
+
+  The bundled with_server.py helper manages server lifecycle. The examples show element discovery, console logging, and static HTML automation. Test scripts and screenshots are written to the workspace.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

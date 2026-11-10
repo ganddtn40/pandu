@@ -176,6 +176,18 @@ test.describe('remote access', () => {
     await expect(remote.locator('.remote-app__meta')).toContainText('Status');
     await shot(remote, '05-remote-paired-dashboard.png');
 
+    // The status view exposes context pressure as a percentage only: no token
+    // counts, model window, or system/tools/history breakdown.
+    await remote.getByRole('button', { name: /Flights/ }).click();
+    await expect(remote.locator('.remote-app__row')).toHaveCount(4);
+    const contextRow = remote
+      .locator('.remote-app__row-main')
+      .filter({ hasText: '% context' });
+    await expect(contextRow).toHaveCount(1);
+    await expect(contextRow).toContainText('82.4% context');
+    await expect(contextRow).not.toContainText('tokens');
+    await expect(contextRow).not.toContainText('1.0M');
+
     // The host audit trail records the code, the request, and the confirmation.
     await card.getByRole('button', { name: 'Refresh' }).click();
     const audit = card.locator('.remote-section').filter({ hasText: 'Audit log' });
@@ -184,7 +196,7 @@ test.describe('remote access', () => {
     await shotOf(audit, '06-host-audit.png');
 
     const matrix = card.locator('.remote-section').filter({ hasText: 'Endpoints and scopes' });
-    await expect(matrix.locator('.remote-matrix tbody tr')).toHaveCount(16);
+    await expect(matrix.locator('.remote-matrix tbody tr')).toHaveCount(18);
     await expect(page.locator('.toast')).toBeHidden({ timeout: 10_000 });
     await page.setViewportSize({ width: 1440, height: 1200 });
     await shotOf(matrix.locator('.remote-matrix-wrap'), '07-endpoints-scopes.png');

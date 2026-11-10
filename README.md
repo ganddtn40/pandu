@@ -122,6 +122,10 @@ your local database.
   scopes, revocation, and troubleshooting
 - [Security model](docs/security.md) — what is protected, stolen-token impact,
   and the endpoints × scopes table
+- [Models, effort, and context](docs/models.md) — the verified model table,
+  host-only overrides, PTY switching, and the context meter
+- [Privacy](docs/privacy.md) — what is stored locally, what can leave the
+  machine, and how to delete it
 - [Market and registry](docs/market.md) — trust tiers, signed registry, install
   previews, offline behavior, and the contributor rules
 - [Rewrite decision record](docs/REWRITE.md) — what is kept, cut, and changed

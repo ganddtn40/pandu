@@ -363,6 +363,382 @@ async fn streams_sse_bytes_unchanged_and_collects_the_response() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn host_override_rewrites_only_the_forwarded_request() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    // First request establishes the ambient OpenAI flight.
+    let first = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "first" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+
+    let preview: Value = client
+        .get(format!(
+            "http://{}/api/sessions/{session_id}/model/preview?model=gpt-5.5&effort=high",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["requiresConfirmation"], true);
+    assert_eq!(preview["override"]["model"], "gpt-5.5");
+    assert_eq!(preview["override"]["effort"], "high");
+    assert_eq!(preview["relativeCost"]["known"], true);
+    assert_eq!(preview["relativeCost"]["direction"], "more");
+    assert_eq!(preview["relativeCost"]["fromModel"], "gpt-4.1");
+    assert_eq!(preview["relativeCost"]["referenceTokens"], 1_000_000);
+
+    let applied = client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.5", "effort": "high" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(applied.status(), StatusCode::OK);
+    let applied: Value = applied.json().await.unwrap();
+    assert_eq!(applied["override"]["originalModel"], "gpt-4.1");
+    assert_eq!(applied["override"]["provider"], "openai");
+
+    let response = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1/chat/completions",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "reasoning_effort": "low",
+            "temperature": 0.25,
+            "messages": [{ "role": "user", "content": "override me" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let step_id = response.headers()["x-cockpit-step-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = response.bytes().await.unwrap();
+
+    // The provider saw the rewritten model and effort; nothing else changed.
+    let captured = mock.last();
+    let forwarded: Value = serde_json::from_str(&captured.body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-5.5");
+    assert_eq!(forwarded["reasoning_effort"], "high");
+    assert_eq!(forwarded["temperature"], 0.25);
+    assert_eq!(forwarded["messages"][0]["content"], "override me");
+
+    // The recorded request keeps the original bytes; the rewrite lives in
+    // step metadata only.
+    let step: Value = client
+        .get(format!("http://{}/api/steps/{step_id}", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let recorded = &step["step"]["request"]["body"];
+    assert_eq!(recorded["model"], "gpt-4.1");
+    assert_eq!(recorded["reasoning_effort"], "low");
+    assert_eq!(step["step"]["metadata"]["override"]["applied"], true);
+    assert_eq!(
+        step["step"]["metadata"]["override"]["modifiedBy"],
+        "cockpit"
+    );
+    assert_eq!(
+        step["step"]["metadata"]["override"]["model"]["from"],
+        "gpt-4.1"
+    );
+    assert_eq!(
+        step["step"]["metadata"]["override"]["model"]["to"],
+        "gpt-5.5"
+    );
+    assert_eq!(
+        step["step"]["metadata"]["override"]["effort"]["from"],
+        "low"
+    );
+    assert_eq!(step["step"]["metadata"]["override"]["effort"]["to"], "high");
+    assert!(step["step"]["metadata"]["context"]["percent"].is_number());
+
+    // Ending the flight drops the override.
+    let ended = client
+        .post(format!(
+            "http://{}/api/sessions/{session_id}/end",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ended.status(), StatusCode::OK);
+    let model: Value = client
+        .get(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(model["override"], Value::Null);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn override_rewrites_streaming_requests_and_passes_sse_bytes_through() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let first = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "first" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+
+    client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.5" }))
+        .send()
+        .await
+        .unwrap();
+
+    let response = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1/chat/completions",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "stream": true,
+            "messages": [{ "role": "user", "content": "stream override" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let step_id = response.headers()["x-cockpit-step-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let bytes = response.bytes().await.unwrap();
+    // The response is the provider's bytes, never re-encoded by Cockpit.
+    assert_eq!(bytes.as_ref(), SSE_BODY.as_bytes());
+
+    let captured = mock.last();
+    let forwarded: Value = serde_json::from_str(&captured.body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-5.5");
+    assert_eq!(forwarded["stream"], true);
+
+    let step: Value = client
+        .get(format!("http://{}/api/steps/{step_id}", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(step["step"]["metadata"]["override"]["applied"], true);
+    assert_eq!(
+        step["step"]["metadata"]["override"]["model"]["to"],
+        "gpt-5.5"
+    );
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_the_override_off_the_forwarded_bytes_are_identical() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    // Deliberately odd whitespace and key order: a byte-identical forward must
+    // not reserialize the body.
+    let raw = r#"{"model": "gpt-4.1",   "messages" :[{"role":"user","content":"bytes"}],"temperature":0.5}"#;
+    let first = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .header("content-type", "application/json")
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+    assert_eq!(mock.last().body, raw);
+
+    // Turning an override on rewrites; turning it back off restores the
+    // byte-identical path for the very next request.
+    client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.5" }))
+        .send()
+        .await
+        .unwrap();
+    client
+        .delete(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+
+    let second = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1/chat/completions",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .body(raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let _ = second.bytes().await.unwrap();
+    assert_eq!(mock.last().body, raw);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_overrides_are_rejected_and_audited() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let first = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "first" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+
+    for (body, code) in [
+        (json!({ "model": "claude-opus-5-5" }), "provider_mismatch"),
+        (json!({ "model": "mystery-model" }), "model_not_found"),
+        (
+            json!({ "model": "gpt-5.5", "effort": "impossible" }),
+            "effort_unsupported",
+        ),
+        (
+            json!({ "model": "gpt-4.1", "effort": "high" }),
+            "effort_not_supported",
+        ),
+    ] {
+        let response = client
+            .put(format!(
+                "http://{}/api/sessions/{session_id}/model",
+                daemon.addr
+            ))
+            .headers(host_headers(&daemon))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+        let payload: Value = response.json().await.unwrap();
+        assert_eq!(payload["error"]["code"], code, "{body}");
+    }
+
+    // A rejected override never installs.
+    let model: Value = client
+        .get(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(model["override"], Value::Null);
+
+    let audit: Value = client
+        .get(format!("http://{}/api/remote/audit?limit=50", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let denied: Vec<&Value> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["event"] == "model.override.denied")
+        .collect();
+    assert_eq!(denied.len(), 4);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn sentinel_swaps_in_configured_anthropic_key() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();
@@ -1103,6 +1479,129 @@ async fn agent_control_relays_sanitized_output_and_queues_input() {
         .await
         .unwrap();
     assert_eq!(late_input.status(), StatusCode::BAD_REQUEST);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pty_model_switch_needs_a_verified_adapter_command() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", daemon.addr);
+
+    let registered: Value = client
+        .post(format!("{base}/api/agents/register"))
+        .headers(host_headers(&daemon))
+        .json(&json!({
+            "agentName": "Claude Code",
+            "workingDir": "C:\\work\\checkout-service",
+            "adapter": "claude-code"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = registered["session"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(registered["session"]["modelSwitch"]["available"], true);
+    assert_eq!(
+        registered["session"]["modelSwitch"]["command"],
+        "/model {model}"
+    );
+
+    let switched: Value = client
+        .post(format!("{base}/api/sessions/{id}/model/switch"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.5" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(switched["mode"], "pty");
+    assert_eq!(switched["command"], "/model gpt-5.5");
+    assert_eq!(switched["adapter"], "claude-code");
+
+    let poll: Value = client
+        .get(format!("{base}/api/agents/{id}/input?after=0&waitMs=0"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(poll["chunks"][0]["data"], "/model gpt-5.5\n");
+
+    // An adapter without a verified command never receives keystrokes.
+    let manual: Value = client
+        .post(format!("{base}/api/agents/register"))
+        .headers(host_headers(&daemon))
+        .json(&json!({
+            "agentName": "OpenCode",
+            "workingDir": "C:\\work\\checkout-service",
+            "adapter": "opencode"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let manual_id = manual["session"]["sessionId"].as_str().unwrap().to_string();
+    assert_eq!(manual["session"]["modelSwitch"]["available"], false);
+    let fallback: Value = client
+        .post(format!("{base}/api/sessions/{manual_id}/model/switch"))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.5" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(fallback["mode"], "manual");
+    assert_eq!(fallback["command"], Value::Null);
+    assert!(
+        fallback["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("no verified model switch")
+    );
+    let manual_poll: Value = client
+        .get(format!(
+            "{base}/api/agents/{manual_id}/input?after=0&waitMs=0"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(manual_poll["chunks"].as_array().unwrap().is_empty());
+
+    let audit: Value = client
+        .get(format!("{base}/api/remote/audit?limit=50"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events: Vec<&str> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|entry| entry["event"].as_str())
+        .collect();
+    assert!(events.contains(&"model.switch"));
+    assert!(events.contains(&"model.switch.manual"));
 
     daemon.shutdown().await.unwrap();
 }

@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use cockpit_core::adapter::AdapterRegistry;
+use cockpit_core::adapter::{Adapter, AdapterRegistry};
 use cockpit_core::agent::{
     AgentEvent, AgentEventInput, AgentEventStatus, AgentEventType, NotificationPayload,
 };
@@ -80,6 +80,28 @@ impl AgentPromptState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSwitchSupport {
+    /// True only when the adapter declares a verified command and the session
+    /// is a PTY Cockpit can type into.
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    pub instructions: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSwitchOutcome {
+    /// `pty` when the command was queued, `manual` when the host must do it.
+    pub mode: &'static str,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    pub instructions: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionView {
@@ -95,6 +117,9 @@ pub struct AgentSessionView {
     /// The agent was started with a flag that skips its own approvals. Every
     /// remote prompt in this session must still be confirmed by the host.
     pub auto_approve: bool,
+    /// Whether Cockpit may switch this agent's model from the terminal, and
+    /// what to tell the host when it may not.
+    pub model_switch: ModelSwitchSupport,
     pub exit_code: Option<i32>,
     pub created_at: String,
     pub updated_at: String,
@@ -182,6 +207,27 @@ pub struct AgentControl {
     inner: StdMutex<Inner>,
 }
 
+fn model_switch_support(adapter: Option<&Adapter>) -> ModelSwitchSupport {
+    match adapter
+        .and_then(|adapter| adapter.model_switch.as_ref())
+        .filter(|spec| spec.verified)
+    {
+        Some(spec) => ModelSwitchSupport {
+            available: true,
+            command: Some(spec.command.clone()),
+            instructions: format!(
+                "Cockpit can send `{}` to this terminal.",
+                spec.command.replace("{model}", "<model>")
+            ),
+        },
+        None => ModelSwitchSupport {
+            available: false,
+            command: None,
+            instructions: "This agent has no verified model switch. Change the model inside the agent, then start a new flight.".to_string(),
+        },
+    }
+}
+
 impl AgentControl {
     pub fn new(
         store: Arc<Store>,
@@ -228,6 +274,7 @@ impl AgentControl {
             .get(&adapter)
             .map(|adapter| adapter.verified)
             .unwrap_or(false);
+        let model_switch = model_switch_support(self.registry.find(&adapter));
 
         let session = self.store.create_session(NewSession {
             title: format!("{agent_name} · {project_name}"),
@@ -269,6 +316,7 @@ impl AgentControl {
             needs_you: false,
             prompt_state: AgentPromptState::Unknown,
             auto_approve,
+            model_switch,
             exit_code: None,
             created_at: now.clone(),
             updated_at: now,
@@ -494,6 +542,53 @@ impl AgentControl {
         Ok(Some(sequence))
     }
 
+    /// Queue a model switch for a PTY agent, or explain how the host should do
+    /// it manually. Hook and log-watch flights never have a terminal, so they
+    /// always fall back to instructions.
+    pub fn switch_model(
+        &self,
+        session_id: &str,
+        adapter_id: Option<&str>,
+        model: &str,
+    ) -> Result<ModelSwitchOutcome> {
+        let adapter = adapter_id.and_then(|id| self.registry.find(id));
+        let adapter_name = adapter
+            .map(|adapter| adapter.name.clone())
+            .unwrap_or_else(|| "This agent".to_string());
+        let command = adapter.and_then(|adapter| adapter.model_switch_command(model));
+        let has_terminal = {
+            let inner = self.lock()?;
+            inner.sessions.contains_key(session_id)
+        };
+
+        if let Some(command) = command {
+            if has_terminal {
+                self.push_input(session_id, &format!("{command}\n"))?;
+                return Ok(ModelSwitchOutcome {
+                    mode: "pty",
+                    model: model.to_string(),
+                    command: Some(command.clone()),
+                    instructions: format!("Cockpit sent `{command}` to {adapter_name}."),
+                });
+            }
+            return Ok(ModelSwitchOutcome {
+                mode: "manual",
+                model: model.to_string(),
+                command: Some(command.clone()),
+                instructions: format!("Run `{command}` in {adapter_name} to switch models."),
+            });
+        }
+
+        Ok(ModelSwitchOutcome {
+            mode: "manual",
+            model: model.to_string(),
+            command: None,
+            instructions: format!(
+                "{adapter_name} has no verified model switch. Change the model inside the agent, then start a new flight."
+            ),
+        })
+    }
+
     /// Long-poll for queued keystrokes. The CLI calls this while it waits for
     /// local input; the response also reports when the session has ended.
     pub async fn wait_for_input(
@@ -658,6 +753,19 @@ impl AgentControl {
         let Some(view) = view else {
             return Ok(None);
         };
+        self.record_event_for(session_id, &view.agent_name, &view.project_name, input)
+    }
+
+    /// Record an event for a flight that is not backed by a registered agent
+    /// terminal (for example a proxy flight). The caller supplies the labels so
+    /// the same persistence, live-bus, and toast path is used.
+    pub fn record_event_for(
+        &self,
+        session_id: &str,
+        agent_name: &str,
+        project_name: &str,
+        input: AgentEventInput,
+    ) -> Result<Option<AgentEvent>> {
         let mut input = input;
         input.message = sanitize_output(&input.message)
             .chars()
@@ -675,12 +783,9 @@ impl AgentControl {
                 input.metadata = None;
             }
         }
-        let event = self.store.insert_agent_event(
-            session_id,
-            &view.agent_name,
-            &view.project_name,
-            &input,
-        )?;
+        let event = self
+            .store
+            .insert_agent_event(session_id, agent_name, project_name, &input)?;
         self.live.publish(
             "agent.event",
             Some(session_id),
@@ -774,6 +879,7 @@ impl AgentControl {
             needs_you: true,
             prompt_state: AgentPromptState::Permission,
             auto_approve: false,
+            model_switch: model_switch_support(self.registry.find("claude-code")),
             exit_code: None,
             created_at: now.clone(),
             updated_at: now,

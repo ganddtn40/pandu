@@ -508,6 +508,7 @@ mod tests {
                     error: None,
                     ttft_ms: None,
                     latency_ms: 1,
+                    metadata: None,
                 },
                 0,
             )

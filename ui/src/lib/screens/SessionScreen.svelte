@@ -8,7 +8,7 @@
     daemonState,
     openAgentEventsFor,
   } from '../api/daemon.svelte';
-  import type { AgentSession } from '../api/types';
+  import type { AgentSession, ModelPricingRow } from '../api/types';
   import { t } from '../i18n/i18n.svelte';
   import { navigate, routeParam } from '../router.svelte';
   import { toast } from '../toast-store.svelte';
@@ -24,6 +24,28 @@
   let pollTimer: number | undefined;
   let loadToken = 0;
   let lastSequence = -1;
+  let models = $state<ModelPricingRow[]>([]);
+  let switchModel = $state('');
+  let switching = $state(false);
+  let switchNote = $state('');
+
+  const ADAPTER_PROVIDERS: Record<string, string> = {
+    'claude-code': 'anthropic',
+    codex: 'openai',
+    'gemini-cli': 'google',
+  };
+
+  const adapterProvider = $derived(
+    agent ? (ADAPTER_PROVIDERS[agent.adapter] ?? null) : null,
+  );
+  const switchModels = $derived(
+    models.filter(
+      (row) => !adapterProvider || row.provider === adapterProvider,
+    ),
+  );
+  const selectedSwitchModel = $derived(
+    switchModel || switchModels.find((row) => !row.deprecated)?.model || switchModels[0]?.model || '',
+  );
 
   const authPrompt = $derived(
     id ? openAgentEventsFor(id).find((event) => event.type === 'auth_required') ?? null : null,
@@ -58,6 +80,36 @@
       }
     }
   }
+
+  async function loadModels(): Promise<void> {
+    try {
+      const data = await daemonApi.models();
+      models = data.models;
+    } catch {
+      models = [];
+    }
+  }
+
+  async function switchAgentModel(): Promise<void> {
+    if (!id || switching || !selectedSwitchModel) return;
+    switching = true;
+    switchNote = '';
+    try {
+      const result = await daemonApi.switchSessionModel(id, selectedSwitchModel);
+      switchNote = result.instructions;
+      toast(result.mode === 'pty' ? t('model.switchSent') : t('model.switchManualToast'));
+      await load();
+    } catch (error) {
+      toast(daemonErrorMessage(error));
+    } finally {
+      switching = false;
+    }
+  }
+
+  $effect(() => {
+    if (!id) return;
+    void loadModels();
+  });
 
   $effect(() => {
     if (!id) return;
@@ -276,6 +328,55 @@
           </button>
         </section>
       {/if}
+
+      <section class="session-model card" data-glass data-glass-layer="card" data-glass-depth="2" data-session-model>
+        <div class="session-model__head">
+          <span class="settings-card__icon"><Icon name="sliders" size={19} /></span>
+          <div>
+            <h2>{t('model.switchTitle')}</h2>
+            <p>{agent.modelSwitch.available ? t('model.switchBody') : t('model.manualTitle')}</p>
+          </div>
+        </div>
+
+        {#if agent.modelSwitch.available && running && switchModels.length > 0}
+          <div class="session-model__form">
+            <label class="model-field">
+              <span>{t('model.chooseModel')}</span>
+              <select
+                value={selectedSwitchModel}
+                onchange={(event) => (switchModel = event.currentTarget.value)}
+              >
+                {#each switchModels as row (row.model)}
+                  <option value={row.model}>
+                    {row.displayName}{row.deprecated ? ` · ${t('model.deprecated')}` : ''}
+                  </option>
+                {/each}
+              </select>
+            </label>
+            <button
+              class="btn btn--primary"
+              type="button"
+              onclick={switchAgentModel}
+              disabled={switching}
+              data-model-switch
+            >
+              <Icon name="arrow-right" size={16} />
+              {switching ? t('model.confirming') : t('model.switch')}
+            </button>
+          </div>
+          {#if agent.modelSwitch.command}
+            <p class="settings-card__note"><code>{agent.modelSwitch.command}</code></p>
+          {/if}
+        {:else}
+          <p class="session-model__manual" data-model-switch-manual>
+            {agent.modelSwitch.instructions}
+          </p>
+        {/if}
+
+        {#if switchNote}
+          <p class="settings-card__note" data-model-switch-note>{switchNote}</p>
+        {/if}
+      </section>
 
       <button class="text-link" type="button" onclick={openFlight}>
         <Icon name="arrow-left" size={14} />

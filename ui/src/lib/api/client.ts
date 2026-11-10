@@ -17,6 +17,9 @@ import type {
   MarketKind,
   MarketSettings,
   MarketStatus,
+  ModelPreview,
+  ModelPricingRow,
+  ModelSwitchResult,
   Overview,
   RemoteAuditResponse,
   RemoteClaimPoll,
@@ -35,6 +38,7 @@ import type {
   ReplayResponse,
   Session,
   SessionList,
+  SessionModelState,
   SettingsResponse,
   SnapshotDetailResponse,
   StepDetail,
@@ -310,6 +314,30 @@ export const daemonApi = {
   ackAgentEvent: (id: string) =>
     request<{ event: AgentEvent }>(`/agent-events/${encodeURIComponent(id)}/ack`, {
       method: 'POST',
+    }),
+  models: () => request<{ models: ModelPricingRow[] }>('/models'),
+  sessionModel: (id: string) =>
+    request<SessionModelState>(`/sessions/${encodeURIComponent(id)}/model`),
+  previewSessionModel: (id: string, model: string, effort?: string) =>
+    request<ModelPreview>(
+      `/sessions/${encodeURIComponent(id)}/model/preview?model=${encodeURIComponent(model)}${
+        effort ? `&effort=${encodeURIComponent(effort)}` : ''
+      }`,
+    ),
+  setSessionModel: (id: string, model: string, effort?: string) =>
+    request<ModelPreview>(`/sessions/${encodeURIComponent(id)}/model`, {
+      method: 'PUT',
+      body: JSON.stringify({ model, ...(effort ? { effort } : {}) }),
+    }),
+  clearSessionModel: (id: string) =>
+    request<{ cleared: boolean; override: null }>(
+      `/sessions/${encodeURIComponent(id)}/model`,
+      { method: 'DELETE' },
+    ),
+  switchSessionModel: (id: string, model: string) =>
+    request<ModelSwitchResult>(`/sessions/${encodeURIComponent(id)}/model/switch`, {
+      method: 'POST',
+      body: JSON.stringify({ model }),
     }),
 };
 

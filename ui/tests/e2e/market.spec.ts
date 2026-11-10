@@ -45,7 +45,12 @@ async function openMarket(
   } else {
     await expect(page.getByTestId('market-dev-override')).toHaveCount(0);
   }
-  await expect(page.getByTestId(`market-card-${SKILL_ID}`)).toBeVisible();
+  await expect(page.locator('[data-testid^="market-card-"]').first()).toBeVisible();
+}
+
+/** The list is virtualized; narrow it before expecting a fixture card. */
+async function search(page: Page, query: string): Promise<void> {
+  await page.getByTestId('market-search').fill(query);
 }
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -66,17 +71,19 @@ async function previewInstall(page: Page): Promise<void> {
 
 test('catalogue, instant search, filters and detail', async ({ page }) => {
   await openMarket(page);
+  await shot(page, 'market-list.png');
+
+  await search(page, 'example');
   await expect(page.getByTestId(`market-card-${OTHER_SKILL_ID}`)).toBeVisible();
   await expect(
     page.getByTestId(`market-card-${OTHER_SKILL_ID}`).getByText('Unreviewed'),
   ).toBeVisible();
-  await shot(page, 'market-list.png');
 
-  await page.getByTestId('market-search').fill('changelog');
+  await search(page, 'changelog');
   await expect(page.getByTestId(`market-card-${SKILL_ID}`)).toBeVisible();
   await expect(page.getByTestId(`market-card-${OTHER_SKILL_ID}`)).toHaveCount(0);
 
-  await page.getByTestId('market-search').fill('');
+  await search(page, '');
   await page.getByTestId('market-agent-claude-code').click();
   await expect(page.getByTestId('market-agent-claude-code')).toHaveAttribute(
     'aria-pressed',
@@ -86,16 +93,22 @@ test('catalogue, instant search, filters and detail', async ({ page }) => {
   await expect(categories.locator('option')).toHaveText([
     'All categories',
     'coding',
+    'testing',
     'docs',
+    'devops',
     'data',
+    'design',
+    'productivity',
   ]);
   await categories.selectOption('coding');
+  await search(page, 'example');
   await expect(page.getByTestId(`market-card-${OTHER_SKILL_ID}`)).toBeVisible();
   await expect(page.getByTestId(`market-card-${SKILL_ID}`)).toHaveCount(0);
   await expect(page.getByTestId(`market-card-${OTHER_SKILL_ID}`).getByText('#git')).toBeVisible();
   await shot(page, 'market-filters.png');
 
   await categories.selectOption('all');
+  await search(page, 'commit');
   await page.getByTestId(`market-card-${OTHER_SKILL_ID}`).click();
   const sheet = page.getByTestId('market-sheet');
   await expect(
@@ -128,6 +141,7 @@ test('daily refresh shows its state and explains the GitHub request', async ({ p
 
 test('skill install preview, installed tab, uninstall and undo', async ({ page }) => {
   await openMarket(page);
+  await search(page, 'changelog');
   await openDetail(page, SKILL_ID);
   await previewInstall(page);
   await expect(page.getByTestId('market-confirm-install')).toBeEnabled();
@@ -194,6 +208,7 @@ test('skill install preview, installed tab, uninstall and undo', async ({ page }
 test('mcp secret, config diff, install and undo', async ({ page }) => {
   await openMarket(page);
   await page.getByTestId('market-tab-mcp').click();
+  await search(page, 'weather');
   await expect(page.getByTestId(`market-card-${MCP_ID}`)).toBeVisible();
   await openDetail(page, MCP_ID);
   await page.getByLabel('Scope').selectOption('project');
@@ -236,6 +251,7 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
 
 test('installed state badges and the 30 second undo toast', async ({ page }) => {
   await openMarket(page, STATE_DAEMON);
+  await search(page, 'changelog');
   await openDetail(page, SKILL_ID);
   await previewInstall(page);
   await page.getByTestId('market-confirm-install').click();

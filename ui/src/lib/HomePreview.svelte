@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
+  import ContextMeter from './ContextMeter.svelte';
   import { activeSessions, daemonState, pendingGuards, refreshDaemon, seedDemoData } from './api/daemon.svelte';
   import type { Session } from './api/types';
   import { openAddAgent } from './add-agent.svelte';
@@ -47,6 +48,13 @@
   const stats = $derived(daemonState.overview?.stats ?? null);
   const active = $derived(activeSessions());
   const live = $derived(active[0] ?? null);
+  const contexts = $derived(daemonState.overview?.contexts ?? {});
+  // Prefer the live flight's own meter. A PTY flight records no proxy context,
+  // so fall back to the newest active flight that does.
+  const contextSession = $derived(
+    live && contexts[live.id] ? live : (active.find((session) => contexts[session.id]) ?? null),
+  );
+  const liveContext = $derived(contextSession ? (contexts[contextSession.id] ?? null) : null);
   const pending = $derived(pendingGuards());
   const rules = $derived(daemonState.rules);
   const adapters = $derived(daemonState.adapters);
@@ -401,6 +409,22 @@
                 </div>
               </div>
             </div>
+            {#if liveContext && contextSession}
+              <div class="live-context" data-live-context>
+                <div class="live-context__head">
+                  <span>{t('context.title')}</span>
+                  <button
+                    class="text-link"
+                    type="button"
+                    onclick={() => openSession(contextSession)}
+                  >
+                    {contextSession.id === live.id ? t('context.latest') : contextSession.title}
+                    <Icon name="arrow-right" size={13} />
+                  </button>
+                </div>
+                <ContextMeter meter={liveContext} label={t('context.latest')} compact />
+              </div>
+            {/if}
           {:else}
             <div class="tile-empty">
               <span class="eyebrow"><span class="dot"></span> {t('home.liveNone')}</span>

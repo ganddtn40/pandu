@@ -1225,6 +1225,7 @@ mod tests {
             hook_otel: None,
             skills: None,
             mcp: None,
+            model_switch: None,
         }
     }
 

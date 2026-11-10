@@ -22,6 +22,21 @@ include = ["**/*.jsonl"]
 parser = "codex-jsonl"
 verified = false
 
+# Codex CLI's /model command switches the active model in place.
+# Checked against https://developers.openai.com/codex/cli/slash-commands
+[model_switch]
+command = "/model {model}"
+verified = true
+
+# Skills live in ~/.agents/skills (user) and .agents/skills (project).
+# Codex also reads ancestor .agents/skills directories and an admin
+# /etc/codex/skills directory; Cockpit writes only the user or project path.
+# Checked against https://developers.openai.com/codex/skills
+[skills]
+user_paths = ["~/.agents/skills"]
+project_paths = [".agents/skills"]
+verified = true
+
 # Codex keeps MCP servers under [mcp_servers.<name>] in config.toml.
 # Checked against https://developers.openai.com/codex/mcp
 [mcp]

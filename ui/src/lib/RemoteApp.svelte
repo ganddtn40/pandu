@@ -616,6 +616,9 @@
             {openSession.agent?.name ?? openSession.source}
             {#if openSession.startedAt}· {timeAgo(openSession.startedAt, t)}{/if}
             {#if openSession.durationMs !== undefined}· {formatDuration(openSession.durationMs)}{/if}
+            {#if openSession.contextPercent !== undefined}
+              · {t('remote.contextValue', { percent: openSession.contextPercent.toFixed(1) })}
+            {/if}
           </p>
           <h3>{t('remote.flightSteps')}</h3>
           {#if !canViewContent}
@@ -659,6 +662,11 @@
                     <strong>{session.title}</strong>
                     <span>
                       {session.agent?.name ?? session.source} · {timeAgo(session.startedAt, t)}
+                      {#if session.contextPercent !== undefined}
+                        · {t('remote.contextValue', {
+                          percent: session.contextPercent.toFixed(1),
+                        })}
+                      {/if}
                     </span>
                   </span>
                   <span class="status-pill">{session.status}</span>

@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
+use cockpit_core::agent::{AgentEventInput, AgentEventType};
 use cockpit_core::collector::{CollectedResponse, IngestedEvent, ProtocolCollector};
-use cockpit_core::cost::{ModelPricing, estimate_usage_cost};
+use cockpit_core::context::{ContextMeter, build_context_meter, parse_context_threshold};
+use cockpit_core::cost::{ModelPricing, estimate_usage_cost, resolve_model_pricing};
 use cockpit_core::model::{
     CapturedRequest, FinishReason, Step, StepKind, StepStatus, StreamChunk, ToolCall,
     ToolCallStatus,
@@ -20,9 +23,11 @@ use cockpit_core::text::{
 };
 use serde_json::{Value, json};
 
+use crate::agents::AgentControl;
 use crate::error::Result;
 use crate::guards::{GuardService, GuardStepInput};
 use crate::live::LiveBus;
+use crate::remote::RemoteAccess;
 use crate::sessions::totals_payload;
 use crate::snapshots::GitSnapshotService;
 use crate::store::{BeginStep, CompleteStep, Store, now_iso};
@@ -46,6 +51,9 @@ pub struct FinishRecordedStep {
     pub collected: Option<CollectedResponse>,
     pub error: Option<String>,
     pub ttft_ms: Option<u64>,
+    /// Host-only model/effort override that was applied to the forwarded
+    /// request. `None` means the request was forwarded byte-identically.
+    pub override_info: Option<Value>,
 }
 
 pub struct RecordedStep {
@@ -80,6 +88,8 @@ pub struct Recorder {
     bus: Arc<LiveBus>,
     guards: Option<Arc<GuardService>>,
     snapshots: Option<Arc<GitSnapshotService>>,
+    agents: Option<Arc<AgentControl>>,
+    remote: Option<Arc<RemoteAccess>>,
 }
 
 impl Recorder {
@@ -88,12 +98,16 @@ impl Recorder {
         bus: Arc<LiveBus>,
         guards: Option<Arc<GuardService>>,
         snapshots: Option<Arc<GitSnapshotService>>,
+        agents: Option<Arc<AgentControl>>,
+        remote: Option<Arc<RemoteAccess>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             store,
             bus,
             guards,
             snapshots,
+            agents,
+            remote,
         })
     }
 
@@ -315,6 +329,9 @@ impl Recorder {
                 .map(|request| request.protocol.default_provider().to_string())
         });
         let overrides = self.pricing_overrides();
+        let pricing = model.as_deref().and_then(|model| {
+            resolve_model_pricing(model, provider.as_deref(), &overrides).pricing
+        });
         let cost = match model.as_deref() {
             Some(model) => {
                 estimate_usage_cost(collected.usage, model, provider.as_deref(), &overrides)
@@ -325,6 +342,32 @@ impl Recorder {
         };
         let cost_known = cost.known;
         let cost_usd = cost.usd;
+
+        let threshold = self
+            .store
+            .get_setting("context.threshold")
+            .ok()
+            .flatten()
+            .as_deref()
+            .map(|raw| parse_context_threshold(Some(raw)))
+            .unwrap_or_else(|| parse_context_threshold(None));
+        let previous_tokens = self
+            .store
+            .previous_context_tokens(&handle.step.session_id, handle.step.seq)
+            .ok()
+            .flatten();
+        let context = build_context_meter(
+            model.as_deref().unwrap_or("unknown"),
+            handle
+                .step
+                .request
+                .as_ref()
+                .and_then(|request| request.body.as_ref()),
+            Some(collected.usage),
+            pricing.as_ref().and_then(|pricing| pricing.context_window),
+            previous_tokens,
+            threshold,
+        );
 
         let finish_reason = collected.finish_reason.or(match status {
             StepStatus::Failed => Some(FinishReason::Error),
@@ -361,6 +404,16 @@ impl Recorder {
             })
             .collect();
 
+        let mut metadata = serde_json::Map::new();
+        metadata.insert(
+            "context".to_string(),
+            serde_json::to_value(&context).unwrap_or(Value::Null),
+        );
+        if let Some(info) = input.override_info.clone() {
+            metadata.insert("override".to_string(), info);
+        }
+        let metadata = Some(Value::Object(metadata));
+
         let completed = self.store.complete_step(
             &handle.step.id,
             CompleteStep {
@@ -377,6 +430,7 @@ impl Recorder {
                 error: error_text,
                 ttft_ms,
                 latency_ms,
+                metadata,
             },
             tool_calls.len() as u64,
         )?;
@@ -430,8 +484,18 @@ impl Recorder {
                 "costUsd": cost_usd,
                 "finishReason": step.response.as_ref().and_then(|response| response.finish_reason).map(|reason| reason.as_str()),
                 "model": model,
+                "context": context,
             }),
         );
+
+        if context.high
+            && !self
+                .store
+                .previous_context_high(&step.session_id, step.seq)
+                .unwrap_or(false)
+        {
+            self.notify_context_high(&step, &context);
+        }
 
         if let Ok(Some(session)) = self.store.get_session(&handle.step.session_id) {
             self.bus.publish(
@@ -443,6 +507,58 @@ impl Recorder {
         }
 
         Ok(true)
+    }
+
+    fn notify_context_high(&self, step: &Step, meter: &ContextMeter) {
+        let Some(agents) = &self.agents else {
+            return;
+        };
+        let session = self.store.get_session(&step.session_id).ok().flatten();
+        let agent_name = session
+            .as_ref()
+            .and_then(|session| session.agent.as_ref())
+            .and_then(|agent| agent.name.clone())
+            .unwrap_or_else(|| "Agent".to_string());
+        let project_name = session
+            .as_ref()
+            .and_then(|session| session.workspace_path.as_deref())
+            .and_then(|path| Path::new(path).file_name())
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Workspace")
+            .to_string();
+        let message = match (meter.percent, meter.window) {
+            (Some(percent), Some(window)) => {
+                format!("Context is at {percent:.0}% of the {window}-token window.")
+            }
+            (Some(percent), None) => format!("Context is at {percent:.0}% of the model window."),
+            _ => "The agent context is nearly full.".to_string(),
+        };
+        let input = AgentEventInput {
+            event_type: AgentEventType::ContextHigh,
+            message,
+            metadata: Some(json!({
+                "stepId": step.id,
+                "model": meter.model,
+                "tokens": meter.tokens,
+                "window": meter.window,
+                "percent": meter.percent,
+                "threshold": meter.threshold,
+            })),
+        };
+        if let Err(error) =
+            agents.record_event_for(&step.session_id, &agent_name, &project_name, input)
+        {
+            tracing::warn!(%error, "could not record the context.high event");
+        }
+        if let Some(remote) = &self.remote {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                let remote = remote.clone();
+                tokio::spawn(async move {
+                    remote.send_notification("context").await;
+                });
+            }
+        }
     }
 
     fn pricing_overrides(&self) -> Vec<ModelPricing> {

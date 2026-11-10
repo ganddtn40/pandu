@@ -1,0 +1,74 @@
+schema_version: 1
+id: "git"
+name: "Git"
+kind: "mcp"
+version: "2026.11.4"
+short_description: "Read, search, and modify Git repositories: status, diffs, log, branches, commits, merges, and remotes."
+long_description: "An MCP server for Git repositories. Tools cover status, staged and unstaged diffs, log, show, branches, checkout, add, commit, merge, and remotes. Each tool takes a repo_path unless the server is started with --repository."
+categories:
+  - "coding"
+tags:
+  - "git"
+  - "version-control"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/modelcontextprotocol/servers"
+  commit: "36380287ed3b15d115b55f546617d723072b1296"
+  content_sha256: "8361f866c514c80d70c196430874ff45bdae143dfc7a5b0ad8e145e535b62d19"
+  files:
+    - "src/git/LICENSE"
+    - "src/git/README.md"
+    - "src/git/pyproject.toml"
+license: "MIT"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads repositories the agent points it at."
+  - id: "filesystem:write"
+    description: "Stages, commits, merges, and checks out branches."
+  - id: "shell"
+    description: "Runs git commands in the selected repository."
+mcp:
+  transport: "stdio"
+  command: "uvx"
+  args:
+    - "mcp-server-git==2026.11.4"
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+readme: |
+  # Git
+
+  An MCP server for working with Git repositories. Tools include status, unstaged and staged diffs, diff against a revision or range, log, show, branch listing, checkout, add, commit, merge, and remote listing.
+
+  Every tool takes a repo_path. Without a --repository argument, the model chooses the repository on each call, so the server can reach any repository the agent process can read. Review that scope before enabling it.
+
+  ## Command
+
+  uvx mcp-server-git==2026.11.4
+
+  Cockpit writes this command to the agent configuration. The agent runs it when it starts the server.
+
+  ## Source and license
+
+  Source: https://github.com/modelcontextprotocol/servers at commit 36380287ed3b15d115b55f546617d723072b1296. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The per-server LICENSE file is MIT. Cockpit records the source tree hash and license evidence in the entry.

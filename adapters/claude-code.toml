@@ -20,6 +20,12 @@ otlp_http = false
 hooks = ["session_start", "tool_call", "session_end"]
 verified = false
 
+# Claude Code's /model command switches the active model in place.
+# Checked against https://docs.claude.com/en/docs/claude-code/slash-commands
+[model_switch]
+command = "/model {model}"
+verified = true
+
 # Skills live in ~/.claude/skills (user) and .claude/skills (project).
 # Checked against https://docs.claude.com/en/docs/claude-code/skills
 [skills]

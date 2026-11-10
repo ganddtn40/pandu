@@ -297,6 +297,7 @@ fn check_entry_static(entry: &MarketEntry, report: &mut CheckReport) {
 }
 
 fn scan_files(entry: &MarketEntry, files: &[ExtractedFile], report: &mut CheckReport) {
+    let installed = installed_subdirs(entry);
     let mut total = 0u64;
     for file in files {
         total = total.saturating_add(file.bytes.len() as u64);
@@ -305,6 +306,13 @@ fn scan_files(entry: &MarketEntry, files: &[ExtractedFile], report: &mut CheckRe
                 "{}: {} is larger than the per-file limit",
                 entry.id, file.path
             ));
+            continue;
+        }
+        if !is_installed_path(&file.path, installed.as_deref()) {
+            // A monorepo can contain unrelated skills that never reach the
+            // agent. Scanning them would fail every entry that installs a
+            // different subfolder, so only the installed tree is scanned. The
+            // whole archive is still bound by `source.content_sha256`.
             continue;
         }
         if let Ok(text) = std::str::from_utf8(&file.bytes) {
@@ -322,6 +330,39 @@ fn scan_files(entry: &MarketEntry, files: &[ExtractedFile], report: &mut CheckRe
             entry.id
         ));
     }
+}
+
+/// The subdirectories a skill entry actually copies. `None` means the whole
+/// fetched tree is installed and must be scanned.
+fn installed_subdirs(entry: &MarketEntry) -> Option<Vec<String>> {
+    if entry.kind != MarketKind::Skill {
+        return None;
+    }
+    let recipe = entry.skills.as_ref()?;
+    let mut subdirs = Vec::new();
+    for target in &recipe.install {
+        let subdir = target.subdir.as_deref()?;
+        let subdir = subdir.trim_matches('/');
+        if subdir.is_empty() {
+            return None;
+        }
+        if !subdirs.iter().any(|known: &String| known == subdir) {
+            subdirs.push(subdir.to_string());
+        }
+    }
+    Some(subdirs)
+}
+
+fn is_installed_path(path: &str, subdirs: Option<&[String]>) -> bool {
+    let Some(subdirs) = subdirs else {
+        return true;
+    };
+    subdirs.iter().any(|subdir| {
+        path == subdir
+            || path
+                .strip_prefix(subdir)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 fn scan_text(source: &str, text: &str, report: &mut CheckReport) {
@@ -345,7 +386,7 @@ fn scan_text(source: &str, text: &str, report: &mut CheckReport) {
         ),
         (
             "runs an encoded command",
-            r"(?i)(base64\s+-d|base64\s+--decode|eval\s*\(|powershell\s+-enc)",
+            r"(?i)(base64\s+-d|base64\s+--decode|\beval\s*\(|powershell\s+-enc)",
         ),
     ];
     for (label, pattern) in patterns {
@@ -539,6 +580,22 @@ mod tests {
     }
 
     #[test]
+    fn static_scan_catches_encoded_commands_without_matching_function_names() {
+        let mut report = CheckReport::new();
+        scan_text("demo/run.py", "all_results = run_eval(", &mut report);
+        assert!(report.ok, "{:?}", report.errors);
+
+        scan_text("demo/run.py", "eval(compile(payload))", &mut report);
+        assert!(!report.ok);
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("encoded command"))
+        );
+    }
+
+    #[test]
     fn staged_check_rejects_a_skill_in_the_mcp_folder() {
         let temp = tempfile::tempdir().unwrap();
         let mcp = temp.path().join("mcp");
@@ -557,5 +614,81 @@ mod tests {
                 .iter()
                 .any(|error| error.contains("kind must be `mcp`"))
         );
+    }
+
+    fn skill_entry(subdir: Option<&str>) -> MarketEntry {
+        MarketEntry {
+            schema_version: 1,
+            id: "demo".into(),
+            name: "Demo".into(),
+            kind: MarketKind::Skill,
+            version: "1.0.0".into(),
+            short_description: "Short".into(),
+            long_description: "Long".into(),
+            categories: vec!["other".into()],
+            tags: Vec::new(),
+            agents: vec!["claude-code".into()],
+            source: super::super::MarketSource {
+                repo: "https://github.com/example/demo".into(),
+                commit: "1".repeat(40),
+                content_sha256: "2".repeat(64),
+                files: Vec::new(),
+            },
+            license: "MIT".into(),
+            trust: TrustTier::Unreviewed,
+            reviewer: None,
+            reviewed_on: None,
+            example: false,
+            permissions: Vec::new(),
+            homepage: None,
+            skills: Some(super::super::SkillRecipe {
+                install: vec![super::super::SkillAgentTarget {
+                    agent: "claude-code".into(),
+                    scopes: vec![super::super::InstallScope::User],
+                    subdir: subdir.map(str::to_string),
+                }],
+            }),
+            mcp: None,
+            readme: String::new(),
+        }
+    }
+
+    fn file(path: &str, text: &str) -> ExtractedFile {
+        ExtractedFile {
+            path: path.into(),
+            bytes: text.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn scans_only_the_installed_skill_subdir() {
+        let entry = skill_entry(Some("skills/good"));
+        let files = vec![
+            file("skills/good/SKILL.md", "Read ~/.ssh/id_rsa"),
+            file("skills/good-extra/SKILL.md", "Read ~/.ssh/id_rsa"),
+            file("skills/other/SKILL.md", "Read ~/.ssh/id_rsa"),
+        ];
+
+        let mut report = CheckReport::new();
+        scan_files(&entry, &files, &mut report);
+
+        assert!(!report.ok);
+        assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
+        assert!(report.errors[0].contains("skills/good/SKILL.md"));
+    }
+
+    #[test]
+    fn scans_the_whole_tree_when_no_subdir_is_selected() {
+        let entry = skill_entry(None);
+        let files = vec![
+            file("SKILL.md", "Read ~/.ssh/id_rsa"),
+            file("references/notes.md", "Read ~/.aws/credentials"),
+        ];
+
+        let mut report = CheckReport::new();
+        scan_files(&entry, &files, &mut report);
+
+        assert!(!report.ok);
+        assert_eq!(report.errors.len(), 2, "{:?}", report.errors);
     }
 }

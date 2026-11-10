@@ -1,6 +1,7 @@
 # Cockpit security model
 
-Status: Phase 8 (market and registry). Branch `rewrite`.
+Status: Phase 9 (verified models, host-only overrides, context meter). Branch
+`rewrite`.
 This document describes what the current build protects, how, and what it does
 not protect yet. It is a working threat model, not a certification.
 
@@ -24,6 +25,8 @@ Assets worth protecting:
 - Market registry entries, pinned source archives, installed skill files, MCP
   configuration, install manifests, and backups. The registry signing key is
   kept offline by the maintainer and is not an asset on the user's machine.
+- The authority to override a model or effort on a live flight, and the audit
+  trail of who changed what.
 
 The main security promise is narrow: **the daemon can observe and nudge a
 terminal the user started, but it cannot start a command, read a credential
@@ -274,6 +277,8 @@ token, or read the audit log.
   severity, the rule class (`ruleName`), and the generic title
   `Approval requested`; command, evidence, description, metadata, and the
   approval nonce are omitted. Inbox events lose their message and metadata.
+  The status view includes `contextPercent` only — never token counts, the model
+  window, the system/tools/history breakdown, or the model source URL.
   Live events are allowlisted by type: known status events keep counts and
   states, guard payloads are reduced to the same safe fields, and an unknown
   event type is delivered with an empty payload. Content and Respond devices
@@ -506,9 +511,78 @@ Unit tests: `market::registry_check::tests::*`,
 `market::install::tests::*`, `market::targets::tests::*`, and
 `market::signing::tests::generated_keys_sign_and_verify`.
 
+### 3.11 Model overrides are host-only, narrow, and fail-open
+
+A model override is a host-only mutation on a live proxy flight. It is not a
+general request editor.
+
+- **Host-only.** `GET /api/models`, `GET/PUT/DELETE /api/sessions/{id}/model`,
+  `GET /api/sessions/{id}/model/preview`, and
+  `POST /api/sessions/{id}/model/switch` are mounted on the loopback listener
+  only. The remote listener exposes
+  `POST /api/remote/sessions/{id}/model` and
+  `POST /api/remote/sessions/{id}/model/switch` solely to reject them with
+  `403 host_only`; the rejection is audited. The remote scope matrix lists both
+  as `host-only`, and `every_remote_endpoint_enforces_its_scope` asserts the
+  rejection for a paired device.
+- **Opt-in and ephemeral.** There is no global switch. An override exists only
+  while the flight is active and lives in daemon memory. It clears when the
+  flight ends and when the daemon restarts. With no override the proxy forwards
+  the original `Bytes` handle and path, so the upstream bytes are byte-identical.
+- **Validated against the compiled table.** The target model must be in
+  `models.json` for the same canonical provider (`google` and `gemini` are the
+  same). The effort must be one of that model's allowed levels. An unknown model,
+  a cross-provider target, an unsupported effort, or a non-JSON body is refused
+  by the API; if a rewrite still cannot be applied safely at forward time, the
+  request is sent unmodified and the step is flagged `failedOpen` with a reason.
+  Forwarding the agent's original request is preferred to sending one the
+  provider will reject.
+- **Only two fields.** The rewrite changes `model` and the provider-specific
+  effort field (`reasoning_effort`, `reasoning.effort`, `output_config.effort`,
+  or `generationConfig.thinkingConfig.thinkingLevel`), plus the model segment in
+  a Gemini URL. Every known effort spelling is removed before the target field is
+  written, so an incompatible parameter cannot be left behind. The recorded
+  request body is never modified.
+- **Audited.** `model.override.set`, `model.override.cleared`,
+  `model.override.denied`, `model.switch`, `model.switch.manual`, and
+  `model.switch.denied` are appended to the hash-chained audit log with the
+  session, provider, from/to model and effort, and mode. No prompt, request body,
+  or credential is recorded.
+- **PTY switch needs a verified adapter.** `POST /api/sessions/{id}/model/switch`
+  types an adapter-declared command only when the adapter has
+  `[model_switch] verified = true` and the template contains `{model}`. A
+  hook/log-watch flight, an unverified adapter, or a session without a live PTY
+  gets manual instructions instead. The daemon never spawns a process for this.
+
+Evidence: `crates/cockpit-daemon/tests/integration.rs`:
+`host_override_rewrites_only_the_forwarded_request`,
+`override_rewrites_streaming_requests_and_passes_sse_bytes_through`,
+`with_the_override_off_the_forwarded_bytes_are_identical`,
+`invalid_overrides_are_rejected_and_audited`, and
+`pty_model_switch_needs_a_verified_adapter_command`.
+`crates/cockpit-daemon/tests/remote.rs::every_remote_endpoint_enforces_its_scope`.
+Unit tests: `proxy::rewrite::tests::*`, `cost::tests::*`,
+`context::tests::*`, and `adapter::tests::model_switch_commands_are_templates_only`.
+
+### 3.12 The context meter is local, labeled, and percentage-only remotely
+
+- The meter uses provider-reported prompt usage when it is non-zero; otherwise it
+  estimates from the recorded request body. The breakdown is always an estimate.
+  No extra network call is made.
+- The window comes from the compiled `models.json`. An unknown model yields no
+  percentage rather than a guessed one. The UI says the window is unknown.
+- A step is marked compacted only when the prompt drops by at least 30% and at
+  least 2,000 tokens versus the previous step. `context.high` fires once per
+  crossing at the configured threshold (default 80%) through the existing
+  notification pipeline.
+- A status-only remote device receives `contextPercent` only. Token counts, the
+  model window, the breakdown, and the source URL are not in the status payload.
+  A content-scoped device sees the full flight record as before.
+
 ## 4. Tests that gate this phase
 
-Phase 8 is not considered done unless these pass:
+Phase 9 is not considered done unless these pass (the Phase 8 market and remote
+gates still apply):
 
 - The remote listener never mounts proxy or host-management routes.
 - Every remote endpoint enforces its scope; the test iterates the same matrix
@@ -561,6 +635,23 @@ Phase 8 is not considered done unless these pass:
   an unverified registry.
 - Playwright covers search, filters, detail, install preview, install, undo,
   uninstall, and the offline banner against a local mock registry.
+- A host override rewrites only the model and effort fields in the forwarded
+  request; the recorded request stays original.
+- Streaming and non-streaming requests are both rewritten, and SSE bytes pass
+  through unchanged.
+- With the override off, the forwarded bytes are identical to the agent's bytes.
+- An unknown model, a cross-provider model, and an unsupported effort are
+  rejected and audited; a forward-time failure is flagged and fails open.
+- A remote device cannot set, clear, or switch a model; both routes return
+  `403 host_only` and are audited.
+- A PTY model switch is sent only for an adapter with a verified
+  `[model_switch]` command; every other case returns manual instructions.
+- Unknown prices stay unknown in cost math and are never rendered as `$0.00`.
+- The context meter prefers provider usage, falls back to an estimator within its
+  accuracy bounds, detects a sudden drop as compaction, and fires `context.high`
+  once per threshold crossing.
+- A status-only remote device sees the context percentage and no tokens, window,
+  or breakdown.
 
 The full suite is `cargo test --workspace`, `cargo clippy --workspace
 --all-targets`, `pnpm check`, `pnpm test`, `pnpm build`, and `pnpm e2e`.
@@ -625,6 +716,8 @@ matrix, and the integration test iterates it.
 | GET | `/api/remote/sessions` | view:status | Flight list |
 | GET | `/api/remote/sessions/{id}` | view:status | Flight detail |
 | GET | `/api/remote/sessions/{id}/steps` | view:content | Captured steps, prompts, and responses |
+| POST | `/api/remote/sessions/{id}/model` | host-only | Always rejected; model and effort overrides are host-only |
+| POST | `/api/remote/sessions/{id}/model/switch` | host-only | Always rejected; PTY model switches are host-only |
 | GET | `/api/remote/guards/events` | view:status | Pending and past approvals |
 | GET | `/api/remote/agents` | view:status | Running agent sessions |
 | GET | `/api/remote/agents/{id}` | view:content | Sanitized terminal output |
@@ -734,6 +827,24 @@ listed so a reviewer can decide whether a later phase must close them.
     reference. Cockpit does not encrypt the agent's config file, and the agent
     can read the value. Prefer an environment variable that the agent already
     has, and rotate the key if the config is exposed.
+17. **Model prices, limits, and effort levels go stale.** The table is a verified
+    snapshot, not a live feed. A provider can change a price, a context window, a
+    model id, or an effort level without notice. Cost totals and the relative-cost
+    preview are estimates; the `verifiedOn` date is the only freshness claim. An
+    unknown price stays unknown rather than becoming `$0.00`, but a stale known
+    price is still wrong.
+18. **The context meter can be wrong.** Provider-reported usage is authoritative
+    for the total, but the system/tools/history/files breakdown is estimated from
+    the request body, and the estimator is approximate. An unknown model has no
+    percentage. Compaction detection is a heuristic based on a 30% / 2,000-token
+    drop and can miss a provider-side summarization or flag an unusual request
+    pattern. A `context.high` notification is an attention aid, not a hard limit;
+    the provider still decides when a request exceeds the window.
+19. **A model override changes what the agent sends, not what it is allowed to
+    do.** It can raise cost, change answer quality, or make a request fail at the
+    provider. Cockpit validates the model and effort against the compiled table
+    and fails open, but it does not evaluate whether the new model is appropriate
+    for the task. The host user is the only approval step.
 
 ## 7. Reporting a problem
 

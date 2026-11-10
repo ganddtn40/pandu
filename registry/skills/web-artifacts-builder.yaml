@@ -1,0 +1,74 @@
+schema_version: 1
+id: "web-artifacts-builder"
+name: "Web Artifacts Builder"
+kind: "skill"
+version: "2c5958e"
+short_description: "Build multi-component React, Tailwind, and shadcn/ui artifacts and bundle them into a single HTML file."
+long_description: "Builds elaborate multi-component HTML artifacts with React, Tailwind CSS, and shadcn/ui. It initializes a frontend project, adds components, and bundles everything into one self-contained HTML file."
+categories:
+  - "coding"
+  - "design"
+tags:
+  - "react"
+  - "tailwind"
+  - "shadcn"
+  - "html"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/web-artifacts-builder/LICENSE.txt"
+    - "skills/web-artifacts-builder/SKILL.md"
+    - "skills/web-artifacts-builder/scripts/bundle-artifact.sh"
+    - "skills/web-artifacts-builder/scripts/init-artifact.sh"
+    - "skills/web-artifacts-builder/scripts/shadcn-components.tar.gz"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads the artifact project and the bundled component archive."
+  - id: "filesystem:write"
+    description: "Writes the project files and the bundled HTML artifact."
+  - id: "network"
+    description: "Installs frontend dependencies from the package registry."
+  - id: "shell"
+    description: "Runs the init and bundle shell scripts."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/web-artifacts-builder"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/web-artifacts-builder"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/web-artifacts-builder"
+readme: |
+  # Web Artifacts Builder
+
+  Builds a multi-component HTML artifact with React, Tailwind CSS, and shadcn/ui. The skill initializes a frontend project, adds components, and bundles the result into a single HTML file.
+
+  It uses two shell helpers: one to initialize the project and one to bundle the artifact. It may install npm dependencies while building. Cockpit does not run these scripts during install.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

@@ -73,12 +73,6 @@ impl AppState {
             Some(guards.clone()),
             Some(snapshots.clone()),
         );
-        let recorder = Recorder::new(
-            store.clone(),
-            live.clone(),
-            Some(guards.clone()),
-            Some(snapshots.clone()),
-        );
         let adapters = Arc::new(adapters::load_registry_with(
             &config.home,
             config.builtin_adapters,
@@ -97,6 +91,14 @@ impl AppState {
         ));
         let pairing = PairingManager::new(store.clone());
         let remote = RemoteAccess::new(store.clone(), pairing.clone());
+        let recorder = Recorder::new(
+            store.clone(),
+            live.clone(),
+            Some(guards.clone()),
+            Some(snapshots.clone()),
+            Some(agents.clone()),
+            Some(remote.clone()),
+        );
         let client = reqwest::Client::builder()
             .redirect(Policy::none())
             .connect_timeout(std::time::Duration::from_secs(30))

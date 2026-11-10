@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
+  import ContextMeter from '../ContextMeter.svelte';
   import { daemonApi } from '../api/client';
   import {
     daemonErrorMessage,
@@ -8,8 +9,11 @@
     seedDemoData,
   } from '../api/daemon.svelte';
   import type {
+    ModelPreview,
+    ModelPricingRow,
     ReplayResponse,
     Session,
+    SessionModelState,
     SnapshotDetailResponse,
     Step,
     StepDetail,
@@ -63,6 +67,16 @@
   let liveBaseline = $state(0);
   let loadingDemo = $state(false);
   let loadToken = 0;
+  let modelState = $state<SessionModelState | null>(null);
+  let modelLoading = $state(false);
+  let modelError = $state<string | null>(null);
+  let overrideOpen = $state(false);
+  let overrideModel = $state('');
+  let overrideEffort = $state('');
+  let overridePreview = $state<ModelPreview | null>(null);
+  let previewLoading = $state(false);
+  let previewError = $state<string | null>(null);
+  let overrideBusy = $state(false);
 
   const demo = $derived(daemonState.health?.demoMode === true);
   const offline = $derived(daemonState.status === 'offline' && daemonState.sessions.length === 0);
@@ -87,6 +101,21 @@
   );
   const selectedDetail = $derived(
     selectedStepId ? (details[selectedStepId] ?? null) : null,
+  );
+  const selectedModels = $derived(modelState?.models ?? []);
+  const currentModel = $derived(modelState?.override?.model ?? modelState?.model ?? '');
+  const currentPricing = $derived(
+    selectedModels.find((row) => row.model === currentModel) ?? null,
+  );
+  const currentEffort = $derived(
+    modelState?.override?.effort ?? currentPricing?.effort?.default ?? '',
+  );
+  const overridePricing = $derived(
+    selectedModels.find((row) => row.model === overrideModel) ?? null,
+  );
+  const overrideLevels = $derived(overridePricing?.effort?.levels ?? []);
+  const canOverride = $derived(
+    selectedSession?.captureMode === 'proxy' && modelState?.status === 'active',
   );
 
   const outputBlocks = $derived.by((): OutputBlock[] => {
@@ -204,6 +233,20 @@
   });
 
   $effect(() => {
+    const id = selectedId;
+    if (!id) {
+      modelState = null;
+      modelError = null;
+      overrideOpen = false;
+      return;
+    }
+    modelState = null;
+    modelError = null;
+    overrideOpen = false;
+    void loadModelState(id);
+  });
+
+  $effect(() => {
     if (!selectedStepId || details[selectedStepId]) return;
     void loadStepDetail(selectedStepId);
   });
@@ -262,6 +305,134 @@
     } catch {
       // The timeline still works without the detail body.
     }
+  }
+
+  async function loadModelState(id: string): Promise<void> {
+    modelLoading = true;
+    modelError = null;
+    try {
+      const state = await daemonApi.sessionModel(id);
+      if (selectedId !== id) return;
+      modelState = state;
+    } catch (error) {
+      if (selectedId !== id) return;
+      modelState = null;
+      modelError = daemonErrorMessage(error);
+    } finally {
+      if (selectedId === id) modelLoading = false;
+    }
+  }
+
+  function openOverride(): void {
+    if (!modelState) return;
+    const fallback =
+      modelState.override?.model ||
+      modelState.model ||
+      selectedModels.find((row) => !row.deprecated)?.model ||
+      selectedModels[0]?.model ||
+      '';
+    overrideModel = fallback;
+    const pricing = selectedModels.find((row) => row.model === fallback);
+    overrideEffort = modelState.override?.effort || pricing?.effort?.default || '';
+    overridePreview = null;
+    previewError = null;
+    overrideOpen = true;
+    void previewOverride();
+  }
+
+  function closeOverride(): void {
+    overrideOpen = false;
+    overridePreview = null;
+    previewError = null;
+  }
+
+  async function previewOverride(): Promise<void> {
+    if (!selectedId || !overrideModel) return;
+    previewLoading = true;
+    previewError = null;
+    try {
+      const preview = await daemonApi.previewSessionModel(
+        selectedId,
+        overrideModel,
+        overrideEffort || undefined,
+      );
+      if (selectedId) overridePreview = preview;
+    } catch (error) {
+      overridePreview = null;
+      previewError = daemonErrorMessage(error);
+    } finally {
+      previewLoading = false;
+    }
+  }
+
+  function onOverrideModel(event: Event): void {
+    overrideModel = (event.currentTarget as HTMLSelectElement).value;
+    const pricing = selectedModels.find((row) => row.model === overrideModel);
+    overrideEffort = pricing?.effort?.default ?? '';
+    void previewOverride();
+  }
+
+  function onOverrideEffort(event: Event): void {
+    overrideEffort = (event.currentTarget as HTMLSelectElement).value;
+    void previewOverride();
+  }
+
+  async function applyOverride(): Promise<void> {
+    if (!selectedId || !overridePreview || overrideBusy) return;
+    overrideBusy = true;
+    try {
+      await daemonApi.setSessionModel(
+        selectedId,
+        overrideModel,
+        overrideEffort || undefined,
+      );
+      toast(t('model.applied'));
+      closeOverride();
+      await loadModelState(selectedId);
+    } catch (error) {
+      toast(daemonErrorMessage(error));
+    } finally {
+      overrideBusy = false;
+    }
+  }
+
+  async function clearOverride(): Promise<void> {
+    if (!selectedId || overrideBusy) return;
+    overrideBusy = true;
+    try {
+      await daemonApi.clearSessionModel(selectedId);
+      toast(t('model.cleared'));
+      await loadModelState(selectedId);
+    } catch (error) {
+      toast(daemonErrorMessage(error));
+    } finally {
+      overrideBusy = false;
+    }
+  }
+
+  function relativeCostText(preview: ModelPreview | null): string {
+    if (!preview) return '';
+    const cost = preview.relativeCost;
+    if (!cost.known || cost.ratio === undefined) return t('model.previewUnknown');
+    const ratio = cost.ratio >= 10 ? cost.ratio.toFixed(0) : cost.ratio.toFixed(1);
+    if (cost.direction === 'more') return t('model.previewMore', { ratio });
+    if (cost.direction === 'less') return t('model.previewLess', { ratio });
+    return t('model.previewSame');
+  }
+
+  function effortLabel(row: ModelPricingRow | null, effort: string): string {
+    if (!row?.effort) return t('model.effortNone');
+    if (effort) return effort;
+    return row.effort.default
+      ? t('model.effortDefault', { effort: row.effort.default })
+      : t('model.effortNone');
+  }
+
+  function priceLabel(row: ModelPricingRow): string {
+    if (!row.priceKnown || row.inputPerMtok === undefined || row.outputPerMtok === undefined) {
+      return t('model.priceUnknown');
+    }
+    return `$${row.inputPerMtok} / $${row.outputPerMtok}`;
   }
 
   // Replay responses carry snapshot summaries only. The patch and per-file
@@ -590,6 +761,207 @@
               </div>
             {/if}
           </dl>
+
+          {#if modelState || modelLoading || modelError}
+            <section
+              class="model-card card"
+              data-glass
+              data-glass-layer="card"
+              data-glass-depth="2"
+              data-model-card
+            >
+              <header class="model-card__head">
+                <div>
+                  <p class="kicker">{t('model.title')}</p>
+                  <h3>
+                    {currentModel || t('common.unknown')}
+                    {#if modelState?.override}
+                      <span class="status-pill status-pill--warn" data-model-modified>
+                        {t('model.modifiedBy')}
+                      </span>
+                    {/if}
+                  </h3>
+                </div>
+                <span class="status-pill">{modelState?.provider ?? '—'}</span>
+              </header>
+
+              {#if modelLoading}
+                <p class="model-card__note">{t('common.loading')}</p>
+              {:else if modelError}
+                <p class="model-card__note">{modelError}</p>
+              {:else if modelState}
+                <div class="model-card__facts">
+                  <div>
+                    <span>{t('model.current')}</span>
+                    <strong>{currentModel || t('common.unknown')}</strong>
+                    {#if currentPricing?.contextWindow}
+                      <small>
+                        {t('model.contextWindow', {
+                          tokens: formatTokens(currentPricing.contextWindow),
+                        })}
+                        {#if currentPricing.maxOutput}
+                          · {t('model.maxOutput', {
+                            tokens: formatTokens(currentPricing.maxOutput),
+                          })}
+                        {/if}
+                      </small>
+                    {/if}
+                  </div>
+                  <div>
+                    <span>{t('model.effort')}</span>
+                    <strong>{effortLabel(currentPricing, currentEffort)}</strong>
+                    {#if currentPricing?.effort}
+                      <small><code>{currentPricing.effort.parameter}</code></small>
+                    {/if}
+                  </div>
+                  {#if modelState.override}
+                    <div class="model-card__change" data-model-original>
+                      <span>{t('model.original')}</span>
+                      <strong>
+                        {modelState.override.originalModel ?? modelState.model ?? t('common.unknown')}
+                        {#if modelState.override.originalEffort}
+                          · {modelState.override.originalEffort}
+                        {/if}
+                        <span class="model-card__arrow">→</span>
+                        {modelState.override.model}
+                        {#if modelState.override.effort}
+                          · {modelState.override.effort}
+                        {/if}
+                      </strong>
+                      <small>{t('model.overrideClears')}</small>
+                    </div>
+                  {/if}
+                </div>
+
+                {#if modelState.context}
+                  <ContextMeter meter={modelState.context} label={t('context.latest')} />
+                {/if}
+
+                <div class="model-card__actions">
+                  {#if canOverride}
+                    <button
+                      class="btn btn--small btn--primary"
+                      type="button"
+                      onclick={openOverride}
+                      data-model-override-open
+                    >
+                      <Icon name="sliders" size={15} />
+                      {t('model.override')}
+                    </button>
+                    {#if modelState.override}
+                      <button
+                        class="btn btn--small btn--ghost"
+                        type="button"
+                        onclick={clearOverride}
+                        disabled={overrideBusy}
+                      >
+                        {t('model.clear')}
+                      </button>
+                    {/if}
+                  {:else}
+                    <div class="model-card__manual" data-model-manual>
+                      <Icon name="info" size={15} />
+                      <div>
+                        <strong>{t('model.manualTitle')}</strong>
+                        <p>
+                          {selectedSession.captureMode === 'proxy'
+                            ? t('model.manualEnded')
+                            : t('model.manualBody')}
+                        </p>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+
+                {#if overrideOpen}
+                  <div class="model-override" data-model-override>
+                    <div class="model-override__head">
+                      <div>
+                        <h4>{t('model.overrideTitle')}</h4>
+                        <p>{t('model.overrideBody')}</p>
+                      </div>
+                      <button
+                        class="icon-button icon-button--small"
+                        type="button"
+                        aria-label={t('common.cancel')}
+                        onclick={closeOverride}
+                      >
+                        <Icon name="x" size={15} />
+                      </button>
+                    </div>
+
+                    <div class="model-override__grid">
+                      <label class="model-field">
+                        <span>{t('model.chooseModel')}</span>
+                        <select value={overrideModel} onchange={onOverrideModel}>
+                          {#each selectedModels as row (row.model)}
+                            <option value={row.model}>
+                              {row.displayName} · {priceLabel(row)}
+                              {row.deprecated ? ` · ${t('model.deprecated')}` : ''}
+                            </option>
+                          {/each}
+                        </select>
+                      </label>
+                      {#if overrideLevels.length > 0}
+                        <label class="model-field">
+                          <span>{t('model.chooseEffort')}</span>
+                          <select value={overrideEffort} onchange={onOverrideEffort}>
+                            {#if overridePricing?.effort?.default}
+                              <option value="">
+                                {t('model.effortDefault', {
+                                  effort: overridePricing.effort.default,
+                                })}
+                              </option>
+                            {/if}
+                            {#each overrideLevels as level (level)}
+                              <option value={level}>{level}</option>
+                            {/each}
+                          </select>
+                        </label>
+                      {/if}
+                    </div>
+
+                    <div
+                      class="model-override__cost"
+                      class:is-warning={!overridePreview?.relativeCost.known}
+                    >
+                      <Icon name="alert" size={15} />
+                      <div>
+                        <strong>{t('model.preview')}</strong>
+                        {#if previewLoading}
+                          <p>{t('common.loading')}</p>
+                        {:else if previewError}
+                          <p>{previewError}</p>
+                        {:else if overridePreview}
+                          <p>{relativeCostText(overridePreview)}</p>
+                        {/if}
+                      </div>
+                    </div>
+
+                    <div class="model-override__actions">
+                      <button
+                        class="btn btn--ghost"
+                        type="button"
+                        onclick={closeOverride}
+                        disabled={overrideBusy}
+                      >
+                        {t('common.cancel')}
+                      </button>
+                      <button
+                        class="btn btn--primary"
+                        type="button"
+                        onclick={applyOverride}
+                        disabled={overrideBusy || previewLoading || !overridePreview}
+                        data-model-override-confirm
+                      >
+                        {overrideBusy ? t('model.confirming') : t('model.confirm')}
+                      </button>
+                    </div>
+                  </div>
+                {/if}
+              {/if}
+            </section>
+          {/if}
 
           <div class="tab-strip" role="tablist" aria-label={t('flights.title')}>
             <button

@@ -1,0 +1,71 @@
+schema_version: 1
+id: "fetch"
+name: "Fetch"
+kind: "mcp"
+version: "2026.11.4"
+short_description: "Fetch a URL and convert its contents to markdown, with chunked reads and a private-address guard."
+long_description: "An MCP server that fetches a URL and converts HTML to markdown. It supports chunked reads with start_index and refuses private, loopback, link-local, and cloud-metadata addresses by default."
+categories:
+  - "data"
+tags:
+  - "web"
+  - "markdown"
+  - "http"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/modelcontextprotocol/servers"
+  commit: "36380287ed3b15d115b55f546617d723072b1296"
+  content_sha256: "8361f866c514c80d70c196430874ff45bdae143dfc7a5b0ad8e145e535b62d19"
+  files:
+    - "src/fetch/LICENSE"
+    - "src/fetch/README.md"
+    - "src/fetch/pyproject.toml"
+license: "MIT"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "network"
+    description: "Fetches public URLs over HTTPS; private and loopback addresses are refused by default."
+mcp:
+  transport: "stdio"
+  command: "uvx"
+  args:
+    - "mcp-server-fetch==2026.11.4"
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+readme: |
+  # Fetch
+
+  An MCP server that fetches a URL and converts the page to markdown. The fetch tool accepts a URL, a maximum length, a start index for chunked reads, a raw-content flag, and a per-call timeout.
+
+  The server refuses private, loopback, link-local, and cloud-metadata addresses by default, and checks every redirect hop the same way. Cockpit does not pass the --allow-private-ips flag, so the guard stays on.
+
+  ## Command
+
+  uvx mcp-server-fetch==2026.11.4
+
+  Cockpit writes this command to the agent configuration. The agent runs it when it starts the server.
+
+  ## Source and license
+
+  Source: https://github.com/modelcontextprotocol/servers at commit 36380287ed3b15d115b55f546617d723072b1296. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The per-server LICENSE file is MIT. Cockpit records the source tree hash and license evidence in the entry.

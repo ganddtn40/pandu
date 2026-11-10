@@ -137,7 +137,7 @@ fn reader_for(
 }
 
 #[tokio::test]
-async fn signed_registry_lists_only_verified_entries() {
+async fn signed_registry_lists_verified_and_example_entries() {
     let home = tempfile::tempdir().unwrap();
     let user_home = tempfile::tempdir().unwrap();
     let service = service(
@@ -149,12 +149,26 @@ async fn signed_registry_lists_only_verified_entries() {
     let catalog = service.catalog(true).await.unwrap();
     assert_eq!(catalog.source, RegistrySource::Cache);
     assert!(catalog.offline);
-    assert_eq!(catalog.entries.len(), 3);
-    assert_eq!(catalog.counts.skills, 2);
-    assert_eq!(catalog.counts.mcp, 1);
+    assert_eq!(catalog.entries.len(), 22);
+    assert_eq!(catalog.counts.skills, 13);
+    assert_eq!(catalog.counts.mcp, 9);
     assert_eq!(catalog.counts.installed, 0);
-    assert!(catalog.entries.iter().all(|entry| entry.example));
-    assert_eq!(catalog.categories, vec!["coding", "docs", "data"]);
+    assert_eq!(
+        catalog.entries.iter().filter(|entry| entry.example).count(),
+        3
+    );
+    assert_eq!(
+        catalog.categories,
+        vec![
+            "coding",
+            "testing",
+            "docs",
+            "devops",
+            "data",
+            "design",
+            "productivity"
+        ]
+    );
     assert!(
         catalog
             .categories
@@ -172,7 +186,15 @@ async fn signed_registry_lists_only_verified_entries() {
         catalog
             .entries
             .iter()
+            .filter(|entry| entry.example)
             .all(|entry| entry.trust == TrustTier::Unreviewed)
+    );
+    assert!(
+        catalog
+            .entries
+            .iter()
+            .filter(|entry| !entry.example)
+            .all(|entry| entry.trust == TrustTier::Official)
     );
 
     let detail = service
@@ -778,8 +800,8 @@ async fn offline_catalog_uses_the_verified_cache_and_fails_closed() {
     let catalog = cached.catalog(false).await.unwrap();
     assert_eq!(catalog.source, RegistrySource::Cache);
     assert!(catalog.offline);
-    assert_eq!(catalog.entries.len(), 3);
-    assert_eq!(catalog.counts.skills, 2);
+    assert_eq!(catalog.entries.len(), 22);
+    assert_eq!(catalog.counts.skills, 13);
 
     // A tampered cache must not silently fall back to anything else.
     let mut index: Value =
@@ -878,7 +900,7 @@ async fn failed_refresh_never_deletes_the_verified_cache() {
 
     let catalog = service.catalog(false).await.unwrap();
     assert_eq!(catalog.source, RegistrySource::Cache);
-    assert_eq!(catalog.entries.len(), 3);
+    assert_eq!(catalog.entries.len(), 22);
 }
 
 #[tokio::test]

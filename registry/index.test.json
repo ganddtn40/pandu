@@ -5,6 +5,27 @@
   "entries": [
     {
       "kind": "skill",
+      "id": "algorithmic-art",
+      "path": "skills/algorithmic-art.yaml",
+      "sha256": "26aabaa3f5861cbc7bcd6cedbc436fcf8290c5c726d2328c4abc2dfcc8c2ba52",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "brand-guidelines",
+      "path": "skills/brand-guidelines.yaml",
+      "sha256": "217d8f4c76bfa4ca204a8d6c0afeb771776f5827582998bd547b54917f93dc36",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "canvas-design",
+      "path": "skills/canvas-design.yaml",
+      "sha256": "ddd0112c8dcdb628cfffa97e054fa5a602d11a4313b7b3ceabb88f4b6b058b71",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
       "id": "example-changelog-writer",
       "path": "skills/example-changelog-writer.yaml",
       "sha256": "6be9ad7343553c5f3fee0a5175c9a42a37d6b01400fc0186e21f0e5da5cb67f8",
@@ -18,12 +39,124 @@
       "version": "1.0.0"
     },
     {
+      "kind": "skill",
+      "id": "frontend-design",
+      "path": "skills/frontend-design.yaml",
+      "sha256": "abb5597b6a163b501bb56c790820bdb2abf238880333da7fc6092398b25afc68",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "internal-comms",
+      "path": "skills/internal-comms.yaml",
+      "sha256": "e547c04ed6e21acbeb51208ad70c67a7b1de438121cdbb64c61ba9f14bb44d3d",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "mcp-builder",
+      "path": "skills/mcp-builder.yaml",
+      "sha256": "719d893d20e361ff65f3a617c397fcd75d5b7137d9ae4846c766251fb0c4df72",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "skill-creator",
+      "path": "skills/skill-creator.yaml",
+      "sha256": "bf954d79518a5bc45b4378b0b1a6175b937a871db482c5b75ce2fc82e6e88666",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "slack-gif-creator",
+      "path": "skills/slack-gif-creator.yaml",
+      "sha256": "eefecd7f9583b2fb16ed7f04d7fe89997328cf0d3de1a050763f5ffff3c024e7",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "theme-factory",
+      "path": "skills/theme-factory.yaml",
+      "sha256": "399b3346176c14e60eb2fb41e30846bbf15a5aceebeb4867a53602c4c1eca458",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "web-artifacts-builder",
+      "path": "skills/web-artifacts-builder.yaml",
+      "sha256": "63e7fd11ae456ece8d592faac693564b71600e6b8f277aa40f7e4ddaa2182753",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "skill",
+      "id": "webapp-testing",
+      "path": "skills/webapp-testing.yaml",
+      "sha256": "b7b62cf702a586fab5586df19cabe7fdf8de364e0c10ac0ba1d3b774444b3609",
+      "version": "2c5958e"
+    },
+    {
+      "kind": "mcp",
+      "id": "context7",
+      "path": "mcp/context7.yaml",
+      "sha256": "0ad0b84706f5dfef4c4478d2e3e0b2890490fa516a90a5238fd76bff724281e6",
+      "version": "4.6.0"
+    },
+    {
       "kind": "mcp",
       "id": "example-weather",
       "path": "mcp/example-weather.yaml",
       "sha256": "363f4dded5cc6e876cf1b43642727b9419b7b5dd0aff4e1b1a3ade2eb65ebee5",
       "version": "1.0.0"
+    },
+    {
+      "kind": "mcp",
+      "id": "fetch",
+      "path": "mcp/fetch.yaml",
+      "sha256": "365af76144226b04a69ca38f50cf009636350e02d88ef43b0cb72b92af9aba2b",
+      "version": "2026.11.4"
+    },
+    {
+      "kind": "mcp",
+      "id": "git",
+      "path": "mcp/git.yaml",
+      "sha256": "b508df9ddd0bf57cf88b226fd11d1cd99f80779bcedc7ffecefd7de6cda261b6",
+      "version": "2026.11.4"
+    },
+    {
+      "kind": "mcp",
+      "id": "github-mcp-remote",
+      "path": "mcp/github-mcp-remote.yaml",
+      "sha256": "3da62bc0ea804f4d5f05277ab60114beb91bbc9677a2d39342715b027bcd69ed",
+      "version": "2.1.0"
+    },
+    {
+      "kind": "mcp",
+      "id": "github-mcp-server",
+      "path": "mcp/github-mcp-server.yaml",
+      "sha256": "ca125917a40d66763b969de74d71a858b8ecf817abd752c2e0fb8fbc7de9fc35",
+      "version": "2.1.0"
+    },
+    {
+      "kind": "mcp",
+      "id": "playwright",
+      "path": "mcp/playwright.yaml",
+      "sha256": "c16ba86f71c0a145253bad0a13797935b354b9c2e350fb6f95b0ece9f0361cf7",
+      "version": "0.0.85"
+    },
+    {
+      "kind": "mcp",
+      "id": "sequential-thinking",
+      "path": "mcp/sequential-thinking.yaml",
+      "sha256": "2960e298d6fb5ccbc30e27bc042f25e0daec432cc2116c08f1e1458339dcca24",
+      "version": "2.1.1"
+    },
+    {
+      "kind": "mcp",
+      "id": "time",
+      "path": "mcp/time.yaml",
+      "sha256": "2bd8528c8e5189988709b89f3281e0714ed9ae7fbbf6d8a9498ffdd57601cb7c",
+      "version": "2026.11.4"
     }
   ],
-  "signature": "5TwDvXgGF2dj99SWTJmjIg97pKH4c8Tz1ebWSC73vo7yw9Cs2X6BUHuCFLotsb5YBRLDOeGJvPFjVigGEFqKAg=="
+  "signature": "/GsVbOHoS9mKZNhzLkFpINVzkaAPU/qMz2rh4Ue7byMzBkgfeb6ak9Cq++2Pg+XxxA9ddFzCEE3kX23c0ehoAA=="
 }

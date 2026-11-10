@@ -1,0 +1,71 @@
+schema_version: 1
+id: "algorithmic-art"
+name: "Algorithmic Art"
+kind: "skill"
+version: "2c5958e"
+short_description: "Create original p5.js generative art with seeded randomness, an algorithmic philosophy, and an interactive viewer."
+long_description: "Creates original generative art with p5.js. The skill writes a short algorithmic philosophy, turns it into a seeded sketch with interactive parameters, and packages a standalone viewer. It is for new work, not for reproducing another artist style."
+categories:
+  - "design"
+tags:
+  - "generative-art"
+  - "p5js"
+  - "creative-coding"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/algorithmic-art/LICENSE.txt"
+    - "skills/algorithmic-art/SKILL.md"
+    - "skills/algorithmic-art/templates/generator_template.js"
+    - "skills/algorithmic-art/templates/viewer.html"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:write"
+    description: "Writes the philosophy, p5.js sketch, and viewer files into the workspace."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/algorithmic-art"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/algorithmic-art"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/algorithmic-art"
+readme: |
+  # Algorithmic Art
+
+  Creates original generative art with p5.js. The workflow has two stages: write an algorithmic philosophy as Markdown, then express it as a seeded p5.js sketch with interactive parameters and a standalone HTML viewer.
+
+  The generated HTML loads p5.js from a CDN. Cockpit does not open the viewer or run the sketch; the agent writes the files and the user opens them in a browser.
+
+  ## Output
+
+  - A Markdown file with the algorithmic philosophy.
+  - An HTML viewer with the sketch and controls.
+  - A JavaScript file with the generative algorithm.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

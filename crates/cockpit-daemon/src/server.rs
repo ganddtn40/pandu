@@ -38,6 +38,21 @@ pub fn build_router(state: AppState, bound_port: u16) -> Router {
         .route("/sessions/{id}", get(api::get_session))
         .route("/sessions/{id}/steps", get(api::list_steps))
         .route("/sessions/{id}/end", post(api::end_session))
+        .route(
+            "/sessions/{id}/model",
+            get(api::get_session_model)
+                .put(api::put_session_model)
+                .delete(api::delete_session_model),
+        )
+        .route(
+            "/sessions/{id}/model/preview",
+            get(api::preview_session_model),
+        )
+        .route(
+            "/sessions/{id}/model/switch",
+            post(api::switch_session_model),
+        )
+        .route("/models", get(api::list_models))
         .route("/sessions/{id}/replay", get(api::session_replay))
         .route("/sessions/{id}/scan", post(api::session_scan))
         .route("/sessions/{id}/budgets", get(api::session_budgets))

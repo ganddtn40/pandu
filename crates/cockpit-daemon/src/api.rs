@@ -7,6 +7,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use cockpit_core::cost::{ModelPricing, canonical_provider, find_builtin_model};
 use cockpit_core::guard::{
     GuardAction, GuardEventStatus, GuardEvidence, GuardRuleKind, GuardSeverity,
 };
@@ -24,6 +25,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::error::DaemonError;
+use crate::sessions::{ModelOverride, ModelOverrideError};
 use crate::state::AppState;
 use crate::store::{BeginStep, CompleteStep, NewFileChange, NewSession, NewSnapshot, now_iso};
 
@@ -106,11 +108,22 @@ pub async fn overview(State(state): State<AppState>) -> Result<Json<Value>, ApiE
         .store
         .list_sessions(10, 0, None)
         .map_err(store_error)?;
+    let mut contexts = serde_json::Map::new();
+    for session in &active_sessions {
+        if let Some(context) = state
+            .store
+            .latest_context(&session.id)
+            .map_err(store_error)?
+        {
+            contexts.insert(session.id.clone(), context);
+        }
+    }
 
     Ok(Json(json!({
         "stats": stats,
         "activeSessions": active_sessions,
         "recentSessions": recent_sessions,
+        "contexts": contexts,
     })))
 }
 
@@ -223,6 +236,282 @@ pub async fn end_session(
         .end_session(&id, SessionStatus::Completed)
         .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
     Ok(Json(json!({ "session": session })))
+}
+
+/// Every verified model row. The UI uses this for the host-only picker.
+pub async fn list_models() -> Json<Value> {
+    let models: Vec<Value> = cockpit_core::cost::BUILT_IN_PRICING
+        .iter()
+        .map(model_payload)
+        .collect();
+    Json(json!({ "models": models }))
+}
+
+pub async fn get_session_model(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    let session = state
+        .store
+        .get_session(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
+    let provider = session_provider(&session);
+    let models: Vec<Value> = cockpit_core::cost::BUILT_IN_PRICING
+        .iter()
+        .filter(|row| canonical_provider(&row.provider) == provider)
+        .map(model_payload)
+        .collect();
+    let context = state.store.latest_context(&id).map_err(store_error)?;
+    Ok(Json(json!({
+        "sessionId": id,
+        "provider": provider,
+        "model": session.model,
+        "status": session.status.as_str(),
+        "models": models,
+        "override": state.sessions.model_override(&id),
+        "context": context,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelPreviewQuery {
+    pub model: String,
+    pub effort: Option<String>,
+}
+
+pub async fn preview_session_model(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ModelPreviewQuery>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    let override_ = state
+        .sessions
+        .preview_model_override(&id, &query.model, query.effort.as_deref())
+        .map_err(model_override_error)?;
+    let session = state
+        .store
+        .get_session(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
+    let relative_cost = relative_cost_payload(&session, &override_);
+    Ok(Json(json!({
+        "override": override_,
+        "relativeCost": relative_cost,
+        "requiresConfirmation": true,
+    })))
+}
+
+pub async fn put_session_model(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::bad_request("Choose a model to override this flight."))?;
+    let effort = body.get("effort").and_then(Value::as_str);
+    let override_ = state
+        .sessions
+        .set_model_override(&id, model, effort)
+        .map_err(model_override_error)?;
+    let session = state
+        .store
+        .get_session(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
+    let relative_cost = relative_cost_payload(&session, &override_);
+    Ok(Json(json!({
+        "override": override_,
+        "relativeCost": relative_cost,
+        "requiresConfirmation": true,
+    })))
+}
+
+pub async fn delete_session_model(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    if state.store.get_session(&id).map_err(store_error)?.is_none() {
+        return Err(ApiError::not_found("That flight does not exist."));
+    }
+    let cleared = state.sessions.clear_model_override(&id).is_some();
+    Ok(Json(json!({ "cleared": cleared, "override": null })))
+}
+
+/// Switch a live agent's model inside its own terminal.
+///
+/// Only an adapter with a verified `model_switch` command may receive
+/// keystrokes. Everything else gets manual instructions, never a guess.
+pub async fn switch_session_model(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    if !is_id(&id) {
+        return Err(ApiError::bad_request("The session id is not valid."));
+    }
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::bad_request("Choose a model to switch this flight to."))?;
+    let session = state
+        .store
+        .get_session(&id)
+        .map_err(store_error)?
+        .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
+    let Some(pricing) = find_builtin_model(model, session.provider.as_deref()) else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "model_not_found",
+            "That model is not in the verified model list for this provider.",
+        ));
+    };
+    let adapter_id = session
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("adapter"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            session
+                .agent
+                .as_ref()
+                .and_then(|agent| agent.name.as_deref())
+        });
+    let outcome = state
+        .agents
+        .switch_model(&id, adapter_id, &pricing.model)
+        .map_err(agent_error)?;
+    state.sessions.audit_model_event(
+        if outcome.mode == "pty" {
+            "model.switch"
+        } else {
+            "model.switch.manual"
+        },
+        &id,
+        json!({
+            "adapter": adapter_id,
+            "model": pricing.model,
+            "mode": outcome.mode,
+            "command": outcome.command,
+        }),
+    );
+    Ok(Json(json!({
+        "model": pricing.model,
+        "adapter": adapter_id,
+        "mode": outcome.mode,
+        "command": outcome.command,
+        "instructions": outcome.instructions,
+    })))
+}
+
+fn model_payload(row: &ModelPricing) -> Value {
+    json!({
+        "provider": canonical_provider(&row.provider),
+        "model": row.model,
+        "displayName": row.display_name.clone().unwrap_or_else(|| row.model.clone()),
+        "aliases": row.aliases,
+        "contextWindow": row.context_window,
+        "maxOutput": row.max_output,
+        "effort": row.effort,
+        "inputPerMtok": row.input_per_mtok,
+        "outputPerMtok": row.output_per_mtok,
+        "cacheReadPerMtok": row.cache_read_per_mtok,
+        "cacheWritePerMtok": row.cache_write_per_mtok,
+        "currency": row.currency,
+        "source": row.source,
+        "verifiedOn": row.verified_on,
+        "note": row.note,
+        "deprecated": row.deprecated,
+        "priceKnown": row.input_per_mtok.is_some() && row.output_per_mtok.is_some(),
+    })
+}
+
+fn session_provider(session: &Session) -> String {
+    let provider = session
+        .provider
+        .clone()
+        .or_else(|| {
+            session
+                .protocol
+                .map(|protocol| protocol.default_provider().to_string())
+        })
+        .unwrap_or_else(|| "openai".to_string());
+    canonical_provider(&provider)
+}
+
+/// Compare one million input tokens plus one million output tokens. This is a
+/// warning signal, not a bill: the UI labels it "estimated relative cost".
+fn relative_cost_payload(session: &Session, override_: &ModelOverride) -> Value {
+    let provider = session_provider(session);
+    let current_model = session
+        .model
+        .clone()
+        .or_else(|| override_.original_model.clone());
+    let from = current_model
+        .as_deref()
+        .and_then(|model| find_builtin_model(model, Some(provider.as_str())));
+    let to = find_builtin_model(&override_.model, Some(provider.as_str()));
+
+    let pair_cost = |row: Option<&ModelPricing>| {
+        row.and_then(|row| match (row.input_per_mtok, row.output_per_mtok) {
+            (Some(input), Some(output)) => Some(input + output),
+            _ => None,
+        })
+    };
+    let from_usd = pair_cost(from);
+    let to_usd = pair_cost(to);
+    let ratio = match (from_usd, to_usd) {
+        (Some(from), Some(to)) if from > 0.0 => Some(to / from),
+        _ => None,
+    };
+    let direction = match (from_usd, to_usd) {
+        (Some(from), Some(to)) if to > from => "more",
+        (Some(from), Some(to)) if to < from => "less",
+        (Some(_), Some(_)) => "same",
+        _ => "unknown",
+    };
+
+    json!({
+        "known": from_usd.is_some() && to_usd.is_some(),
+        "fromModel": current_model,
+        "toModel": override_.model,
+        "fromUsd": from_usd,
+        "toUsd": to_usd,
+        "ratio": ratio,
+        "direction": direction,
+        "referenceTokens": 1_000_000,
+    })
+}
+
+fn model_override_error(error: ModelOverrideError) -> ApiError {
+    let status = match error {
+        ModelOverrideError::SessionNotFound => StatusCode::NOT_FOUND,
+        ModelOverrideError::SessionEnded => StatusCode::CONFLICT,
+        ModelOverrideError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    if status == StatusCode::INTERNAL_SERVER_ERROR {
+        tracing::error!(%error, "a model override storage operation failed");
+    }
+    ApiError::new(status, error.code(), error.message())
 }
 
 pub async fn get_settings(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -933,6 +1222,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 error: None,
                 ttft_ms: Some(312),
                 latency_ms: 1_940,
+                metadata: None,
             },
             1,
         )
@@ -1008,6 +1298,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 error: None,
                 ttft_ms: Some(268),
                 latency_ms: 1_120,
+                metadata: None,
             },
             0,
         )
@@ -1161,6 +1452,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 error: None,
                 ttft_ms: Some(410),
                 latency_ms: 2_480,
+                metadata: None,
             },
             0,
         )
@@ -1315,6 +1607,25 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
                 error: None,
                 ttft_ms: Some(355),
                 latency_ms: 1_650,
+                metadata: Some(json!({
+                    "context": {
+                        "model": "gemini-2.5-pro",
+                        "tokens": 864_000,
+                        "window": 1_048_576,
+                        "percent": 82.4,
+                        "source": "provider",
+                        "breakdown": {
+                            "system": 4_200,
+                            "tools": 18_600,
+                            "history": 741_200,
+                            "files": 82_000,
+                            "other": 18_000
+                        },
+                        "compacted": false,
+                        "threshold": 0.8,
+                        "high": true
+                    }
+                })),
             },
             0,
         )

@@ -17,6 +17,7 @@ use crate::proxy::headers::{
     build_response_headers, build_upstream_headers, collect_header_map, is_recordable_path,
     proxy_error_response,
 };
+use crate::proxy::rewrite::rewrite_request;
 use crate::recorder::{BeginRecordedStep, FinishRecordedStep};
 use crate::state::AppState;
 
@@ -241,10 +242,31 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
         None
     };
 
+    // Recording above keeps the original body. The rewrite below only affects
+    // the bytes forwarded upstream, and only when a host override is active.
+    let rewrite_provider = session
+        .as_ref()
+        .and_then(|session| session.provider.clone())
+        .unwrap_or_else(|| provider.clone());
+    let model_override = session
+        .as_ref()
+        .filter(|_| recordable)
+        .and_then(|session| state.sessions.model_override(&session.id));
+    let rewrite = rewrite_request(
+        &body_bytes,
+        &route.upstream_path,
+        route.protocol,
+        &rewrite_provider,
+        model_override.as_ref(),
+    );
+    let override_info = rewrite.info;
+    let upstream_path = rewrite.path;
+    let forward_body = rewrite.body;
+
     let mut upstream_url = format!(
         "{}{}",
         state.config.upstream_base(route.protocol),
-        route.upstream_path
+        upstream_path
     );
     if let Some(query) = uri.query() {
         upstream_url.push('?');
@@ -256,10 +278,9 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
         .client
         .request(method.clone(), &upstream_url)
         .headers(upstream_headers);
-    if method != http::Method::GET && method != http::Method::HEAD && !body_bytes.is_empty() {
-        builder = builder.body(body_bytes.to_vec());
+    if method != http::Method::GET && method != http::Method::HEAD && !forward_body.is_empty() {
+        builder = builder.body(forward_body.to_vec());
     }
-
     let upstream = match builder.send().await {
         Ok(upstream) => upstream,
         Err(error) => {
@@ -277,6 +298,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
                         collected: None,
                         error: Some(message.clone()),
                         ttft_ms: None,
+                        override_info: override_info.clone(),
                     },
                 );
             }
@@ -327,6 +349,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
         let recorder = state.recorder.clone();
         let response_header_map = collect_header_map(upstream.headers());
         let (sender, receiver) = mpsc::channel::<Result<Bytes, std::io::Error>>(16);
+        let override_info = override_info.clone();
 
         tokio::spawn(async move {
             let mut handle = handle;
@@ -379,6 +402,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
                     collected: None,
                     error,
                     ttft_ms: None,
+                    override_info,
                 },
             );
 
@@ -411,6 +435,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
                     collected: None,
                     error: Some(message.clone()),
                     ttft_ms: None,
+                    override_info: override_info.clone(),
                 },
             );
             return proxy_error_response(
@@ -427,7 +452,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
     let collected = parsed
         .value
         .as_ref()
-        .map(|value| collect_non_stream_response(route.protocol, &route.upstream_path, value));
+        .map(|value| collect_non_stream_response(route.protocol, &upstream_path, value));
     let status = if upstream_status.as_u16() >= 400
         || collected
             .as_ref()
@@ -456,6 +481,7 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
             collected,
             error,
             ttft_ms: None,
+            override_info,
         },
     ) {
         tracing::warn!(%error, "could not finalize a recorded step");

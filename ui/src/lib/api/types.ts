@@ -86,6 +86,8 @@ export interface Session {
   totals: SessionTotals;
   tags: string[];
   metadata?: Record<string, unknown>;
+  /** Percentage only. Remote devices never see tokens or the breakdown. */
+  contextPercent?: number;
 }
 
 export interface CapturedRequest {
@@ -267,10 +269,35 @@ export interface OverviewStats {
   lastSessionAt?: string;
 }
 
+export interface ContextBreakdown {
+  system: number;
+  tools: number;
+  history: number;
+  files: number;
+  other: number;
+}
+
+export type ContextSource = 'provider' | 'estimated';
+
+/** Per-request context pressure recorded on a model step. */
+export interface ContextMeter {
+  model: string;
+  tokens: number;
+  window?: number;
+  percent?: number;
+  source: ContextSource;
+  breakdown: ContextBreakdown;
+  compacted: boolean;
+  threshold: number;
+  high: boolean;
+}
+
 export interface Overview {
   stats: OverviewStats;
   activeSessions: Session[];
   recentSessions: Session[];
+  /** Latest context meter per active flight id, when one was recorded. */
+  contexts?: Record<string, ContextMeter>;
 }
 
 export interface SessionList {
@@ -326,6 +353,12 @@ export interface SettingsResponse {
   settings: Record<string, string>;
 }
 
+export interface ModelSwitchSupport {
+  available: boolean;
+  command?: string;
+  instructions: string;
+}
+
 export interface AgentSession {
   sessionId: string;
   agentName: string;
@@ -337,6 +370,7 @@ export interface AgentSession {
   needsYou: boolean;
   promptState: AgentPromptState;
   autoApprove: boolean;
+  modelSwitch: ModelSwitchSupport;
   exitCode?: number;
   createdAt: string;
   updatedAt: string;
@@ -374,6 +408,83 @@ export interface ApprovalDecision {
   provider?: string;
   nonce?: string;
   sessionId?: string;
+}
+
+// ----- Model & effort ------------------------------------------------------
+
+export interface EffortControl {
+  parameter: string;
+  anthropicParameter?: string;
+  responsesParameter?: string;
+  levels: string[];
+  default?: string;
+}
+
+export interface ModelPricingRow {
+  provider: string;
+  model: string;
+  displayName: string;
+  aliases: string[];
+  contextWindow?: number;
+  maxOutput?: number;
+  effort?: EffortControl;
+  inputPerMtok?: number;
+  outputPerMtok?: number;
+  cacheReadPerMtok?: number;
+  cacheWritePerMtok?: number;
+  currency: string;
+  source: string;
+  verifiedOn?: string;
+  note?: string;
+  deprecated: boolean;
+  priceKnown: boolean;
+}
+
+export interface ModelOverride {
+  sessionId: string;
+  provider: string;
+  model: string;
+  effort?: string;
+  originalModel?: string;
+  originalEffort?: string;
+  setAt: string;
+}
+
+export type RelativeCostDirection = 'more' | 'less' | 'same' | 'unknown';
+
+export interface RelativeCost {
+  known: boolean;
+  fromModel?: string;
+  toModel: string;
+  fromUsd?: number;
+  toUsd?: number;
+  ratio?: number;
+  direction: RelativeCostDirection;
+  referenceTokens: number;
+}
+
+export interface ModelPreview {
+  override: ModelOverride;
+  relativeCost: RelativeCost;
+  requiresConfirmation: boolean;
+}
+
+export interface SessionModelState {
+  sessionId: string;
+  provider: string;
+  model?: string;
+  status: SessionStatus;
+  models: ModelPricingRow[];
+  override?: ModelOverride;
+  context?: ContextMeter;
+}
+
+export interface ModelSwitchResult {
+  model: string;
+  adapter?: string;
+  mode: 'pty' | 'manual';
+  command?: string;
+  instructions: string;
 }
 
 // ----- Remote access -------------------------------------------------------

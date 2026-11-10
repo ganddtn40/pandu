@@ -50,6 +50,11 @@ pub fn build_remote_router(state: AppState) -> Router {
         .route("/remote/sessions", get(list_sessions))
         .route("/remote/sessions/{id}", get(get_session))
         .route("/remote/sessions/{id}/steps", get(list_steps))
+        .route("/remote/sessions/{id}/model", post(reject_model_override))
+        .route(
+            "/remote/sessions/{id}/model/switch",
+            post(reject_model_switch),
+        )
         .route("/remote/guards/events", get(list_guard_events))
         .route("/remote/guards/events/{id}/decision", post(guard_decision))
         .route("/remote/agents", get(list_agents))
@@ -327,6 +332,61 @@ async fn list_steps(
     }
 }
 
+/// Model and effort overrides are host-only. The route exists on the remote
+/// listener only so a paired device gets an explicit refusal and an audit row,
+/// never a silent 404 that hides the security boundary.
+async fn reject_model_override(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    state.remote.audit(
+        "model.override.denied",
+        Some((&principal.device_id, &principal.device_name)),
+        None,
+        json!({
+            "sessionId": id,
+            "reason": "remote_host_only",
+            "model": body.get("model").cloned().unwrap_or(Value::Null),
+        }),
+        None,
+        None,
+    );
+    api_error(
+        StatusCode::FORBIDDEN,
+        "host_only",
+        "Model and effort changes are host-only. Use the Cockpit desktop UI.",
+    )
+}
+
+/// PTY model switches are host-only for the same reason overrides are: a
+/// paired device must never type into the host's terminal.
+async fn reject_model_switch(
+    State(state): State<AppState>,
+    Extension(principal): Extension<RemotePrincipal>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    state.remote.audit(
+        "model.switch.denied",
+        Some((&principal.device_id, &principal.device_name)),
+        None,
+        json!({
+            "sessionId": id,
+            "reason": "remote_host_only",
+            "model": body.get("model").cloned().unwrap_or(Value::Null),
+        }),
+        None,
+        None,
+    );
+    api_error(
+        StatusCode::FORBIDDEN,
+        "host_only",
+        "Model changes are host-only. Use the Cockpit desktop UI.",
+    )
+}
+
 async fn list_guard_events(
     State(state): State<AppState>,
     Extension(principal): Extension<RemotePrincipal>,
@@ -421,6 +481,13 @@ fn status_session_value(state: &AppState, session: &Value) -> Value {
     }
     if let Some(name) = agent_name {
         value.insert("agent".to_string(), json!({ "name": name }));
+    }
+    // The remote status view gets the context percentage only — never the
+    // token counts, the model window, or the system/tools/history breakdown.
+    if let Ok(Some(context)) = state.store.latest_context(id) {
+        if let Some(percent) = context.get("percent").and_then(Value::as_f64) {
+            value.insert("contextPercent".to_string(), json!(percent));
+        }
     }
     Value::Object(value)
 }

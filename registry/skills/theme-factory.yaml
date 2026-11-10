@@ -1,0 +1,76 @@
+schema_version: 1
+id: "theme-factory"
+name: "Theme Factory"
+kind: "skill"
+version: "2c5958e"
+short_description: "Apply one of ten preset themes or generate a new one for slides, documents, reports, and HTML pages."
+long_description: "Styles artifacts with a consistent theme. It ships ten preset themes with colors and fonts and can generate a new theme on the fly for slides, documents, reports, and HTML pages."
+categories:
+  - "design"
+tags:
+  - "themes"
+  - "slides"
+  - "documents"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/theme-factory/LICENSE.txt"
+    - "skills/theme-factory/SKILL.md"
+    - "skills/theme-factory/theme-showcase.pdf"
+    - "skills/theme-factory/themes/arctic-frost.md"
+    - "skills/theme-factory/themes/botanical-garden.md"
+    - "skills/theme-factory/themes/desert-rose.md"
+    - "skills/theme-factory/themes/forest-canopy.md"
+    - "skills/theme-factory/themes/golden-hour.md"
+    - "skills/theme-factory/themes/midnight-galaxy.md"
+    - "skills/theme-factory/themes/modern-minimalist.md"
+    - "skills/theme-factory/themes/ocean-depths.md"
+    - "skills/theme-factory/themes/sunset-boulevard.md"
+    - "skills/theme-factory/themes/tech-innovation.md"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads the target artifact and the bundled theme definitions."
+  - id: "filesystem:write"
+    description: "Writes the styled artifact and any new theme definition."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/theme-factory"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/theme-factory"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/theme-factory"
+readme: |
+  # Theme Factory
+
+  Styles an artifact with a consistent visual theme. Ten preset themes define colors and fonts for slides, documents, reports, and HTML pages. The skill can also generate a new theme when none of the presets fit.
+
+  The folder includes a PDF showcase and one Markdown file per theme. The skill reads the target artifact and writes the styled result.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

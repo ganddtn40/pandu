@@ -318,6 +318,21 @@ mod tests {
     }
 
     #[test]
+    fn codex_skills_paths_are_verified() {
+        let home = std::env::temp_dir().join("cockpit-adapter-test-codex-skills");
+        let registry = load_registry(&home);
+        let skills = registry
+            .get("codex")
+            .unwrap()
+            .skills
+            .as_ref()
+            .expect("Codex has a skills section");
+        assert!(skills.verified);
+        assert_eq!(skills.user_paths, vec!["~/.agents/skills"]);
+        assert_eq!(skills.project_paths, vec![".agents/skills"]);
+    }
+
+    #[test]
     fn user_adapters_override_builtins() {
         let directory = tempfile::tempdir().unwrap();
         let adapters = directory.path().join("adapters");

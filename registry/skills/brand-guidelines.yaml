@@ -1,0 +1,63 @@
+schema_version: 1
+id: "brand-guidelines"
+name: "Brand Guidelines"
+kind: "skill"
+version: "2c5958e"
+short_description: "Apply Anthropic's brand colors and typography to artifacts that need a consistent, recognizable visual identity."
+long_description: "Applies Anthropic's official brand colors and typography to documents, slides, and interfaces. Use it when an artifact needs Anthropic's look and feel, or when existing brand guidance should drive the visual choices."
+categories:
+  - "design"
+tags:
+  - "branding"
+  - "typography"
+  - "color"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/brand-guidelines/LICENSE.txt"
+    - "skills/brand-guidelines/SKILL.md"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads the target artifact and the bundled brand reference files."
+  - id: "filesystem:write"
+    description: "Writes the styled artifact back to the workspace."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/brand-guidelines"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/brand-guidelines"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/brand-guidelines"
+readme: |
+  # Brand Guidelines
+
+  Applies Anthropic's brand colors and typography to an artifact. The skill ships a compact reference for the palette and type, then asks the agent to apply those choices consistently to the target document, slide, or interface.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

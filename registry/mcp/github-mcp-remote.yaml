@@ -1,0 +1,71 @@
+schema_version: 1
+id: "github-mcp-remote"
+name: "GitHub MCP Server (remote)"
+kind: "mcp"
+version: "2.1.0"
+short_description: "GitHub's hosted MCP server for repositories, issues, pull requests, code search, and Actions."
+long_description: "GitHub's hosted MCP server. It exposes repository, issue, pull request, code search, and Actions tools over streamable HTTP. The agent authenticates with GitHub OAuth or a personal access token."
+categories:
+  - "coding"
+  - "devops"
+tags:
+  - "github"
+  - "issues"
+  - "pull-requests"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/github/github-mcp-server"
+  commit: "4bcdcdf8d7beee98c9448e73e257308280924cc4"
+  content_sha256: "d1430c8a295eabb2646d3fd7e7d7e506a197ffe48d7a482478f6243a45ac889c"
+  files:
+    - "LICENSE"
+    - "README.md"
+    - "go.mod"
+    - "server.json"
+license: "MIT"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "network"
+    description: "Calls the GitHub API over HTTPS."
+  - id: "secrets"
+    description: "Uses the agent's GitHub OAuth session or a personal access token."
+mcp:
+  transport: "http"
+  url: "https://api.githubcopilot.com/mcp/"
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+readme: |
+  # GitHub MCP Server (remote)
+
+  GitHub's hosted MCP server. It exposes repository, issue, pull request, code search, and Actions tools over streamable HTTP. GitHub hosts the server; Cockpit only writes the URL.
+
+  The agent authenticates through GitHub OAuth. A personal access token can be supplied manually if the agent supports custom headers, but the registry HTTP recipe has no header field, so Cockpit does not write one.
+
+  ## Configuration
+
+  URL: https://api.githubcopilot.com/mcp/
+
+  ## Source and license
+
+  Source: https://github.com/github/github-mcp-server at commit 4bcdcdf8d7beee98c9448e73e257308280924cc4. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The repository LICENSE is MIT. Cockpit records the source tree hash and license evidence in the entry.

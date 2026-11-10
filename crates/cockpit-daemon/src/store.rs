@@ -361,6 +361,9 @@ pub struct CompleteStep {
     pub error: Option<String>,
     pub ttft_ms: Option<u64>,
     pub latency_ms: u64,
+    /// Recorder-owned metadata (context meter, model override). This never
+    /// alters the recorded request or response.
+    pub metadata: Option<Value>,
 }
 
 /// A completed step reconstructed from an agent's own log file.
@@ -1106,6 +1109,11 @@ impl Store {
         };
 
         let response_headers = serde_json::to_string(&input.response_headers)?;
+        let metadata = input
+            .metadata
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         transaction.execute(
             "UPDATE steps SET
                status = ?1, model = COALESCE(?2, model), response_status = ?3,
@@ -1114,7 +1122,7 @@ impl Store {
                response_error = ?10, input_tokens = ?11, output_tokens = ?12,
                cache_read_tokens = ?13, cache_write_tokens = ?14, reasoning_tokens = ?15,
                cost_usd = ?16, cost_known = ?17, ended_at = ?18, duration_ms = ?19,
-               error = ?20
+               error = ?20, metadata = COALESCE(?22, metadata)
              WHERE id = ?21 AND status = 'running'",
             params![
                 input.status.as_str(),
@@ -1138,6 +1146,7 @@ impl Store {
                 input.latency_ms as i64,
                 input.error,
                 step_id,
+                metadata,
             ],
         )?;
 
@@ -1456,6 +1465,72 @@ impl Store {
             steps.push(row?);
         }
         Ok(steps)
+    }
+
+    /// The context size recorded for the most recent earlier step in a flight.
+    /// Steps without a context meter (log imports, tool-only steps) are skipped
+    /// so compaction detection still finds the last real model request.
+    pub fn previous_context_tokens(
+        &self,
+        session_id: &str,
+        before_seq: u64,
+    ) -> Result<Option<u64>> {
+        Ok(self
+            .previous_context(session_id, before_seq)?
+            .and_then(|context| context.get("tokens").and_then(Value::as_u64)))
+    }
+
+    /// Whether the previous step was already above the context threshold, used
+    /// to avoid firing `context.high` on every request in a long flight.
+    pub fn previous_context_high(&self, session_id: &str, before_seq: u64) -> Result<bool> {
+        Ok(self
+            .previous_context(session_id, before_seq)?
+            .and_then(|context| context.get("high").and_then(Value::as_bool))
+            .unwrap_or(false))
+    }
+
+    fn previous_context(&self, session_id: &str, before_seq: u64) -> Result<Option<Value>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT metadata FROM steps
+             WHERE session_id = ?1 AND seq < ?2 AND metadata IS NOT NULL
+             ORDER BY seq DESC LIMIT 8",
+        )?;
+        let rows = statement.query_map(params![session_id, before_seq as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
+        for row in rows {
+            let raw = row?;
+            let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if let Some(context) = value.get("context") {
+                return Ok(Some(context.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The most recent context meter recorded for a flight. Remote status uses
+    /// only the percentage from this value.
+    pub fn latest_context(&self, session_id: &str) -> Result<Option<Value>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT metadata FROM steps
+             WHERE session_id = ?1 AND metadata IS NOT NULL
+             ORDER BY seq DESC LIMIT 8",
+        )?;
+        let rows = statement.query_map(params![session_id], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let raw = row?;
+            let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if let Some(context) = value.get("context") {
+                return Ok(Some(context.clone()));
+            }
+        }
+        Ok(None)
     }
 
     pub fn insert_redactions(&self, step_id: &str, rows: &[RedactionRow]) -> Result<()> {
@@ -3405,6 +3480,7 @@ mod tests {
                     error: None,
                     ttft_ms: Some(12),
                     latency_ms: 40,
+                    metadata: None,
                 },
                 1,
             )
@@ -3453,6 +3529,7 @@ mod tests {
             error: None,
             ttft_ms: None,
             latency_ms: 1,
+            metadata: None,
         };
         assert!(
             store

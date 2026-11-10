@@ -1,0 +1,73 @@
+schema_version: 1
+id: "slack-gif-creator"
+name: "Slack GIF Creator"
+kind: "skill"
+version: "2c5958e"
+short_description: "Create animated GIFs sized and optimized for Slack, with easing, frame composition, and validation helpers."
+long_description: "Creates animated GIFs optimized for Slack. It provides frame composition, easing, validation, and size guidance, and can save emoji-sized or message-sized GIFs with color and duplicate optimization."
+categories:
+  - "design"
+  - "productivity"
+tags:
+  - "gif"
+  - "slack"
+  - "animation"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/slack-gif-creator/LICENSE.txt"
+    - "skills/slack-gif-creator/SKILL.md"
+    - "skills/slack-gif-creator/core/easing.py"
+    - "skills/slack-gif-creator/core/frame_composer.py"
+    - "skills/slack-gif-creator/core/gif_builder.py"
+    - "skills/slack-gif-creator/core/validators.py"
+    - "skills/slack-gif-creator/requirements.txt"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:write"
+    description: "Writes the generated GIF and intermediate frame data."
+  - id: "shell"
+    description: "Runs the bundled Python GIF helpers."
+  - id: "network"
+    description: "Installs the Python imaging dependencies with pip when they are missing."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/slack-gif-creator"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/slack-gif-creator"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/slack-gif-creator"
+readme: |
+  # Slack GIF Creator
+
+  Creates animated GIFs for Slack. The skill provides constraints for emoji and message sizes, easing functions, frame composition, and validators for dimensions, frame count, and duration.
+
+  The helpers use Pillow, imageio, and numpy. The skill documents installing them with pip; Cockpit does not install them. The generated GIF is written to the workspace.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

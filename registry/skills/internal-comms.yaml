@@ -1,0 +1,70 @@
+schema_version: 1
+id: "internal-comms"
+name: "Internal Communications"
+kind: "skill"
+version: "2c5958e"
+short_description: "Draft internal communications such as status reports, leadership updates, newsletters, FAQs, and incident reports."
+long_description: "Drafts internal communications in company formats: status reports, leadership updates, 3P updates, newsletters, FAQs, incident reports, and project updates. It includes worked examples for each format."
+categories:
+  - "docs"
+  - "productivity"
+tags:
+  - "writing"
+  - "status-reports"
+  - "newsletters"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/anthropics/skills"
+  commit: "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+  content_sha256: "da39d89a6fe60aac12400b53ff6636868216f1578422d7cd10c1ae8e7c95c37c"
+  files:
+    - "skills/internal-comms/LICENSE.txt"
+    - "skills/internal-comms/SKILL.md"
+    - "skills/internal-comms/examples/3p-updates.md"
+    - "skills/internal-comms/examples/company-newsletter.md"
+    - "skills/internal-comms/examples/faq-answers.md"
+    - "skills/internal-comms/examples/general-comms.md"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "filesystem:read"
+    description: "Reads project context and the bundled communication examples."
+  - id: "filesystem:write"
+    description: "Writes the finished communication to the workspace."
+skills:
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/internal-comms"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/internal-comms"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+      subdir: "skills/internal-comms"
+readme: |
+  # Internal Communications
+
+  Helps write internal communications in a consistent company voice. Formats include status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, and project updates.
+
+  The skill includes examples for each format. It reads the project context the user points at and writes the finished draft to the workspace.
+
+  ## Source and license
+
+  Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.

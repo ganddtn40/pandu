@@ -162,6 +162,21 @@ pub struct McpSpec {
     pub verified: bool,
 }
 
+/// How Cockpit asks an agent to change models from its own terminal.
+///
+/// The command is a fixed template: only `{model}` is substituted. This keeps
+/// the adapter data-only - it can never run arbitrary shell input - and lets
+/// the UI explain the switch before it happens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct ModelSwitchSpec {
+    /// A single-line command containing `{model}`, e.g. `/model {model}`.
+    pub command: String,
+    /// False unless the command was checked against the vendor's docs.
+    #[serde(default)]
+    pub verified: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct Adapter {
@@ -183,6 +198,8 @@ pub struct Adapter {
     pub skills: Option<SkillsSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<McpSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch: Option<ModelSwitchSpec>,
 }
 
 impl Adapter {
@@ -413,6 +430,25 @@ impl Adapter {
             }
         }
 
+        if let Some(model_switch) = &self.model_switch {
+            let command = model_switch.command.trim();
+            if command.is_empty() || command.len() > 200 {
+                return Err(AdapterError::new(
+                    "model_switch.command must be 1-200 characters",
+                ));
+            }
+            if !command.contains("{model}") {
+                return Err(AdapterError::new(
+                    "model_switch.command must contain the {model} placeholder",
+                ));
+            }
+            if command.contains('\n') || command.contains('\r') || command.contains('\0') {
+                return Err(AdapterError::new(
+                    "model_switch.command must be a single line",
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -426,8 +462,21 @@ impl Adapter {
                 .is_none_or(|log_watch| log_watch.verified)
             && self.hook_otel.as_ref().is_none_or(|hook| hook.verified)
             && self.skills.as_ref().is_none_or(|skills| skills.verified)
-            && self.mcp.as_ref().is_none_or(|mcp| mcp.verified);
+            && self.mcp.as_ref().is_none_or(|mcp| mcp.verified)
+            && self
+                .model_switch
+                .as_ref()
+                .is_none_or(|model_switch| model_switch.verified);
         self.verified = self.verified && sections_verified;
+    }
+
+    /// The exact line Cockpit may type into this agent's terminal, or `None`
+    /// when the adapter has no verified switch command.
+    pub fn model_switch_command(&self, model: &str) -> Option<String> {
+        self.model_switch
+            .as_ref()
+            .filter(|spec| spec.verified)
+            .map(|spec| spec.command.replace("{model}", model.trim()))
     }
 
     pub fn supports(&self, mode: CaptureMode) -> bool {
@@ -752,6 +801,33 @@ verified = false
         );
         let adapter = Adapter::from_toml("example-agent", &contents).unwrap();
         assert!(adapter.skills.is_some());
+    }
+
+    #[test]
+    fn model_switch_commands_are_templates_only() {
+        let contents =
+            format!("{VALID}\n[model_switch]\ncommand = \"/model {{model}}\"\nverified = true\n");
+        let adapter = Adapter::from_toml("example-agent", &contents).unwrap();
+        assert_eq!(
+            adapter.model_switch_command("gpt-5.5").as_deref(),
+            Some("/model gpt-5.5")
+        );
+        assert!(!adapter.verified);
+
+        let unverified =
+            format!("{VALID}\n[model_switch]\ncommand = \"/model {{model}}\"\nverified = false\n");
+        let adapter = Adapter::from_toml("example-agent", &unverified).unwrap();
+        assert_eq!(adapter.model_switch_command("gpt-5.5"), None);
+
+        let missing = format!("{VALID}\n[model_switch]\ncommand = \"/model\"\nverified = true\n");
+        let error = Adapter::from_toml("example-agent", &missing).unwrap_err();
+        assert!(error.to_string().contains("{model} placeholder"));
+
+        let multiline = format!(
+            "{VALID}\n[model_switch]\ncommand = \"/model {{model}}\\nnext\"\nverified = true\n"
+        );
+        let error = Adapter::from_toml("example-agent", &multiline).unwrap_err();
+        assert!(error.to_string().contains("single line"));
     }
 
     #[test]

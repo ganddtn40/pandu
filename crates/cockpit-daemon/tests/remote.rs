@@ -465,6 +465,12 @@ fn request_body(path: &str) -> Option<Value> {
     if path.ends_with("/prompt") {
         return Some(json!({ "text": "hello" }));
     }
+    if path.ends_with("/model/switch") {
+        return Some(json!({ "model": "gpt-5.5" }));
+    }
+    if path.ends_with("/model") {
+        return Some(json!({ "model": "gpt-5.5" }));
+    }
     if path == "/api/remote/pair/claim" {
         return Some(json!({
             "code": "00000000000000000000000000000000",
@@ -619,6 +625,21 @@ async fn every_remote_endpoint_enforces_its_scope() {
                 "{path} must require a token"
             );
             daemon.state.remote.clear_auth_failures("auth:127.0.0.1");
+        }
+
+        if endpoint.scope == "host-only" {
+            for token in [&viewer.token, &full.token] {
+                let response =
+                    send_remote(&client, endpoint.method, &url, Some(token), body_ref).await;
+                assert_eq!(
+                    response.status(),
+                    StatusCode::FORBIDDEN,
+                    "{path} must always reject remote devices"
+                );
+                let payload: Value = response.json().await.unwrap();
+                assert_eq!(payload["error"]["code"], "host_only");
+            }
+            continue;
         }
 
         let as_viewer = send_remote(

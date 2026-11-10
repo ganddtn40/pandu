@@ -213,7 +213,7 @@ manual-only, with the exact path and steps shown in the UI.
 | --- | --- | --- | --- |
 | **Claude Code** | Yes | Yes | Skills: `~/.claude/skills`, `.claude/skills`. MCP: `.mcp.json` (`mcpServers`). User-scope `~/.claude.json` is manual-only because it also holds app state. |
 | **OpenCode** | Yes | Yes | Skills: `~/.config/opencode/skills`, `.opencode/skills`. MCP: `~/.config/opencode/opencode.json(c)`, `opencode.json(c)`, `.opencode/opencode.json(c)` (`mcp.servers`, JSONC). |
-| **Codex CLI** | Manual only | Yes | MCP: `~/.codex/config.toml`, `.codex/config.toml` (`[mcp_servers.<name>]`). No verified skill folder in this build. |
+| **Codex CLI** | Yes | Yes | Skills: `~/.agents/skills`, `.agents/skills`. MCP: `~/.codex/config.toml`, `.codex/config.toml` (`[mcp_servers.<name>]`). Codex also reads ancestor `.agents/skills` and admin `/etc/codex/skills`; Cockpit writes only the user or project path. |
 | Other adapters | Manual only | Manual only | No verified market target; Cockpit refuses to guess. |
 
 Scope:

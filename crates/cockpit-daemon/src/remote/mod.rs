@@ -874,6 +874,7 @@ impl RemoteAccess {
             "pairing" => "A device is waiting for pairing confirmation.",
             "prompt" => "A paired device sent a prompt that needs host confirmation.",
             "approval" => "A paired device needs a decision.",
+            "context" => "An agent is close to filling its context window.",
             _ => "Cockpit needs you at the computer.",
         };
         let url = format!("{}/{}", status.server.trim_end_matches('/'), topic);
@@ -952,6 +953,18 @@ impl RemoteAccess {
                 path: "/api/remote/sessions/{id}/steps",
                 scope: "view:content",
                 note: "Captured steps, prompts, and responses",
+            },
+            EndpointScope {
+                method: "POST",
+                path: "/api/remote/sessions/{id}/model",
+                scope: "host-only",
+                note: "Always rejected: model and effort overrides are host-only",
+            },
+            EndpointScope {
+                method: "POST",
+                path: "/api/remote/sessions/{id}/model/switch",
+                scope: "host-only",
+                note: "Always rejected: PTY model switches are host-only",
             },
             EndpointScope {
                 method: "GET",
@@ -1249,7 +1262,7 @@ mod tests {
             assert!(
                 matches!(
                     endpoint.scope,
-                    "view:status" | "view:content" | "respond" | "prompt" | "none"
+                    "view:status" | "view:content" | "respond" | "prompt" | "none" | "host-only"
                 ),
                 "unexpected scope {}",
                 endpoint.scope

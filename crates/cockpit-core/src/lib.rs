@@ -8,6 +8,7 @@
 pub mod adapter;
 pub mod agent;
 pub mod collector;
+pub mod context;
 pub mod cost;
 pub mod guard;
 pub mod ids;

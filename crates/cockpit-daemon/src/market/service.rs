@@ -47,16 +47,92 @@ const BUNDLED_REVOKED: &str = include_str!("../../../../registry/revoked.test.js
 const BUNDLED_REVOKED: &str = include_str!("../../../../registry/revoked.json");
 const BUNDLED_ENTRIES: &[(&str, &str)] = &[
     (
-        "skills/example-commit-messages.yaml",
-        include_str!("../../../../registry/skills/example-commit-messages.yaml"),
+        "skills/algorithmic-art.yaml",
+        include_str!("../../../../registry/skills/algorithmic-art.yaml"),
+    ),
+    (
+        "skills/brand-guidelines.yaml",
+        include_str!("../../../../registry/skills/brand-guidelines.yaml"),
+    ),
+    (
+        "skills/canvas-design.yaml",
+        include_str!("../../../../registry/skills/canvas-design.yaml"),
     ),
     (
         "skills/example-changelog-writer.yaml",
         include_str!("../../../../registry/skills/example-changelog-writer.yaml"),
     ),
     (
+        "skills/example-commit-messages.yaml",
+        include_str!("../../../../registry/skills/example-commit-messages.yaml"),
+    ),
+    (
+        "skills/frontend-design.yaml",
+        include_str!("../../../../registry/skills/frontend-design.yaml"),
+    ),
+    (
+        "skills/internal-comms.yaml",
+        include_str!("../../../../registry/skills/internal-comms.yaml"),
+    ),
+    (
+        "skills/mcp-builder.yaml",
+        include_str!("../../../../registry/skills/mcp-builder.yaml"),
+    ),
+    (
+        "skills/skill-creator.yaml",
+        include_str!("../../../../registry/skills/skill-creator.yaml"),
+    ),
+    (
+        "skills/slack-gif-creator.yaml",
+        include_str!("../../../../registry/skills/slack-gif-creator.yaml"),
+    ),
+    (
+        "skills/theme-factory.yaml",
+        include_str!("../../../../registry/skills/theme-factory.yaml"),
+    ),
+    (
+        "skills/web-artifacts-builder.yaml",
+        include_str!("../../../../registry/skills/web-artifacts-builder.yaml"),
+    ),
+    (
+        "skills/webapp-testing.yaml",
+        include_str!("../../../../registry/skills/webapp-testing.yaml"),
+    ),
+    (
+        "mcp/context7.yaml",
+        include_str!("../../../../registry/mcp/context7.yaml"),
+    ),
+    (
         "mcp/example-weather.yaml",
         include_str!("../../../../registry/mcp/example-weather.yaml"),
+    ),
+    (
+        "mcp/fetch.yaml",
+        include_str!("../../../../registry/mcp/fetch.yaml"),
+    ),
+    (
+        "mcp/git.yaml",
+        include_str!("../../../../registry/mcp/git.yaml"),
+    ),
+    (
+        "mcp/github-mcp-remote.yaml",
+        include_str!("../../../../registry/mcp/github-mcp-remote.yaml"),
+    ),
+    (
+        "mcp/github-mcp-server.yaml",
+        include_str!("../../../../registry/mcp/github-mcp-server.yaml"),
+    ),
+    (
+        "mcp/playwright.yaml",
+        include_str!("../../../../registry/mcp/playwright.yaml"),
+    ),
+    (
+        "mcp/sequential-thinking.yaml",
+        include_str!("../../../../registry/mcp/sequential-thinking.yaml"),
+    ),
+    (
+        "mcp/time.yaml",
+        include_str!("../../../../registry/mcp/time.yaml"),
     ),
 ];
 
@@ -1133,10 +1209,18 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(registry.entries.len(), 3);
-        for entry in &registry.entries {
-            assert!(entry.example);
-        }
+        // Debug builds bundle the seeded test index; release builds still carry
+        // the production index, which has not been reseeded yet.
+        let expected = if cfg!(debug_assertions) { 22 } else { 3 };
+        assert_eq!(registry.entries.len(), expected);
+        assert_eq!(
+            registry
+                .entries
+                .iter()
+                .filter(|entry| entry.example)
+                .count(),
+            3
+        );
         assert_eq!(registry.index.key_id, REGISTRY_KEY_ID);
     }
 
@@ -1175,7 +1259,9 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(registry.entries.is_empty());
+        let expected = if cfg!(debug_assertions) { 19 } else { 0 };
+        assert_eq!(registry.entries.len(), expected);
+        assert!(registry.entries.iter().all(|entry| !entry.example));
     }
 
     #[test]

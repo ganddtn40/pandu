@@ -1,0 +1,78 @@
+schema_version: 1
+id: "playwright"
+name: "Playwright MCP"
+kind: "mcp"
+version: "0.0.85"
+short_description: "Drive a real browser through Playwright to inspect pages, click, type, take screenshots, and debug UI behavior."
+long_description: "An MCP server that drives a real browser with Playwright. It exposes tools for navigation, clicking, typing, snapshots, screenshots, console logs, and network requests."
+categories:
+  - "testing"
+tags:
+  - "browser"
+  - "playwright"
+  - "automation"
+agents:
+  - "claude-code"
+  - "codex"
+  - "opencode"
+source:
+  repo: "https://github.com/microsoft/playwright-mcp"
+  commit: "4e0794dd0a0176519830a5ed27b491137cf9338f"
+  content_sha256: "8f573529e0ebcb84822236a6ceb629cfeec4d6fc8f7dab0992973a7fe28d53fa"
+  files:
+    - "LICENSE"
+    - "README.md"
+    - "cli.js"
+    - "index.js"
+    - "package.json"
+license: "Apache-2.0"
+trust: "official"
+reviewer:
+  name: "Cockpit maintainers"
+  date: "2026-11-10"
+  ci_passed: true
+reviewed_on: "2026-11-10"
+permissions:
+  - id: "network"
+    description: "Navigates to web pages and local applications."
+  - id: "filesystem:read"
+    description: "Reads browser profile data and page content."
+  - id: "filesystem:write"
+    description: "Writes screenshots, traces, and browser profile data."
+mcp:
+  transport: "stdio"
+  command: "npx"
+  args:
+    - "-y"
+    - "@playwright/mcp@0.0.85"
+  install:
+    - agent: "claude-code"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "codex"
+      scopes:
+        - "user"
+        - "project"
+    - agent: "opencode"
+      scopes:
+        - "user"
+        - "project"
+readme: |
+  # Playwright MCP
+
+  An MCP server that drives a real browser with Playwright. It exposes tools for navigation, clicking, typing, form filling, page snapshots, screenshots, console logs, and network inspection.
+
+  The server launches a browser when the agent starts it. The Playwright browser binaries must already be installed on the machine. The package is pinned to 0.0.85.
+
+  ## Command
+
+  npx -y @playwright/mcp@0.0.85
+
+  Cockpit writes this command to the agent configuration. The agent runs it when it starts the server.
+
+  ## Source and license
+
+  Source: https://github.com/microsoft/playwright-mcp at commit 4e0794dd0a0176519830a5ed27b491137cf9338f. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
+
+  The repository LICENSE is Apache-2.0. Cockpit records the source tree hash and license evidence in the entry.
