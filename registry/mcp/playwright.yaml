@@ -28,7 +28,7 @@ source:
 license: "Apache-2.0"
 trust: "official"
 reviewer:
-  name: "Cockpit maintainers"
+  name: "Pandu maintainers"
   date: "2026-11-10"
   ci_passed: true
 reviewed_on: "2026-11-10"
@@ -69,10 +69,10 @@ readme: |
 
   npx -y @playwright/mcp@0.0.85
 
-  Cockpit writes this command to the agent configuration. The agent runs it when it starts the server.
+  Pandu writes this command to the agent configuration. The agent runs it when it starts the server.
 
   ## Source and license
 
   Source: https://github.com/microsoft/playwright-mcp at commit 4e0794dd0a0176519830a5ed27b491137cf9338f. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
 
-  The repository LICENSE is Apache-2.0. Cockpit records the source tree hash and license evidence in the entry.
+  The repository LICENSE is Apache-2.0. Pandu records the source tree hash and license evidence in the entry.

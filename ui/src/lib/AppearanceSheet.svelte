@@ -4,6 +4,7 @@
   import { ACCENTS, accentFor } from './design/accents';
   import { appearanceState, closeAppearance } from './design/appearance.svelte';
   import { designState, resetDesign, setDesign } from './design/design.svelte';
+  import { PRODUCT_NAME, SLUG } from './brand';
   import {
     designFromTheme,
     parseThemeText,
@@ -61,7 +62,7 @@
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'pandu-theme.json';
+    anchor.download = `${SLUG}-theme.json`;
     anchor.click();
     URL.revokeObjectURL(url);
     toast('Theme exported as JSON.');
@@ -112,7 +113,7 @@
 
   function reset(): void {
     resetDesign();
-    toast('Appearance reset to the Pandu default.');
+    toast(`Appearance reset to the ${PRODUCT_NAME} default.`);
   }
 </script>
 

@@ -22,6 +22,7 @@
   import { routeLabel } from './lib/router';
   import { initRouter, routeState } from './lib/router.svelte';
   import { initGlass, type GlassController } from './glass/engine';
+  import { PRODUCT_NAME } from './lib/brand';
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let glass: GlassController | undefined;
@@ -56,7 +57,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <svelte:head>
-  <title>{routeLabel(routeState.path)} · Pandu</title>
+  <title>{routeLabel(routeState.path)} · {PRODUCT_NAME}</title>
 </svelte:head>
 
 <canvas bind:this={canvas} class="glass-canvas" aria-hidden="true"></canvas>
@@ -70,7 +71,7 @@
 
     <div class="workspace">
       <SideRail />
-      <main class="panel" aria-label="Pandu">
+      <main class="panel" aria-label={PRODUCT_NAME}>
         {#if dev && routeState.path === '/glass-preview'}
           <GlassPreview />
         {:else if routeState.path === '/inbox'}

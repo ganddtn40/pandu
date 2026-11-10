@@ -35,7 +35,7 @@ verified = true
 
 # User-scope MCP servers live in ~/.claude.json; project scope uses .mcp.json.
 # Checked against https://docs.claude.com/en/docs/claude-code/mcp
-# ~/.claude.json also holds Claude Code's app state, so Cockpit never edits it.
+# ~/.claude.json also holds Claude Code's app state, so Pandu never edits it.
 # Use the project scope (.mcp.json) or Claude's own `claude mcp add` command.
 [mcp]
 user_paths = ["~/.claude.json"]

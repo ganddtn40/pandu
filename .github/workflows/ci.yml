@@ -38,4 +38,4 @@ jobs:
         run: cargo test --workspace
 
       - name: Audit the model registry
-        run: cargo run --quiet -p cockpit-cli -- models audit
+        run: cargo run --quiet -p pandu-cli -- models audit

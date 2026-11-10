@@ -30,7 +30,7 @@ source:
 license: "Apache-2.0"
 trust: "official"
 reviewer:
-  name: "Cockpit maintainers"
+  name: "Pandu maintainers"
   date: "2026-11-10"
   ci_passed: true
 reviewed_on: "2026-11-10"
@@ -65,10 +65,10 @@ readme: |
 
   Builds a multi-component HTML artifact with React, Tailwind CSS, and shadcn/ui. The skill initializes a frontend project, adds components, and bundles the result into a single HTML file.
 
-  It uses two shell helpers: one to initialize the project and one to bundle the artifact. It may install npm dependencies while building. Cockpit does not run these scripts during install.
+  It uses two shell helpers: one to initialize the project and one to bundle the artifact. It may install npm dependencies while building. Pandu does not run these scripts during install.
 
   ## Source and license
 
   Source: https://github.com/anthropics/skills at commit 2c5958ecac7cee2b583967a2c4981d0f4a75c579. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
 
-  The skill folder carries its own Apache-2.0 LICENSE.txt. Cockpit copies that folder into the agent skill directory and never executes the skill.
+  The skill folder carries its own Apache-2.0 LICENSE.txt. Pandu copies that folder into the agent skill directory and never executes the skill.

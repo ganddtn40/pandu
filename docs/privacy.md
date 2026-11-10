@@ -2,9 +2,9 @@
 
 Status: Phase 9. Branch `rewrite`.
 
-Cockpit is a local tool. There is no account, no cloud sync, no telemetry, and no
+Pandu is a local tool. There is no account, no cloud sync, no telemetry, and no
 background upload. The daemon binds to a loopback address, records flights in
-SQLite under `$COCKPIT_HOME`, and sends a network request only when the user asks
+SQLite under `$PANDU_HOME`, and sends a network request only when the user asks
 for one: a proxied model request, an explicit market refresh or install, or the
 optional ntfy notification the user configured.
 
@@ -23,7 +23,7 @@ machine, and how to delete it.
 | Guard events and decisions | SQLite | Request, rule, severity, nonce (cleared on resolution), and who decided. |
 | Agent events | SQLite | Attention events such as permission, question, auth required, done, and error. The message is stored; terminal output is not. |
 | Remote audit log | SQLite | Hash-chained entries for pairing, scopes, approvals, prompts (size and hash only), model overrides and switches, and remote on/off. |
-| Market state | SQLite and files under `$COCKPIT_HOME` | Registry cache, install manifests, backups, and settings. Installed skills and MCP configuration are written to the paths the user previewed. |
+| Market state | SQLite and files under `$PANDU_HOME` | Registry cache, install manifests, backups, and settings. Installed skills and MCP configuration are written to the paths the user previewed. |
 | Appearance and UI preferences | Browser `localStorage` | Theme, wallpaper, language, widget layout, onboarding flag, and notification preferences. The wallpaper is stored on this device only. |
 | Remote device token | Browser `localStorage` on the remote device | The host stores only a SHA-256 hash. |
 
@@ -49,7 +49,7 @@ read it; see `docs/security.md`.
 
 ## 3. Context meter
 
-The context meter is derived from data Cockpit already has:
+The context meter is derived from data Pandu already has:
 
 - The provider's reported prompt usage, when the response includes it.
 - Otherwise an estimate from the recorded request body: system/instructions,
@@ -68,7 +68,7 @@ prompt, code, path, or token count.
 
 ## 4. Model table and overrides
 
-`models.json` is compiled into the binary. Cockpit does not fetch model prices or
+`models.json` is compiled into the binary. Pandu does not fetch model prices or
 limits at runtime, and it does not send the table anywhere.
 
 A model override is:
@@ -96,8 +96,8 @@ an estimate, not a quote.
 | Remote listener | The scoped remote dashboard and API, over the configured mode | Only while remote access is on. |
 | Desktop toast | Event type, agent name, and project name, to the OS notification surface | Only for attention events, done, and error, and only when toasts are enabled. Demo mode never sends one. |
 
-Cockpit does not send analytics, crash reports, usage counts, or a heartbeat. It
-does not proxy through a Cockpit-operated server. There is no Cockpit account.
+Pandu does not send analytics, crash reports, usage counts, or a heartbeat. It
+does not proxy through a Pandu-operated server. There is no Pandu account.
 
 ## 6. Remote access
 
@@ -123,15 +123,15 @@ The full threat model and the endpoints × scopes table are in
 
 ## 7. Retention and deletion
 
-This build does not prune flights automatically. To delete everything Cockpit
+This build does not prune flights automatically. To delete everything Pandu
 stores:
 
 1. Stop the daemon and any running agent.
-2. Remove `$COCKPIT_HOME` (default `~/.cockpit/v2`). This deletes the SQLite
+2. Remove `$PANDU_HOME` (default `~/.pandu/v2`). This deletes the SQLite
    database, market cache, install manifests, and backups.
 3. Remove installed market files and configuration entries first if you want to
    keep the agent configuration clean; uninstalling from the Market screen removes
-   only files Cockpit can prove it created.
+   only files Pandu can prove it created.
 4. Clear the site's `localStorage` in the browser to remove appearance,
    onboarding, and any remote token on that device.
 5. If remote access was enabled, revoke devices or use Panic before deleting the
@@ -139,11 +139,11 @@ stores:
    stop authenticating, but the listener configuration is gone with it.
 
 Deleting a single flight is not exposed in this build. Use the database backup
-you keep, or remove `$COCKPIT_HOME` and start fresh.
+you keep, or remove `$PANDU_HOME` and start fresh.
 
 ## 8. Children and sensitive data
 
-Cockpit is a developer tool. It is not designed for children's data, health data,
+Pandu is a developer tool. It is not designed for children's data, health data,
 or regulated data. Because request bodies and terminal output can contain
-anything the agent sees, treat the Cockpit database with the same care as the
+anything the agent sees, treat the Pandu database with the same care as the
 repositories and credentials the agent can reach.

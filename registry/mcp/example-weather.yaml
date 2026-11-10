@@ -6,8 +6,8 @@ version: 1.0.0
 short_description: A read-only example MCP server that returns current conditions and a short forecast.
 long_description: >-
   An example fixture that shows the MCP entry shape, a pinned package version,
-  required environment variable names, and a secret Cockpit asks for locally.
-  The package name is illustrative and is not published. Cockpit writes the
+  required environment variable names, and a secret Pandu asks for locally.
+  The package name is illustrative and is not published. Pandu writes the
   agent configuration only; the agent runs the command when it starts.
 categories:
   - data
@@ -18,7 +18,7 @@ agents:
   - codex
   - opencode
 source:
-  repo: https://example.invalid/cockpit-examples/weather-mcp
+  repo: https://example.invalid/pandu-examples/weather-mcp
   commit: "3333333333333333333333333333333333333333"
   content_sha256: 74c3e17aacd5a76e1291ac92f5072aa8b2a73a31229ff533fcc2c59d9ae7b973
   files:
@@ -69,7 +69,7 @@ readme: |
 
   - `WEATHER_UNITS` selects metric or imperial output. Set it in the agent's
     environment before the agent starts.
-  - `WEATHER_API_KEY` is a secret. Cockpit asks for it locally at install time
+  - `WEATHER_API_KEY` is a secret. Pandu asks for it locally at install time
     and never stores it in the registry, the database, or the install manifest.
 
   ## Command
@@ -78,5 +78,5 @@ readme: |
   npx -y example-weather-mcp@1.0.0
   ```
 
-  The agent will run this command when it starts the server. Cockpit writes
+  The agent will run this command when it starts the server. Pandu writes
   configuration only and never executes the command itself.

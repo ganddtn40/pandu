@@ -1,6 +1,6 @@
 # Security policy
 
-Cockpit is a local flight recorder and control surface for AI coding agents.
+Pandu is a local flight recorder and control surface for AI coding agents.
 It runs on the user's computer, stores data in a local SQLite database, and can
 observe, prompt, and approve activity in a terminal the user started. It is not
 a sandbox, an anti-malware product, or a certification.
@@ -21,7 +21,7 @@ The market and registry model is in [`docs/market.md`](docs/market.md).
 **Do not open a public issue for a security problem.** Use GitHub's private
 vulnerability reporting:
 
-<https://github.com/ganddtn40/cockpit/security/advisories/new>
+<https://github.com/ganddtn40/pandu/security/advisories/new>
 
 If private advisories are unavailable, contact the maintainer through the
 GitHub profile linked from the repository and ask for a private channel. Do not
@@ -30,7 +30,7 @@ message; describe the impact and ask how to share evidence.
 
 Please include:
 
-- the Cockpit version or commit, the operating system, and whether the build is
+- the Pandu version or commit, the operating system, and whether the build is
   from source or a package;
 - the affected surface: daemon HTTP API, remote listener, PTY, proxy, adapters,
   notifications, market/registry, or UI;
@@ -56,14 +56,14 @@ Please include:
   the audit chain.
 - Market and registry: signature verification, index and revocation handling,
   archive extraction, config edits, install manifests, uninstall, and undo.
-- Adapter files and the claims Cockpit makes about an agent.
+- Adapter files and the claims Pandu makes about an agent.
 - Anything that lets a remote device, a web page, an agent, or an installed
   market entry cross a boundary described in `docs/security.md`.
 
 ### Out of scope
 
 - Vulnerabilities in a third-party agent, MCP server, package, or model provider
-  itself. Report those upstream. If Cockpit's install or display path makes the
+  itself. Report those upstream. If Pandu's install or display path makes the
   issue worse, that part is in scope.
 - An attacker who already runs code as the same local user. Same-user malware
   can read the database, the agent's environment, and the terminal.
@@ -93,7 +93,7 @@ designed to live in its own repository; this process applies wherever the signed
    The index and revocation list are re-signed with the offline maintainer key
    and published together.
 5. Clients that refresh the registry refuse the revoked entry, mark an installed
-   copy as **Revoked**, and offer one-click removal. Cockpit does not silently
+   copy as **Revoked**, and offer one-click removal. Pandu does not silently
    delete an installed copy; the user confirms the removal.
 6. A GitHub security advisory is published for issues that affect users, with
    the entry id, affected versions, and the removal step. The advisory may be
@@ -110,7 +110,7 @@ rotation overlap, and step-by-step compromise procedure is in
 [`docs/registry/KEYS.md`](docs/registry/KEYS.md). If it is exposed:
 
 1. Stop publishing with the old key.
-2. Generate a new Ed25519 key, embed the new public key in a Cockpit release,
+2. Generate a new Ed25519 key, embed the new public key in a Pandu release,
    and publish the new key id.
 3. Re-sign the index and revocation list with the new key.
 4. Publish an advisory that names the old key id and the release that trusts the

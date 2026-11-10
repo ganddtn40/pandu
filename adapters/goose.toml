@@ -13,7 +13,7 @@ version_args = ["--version"]
 protocols = ["openai-chat"]
 base_url_env = ["OPENAI_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY"]
-setup_note = "Use an OpenAI-compatible provider whose base URL points at Cockpit."
+setup_note = "Use an OpenAI-compatible provider whose base URL points at Pandu."
 verified = false
 
 [log_watch]

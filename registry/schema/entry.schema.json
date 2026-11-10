@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ganddtn40/cockpit/registry/schema/entry.schema.json",
-  "title": "Cockpit market entry",
+  "$id": "https://github.com/ganddtn40/pandu/registry/schema/entry.schema.json",
+  "title": "Pandu market entry",
   "description": "One signed-registry entry. The index binds this file by SHA-256; the index and revocation list are bound by an Ed25519 signature.",
   "type": "object",
   "additionalProperties": false,

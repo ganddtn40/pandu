@@ -1,6 +1,6 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig, type Plugin } from 'vite';
-import brand from '../brand.json';
+import brand from '../brand.json' with { type: 'json' };
 
 /**
  * The inline boot script in `index.html` must run before the first paint, so

@@ -1,4 +1,5 @@
 import { daemonApi, DaemonError, liveSocketUrl } from './client';
+import { PRODUCT_NAME } from '../brand';
 import type {
   AdapterStatus,
   AgentEvent,
@@ -67,7 +68,7 @@ let refreshAgain = false;
 function errorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'The Pandu daemon is not reachable.';
+  return `The ${PRODUCT_NAME} daemon is not reachable.`;
 }
 
 /**

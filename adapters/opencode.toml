@@ -13,7 +13,7 @@ version_args = ["--version"]
 protocols = ["openai-chat", "anthropic"]
 base_url_env = ["OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-setup_note = "Point the OpenAI or Anthropic base URL at Cockpit and keep a local placeholder key."
+setup_note = "Point the OpenAI or Anthropic base URL at Pandu and keep a local placeholder key."
 verified = false
 
 [log_watch]

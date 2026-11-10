@@ -1,8 +1,8 @@
-# Contributing to the Cockpit registry
+# Contributing to the Pandu registry
 
 The registry is the catalogue behind **Market**. It is intentionally small,
 signed, and boring: a YAML file per entry, a signed index that binds every file
-by SHA-256, and a signed revocation list. Cockpit refuses the whole registry if a
+by SHA-256, and a signed revocation list. Pandu refuses the whole registry if a
 signature or an entry hash does not verify.
 
 This guide is for contributors and reviewers. The runtime model is in
@@ -57,7 +57,7 @@ The schema is authoritative. The highlights:
 | `source.repo` | Real entries: exactly `https://github.com/<owner>/<repo>`. Example fixtures: exactly `https://example.invalid/<owner>/<repo>`, a reserved non-registrable host. |
 | `source.commit` | Full lowercase 40-character commit SHA. |
 | `source.content_sha256` | Hash of the pinned tree, computed with `registry/hash.mjs`. |
-| `source.files` | At most 500 paths. This is a review aid, not an install filter: Cockpit installs every file in the pinned tree. |
+| `source.files` | At most 500 paths. This is a review aid, not an install filter: Pandu installs every file in the pinned tree. |
 | `license` | SPDX identifier from the allowlist below. |
 | `trust` | `unreviewed`, `community-reviewed`, or `official`. |
 | `permissions` | At most 16 declarations. Describe what the entry actually does. |
@@ -128,12 +128,12 @@ readme: |
   Turns a list of merged changes into short, player-facing notes.
 ```
 
-Cockpit only writes a skill when the adapter has a verified `[skills]` section.
+Pandu only writes a skill when the adapter has a verified `[skills]` section.
 If it does not, the UI shows manual instructions and writes nothing.
 
 ### MCP servers
 
-An MCP entry is a recipe, not a copy of the server. Cockpit edits the agent's
+An MCP entry is a recipe, not a copy of the server. Pandu edits the agent's
 configuration and never runs the command.
 
 ```yaml
@@ -175,7 +175,7 @@ mcp:
 readme: |
   # Weather MCP
 
-  Requires `WEATHER_API_KEY`. Cockpit asks for it locally and writes it only to
+  Requires `WEATHER_API_KEY`. Pandu asks for it locally and writes it only to
   the agent configuration.
 ```
 
@@ -190,9 +190,9 @@ Rules for MCP entries:
 - `env` and `secrets` list **names only**. Values are asked for locally at
   install time. They are never stored in the registry, the database, or the
   install manifest.
-- `secrets` names the values Cockpit asks for. `env` is the full set of names
+- `secrets` names the values Pandu asks for. `env` is the full set of names
   the server expects. Both lists must be unique and valid environment names;
-  Cockpit rejects a duplicate. OpenCode always receives `{env:NAME}` references,
+  Pandu rejects a duplicate. OpenCode always receives `{env:NAME}` references,
   never a literal secret.
 - The exact command and arguments are shown in the install preview, with a
   warning that the agent will execute third-party code when it starts the
@@ -223,20 +223,20 @@ working copy with uncommitted changes.
 Offline (schema, signatures, index hashes, and local example fixtures):
 
 ```powershell
-cargo run -p cockpit-cli -- market check --dir registry
+cargo run -p pandu-cli -- market check --dir registry
 ```
 
 Online (also downloads each non-example skill at its pinned commit, verifies the
 content hash, and scans every file):
 
 ```powershell
-cargo run -p cockpit-cli -- market check --dir registry --online
+cargo run -p pandu-cli -- market check --dir registry --online
 ```
 
 With link checks:
 
 ```powershell
-cargo run -p cockpit-cli -- market check --dir registry --online --links
+cargo run -p pandu-cli -- market check --dir registry --online --links
 ```
 
 While your entry is not in the signed index yet, use the staged check. It reads
@@ -245,7 +245,7 @@ schema, verifies example fixture hashes, downloads pinned sources, and runs the
 static scans. It does **not** make the entry trusted:
 
 ```powershell
-cargo run -p cockpit-cli -- market check --dir registry --staged --online --links
+cargo run -p pandu-cli -- market check --dir registry --staged --online --links
 ```
 
 CI runs the staged check on pull requests and the signed check on `main` and
@@ -277,13 +277,13 @@ model, offline generation, rotation, and compromise procedure is in
    test key:
 
    ```powershell
-   cargo run --release -p cockpit-cli -- market sign --key C:\secure\private.pem --dir registry
+   cargo run --release -p pandu-cli -- market sign --key C:\secure\private.pem --dir registry
    ```
 
 4. Run the signed check again from a release build:
 
    ```powershell
-   cargo run --release -p cockpit-cli -- market check --dir registry --online --links
+   cargo run --release -p pandu-cli -- market check --dir registry --online --links
    ```
 
 5. If a YAML file changed, also regenerate and commit the test variant so
@@ -315,7 +315,7 @@ off on the rest.
 - [ ] The commit is a full 40-character SHA, not a branch or tag, and the
       reviewed tree is that commit.
 - [ ] `source.files` lists the intended files and no unexpected file is in the
-      tree. Remember that Cockpit installs the whole tree.
+      tree. Remember that Pandu installs the whole tree.
 - [ ] The license is on the SPDX allowlist and matches the repository.
 - [ ] `source.content_sha256` matches `node registry/hash.mjs` for the pinned
       tree.
@@ -336,7 +336,7 @@ off on the rest.
 - [ ] The declared permissions match the behaviour. A skill that reads files
       declares `filesystem:read`; one that needs a key declares `secrets`.
 - [ ] The entry does not ask the agent to disable safety rules, approve itself,
-      or modify Cockpit.
+      or modify Pandu.
 - [ ] For MCP: the command is a bare executable, the package version is exact,
       the URL is HTTPS, and every environment value is a name, not a value.
 - [ ] For MCP: the server's own documentation matches the command and arguments.
@@ -346,12 +346,12 @@ off on the rest.
 - [ ] The install preview in a disposable home writes only the expected paths.
 - [ ] The preview diff is understandable and does not overwrite unrelated keys.
 - [ ] The configuration edit preserves comments and unknown keys.
-- [ ] Uninstall removes only Cockpit-created files and leaves user edits alone.
+- [ ] Uninstall removes only Pandu-created files and leaves user edits alone.
 - [ ] Undo restores the previous state.
 - [ ] An update shows the diff against the installed version; it is never
       automatic.
 - [ ] The entry does not require a package manager to run during install.
-      Cockpit only writes files and configuration.
+      Pandu only writes files and configuration.
 
 ### Tier promotion
 
@@ -379,7 +379,7 @@ To revoke an entry, add it to `registry/revoked.json`:
 ```
 
 Then sign and publish both files. The client marks an installed copy as
-**Revoked**, warns on every refresh, and offers one-click removal. Cockpit does
+**Revoked**, warns on every refresh, and offers one-click removal. Pandu does
 not delete installed files silently. The public process, including the
 key-compromise path, is in [`SECURITY.md`](../../SECURITY.md).
 

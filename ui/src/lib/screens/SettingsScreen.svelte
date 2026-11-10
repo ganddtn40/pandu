@@ -10,6 +10,7 @@
   } from '../api/daemon.svelte';
   import type { AdapterStatus } from '../api/types';
   import { openAddAgent } from '../add-agent.svelte';
+  import { CLI_COMMAND } from '../brand';
   import { copyText } from '../clipboard';
   import { ACCENTS, accentFor } from '../design/accents';
   import { openAppearance } from '../design/appearance.svelte';
@@ -78,7 +79,7 @@
   }
 
   function commandFor(adapter: AdapterStatus): string {
-    return `pandu run -- ${adapter.command}`;
+    return `${CLI_COMMAND} run -- ${adapter.command}`;
   }
 
   async function copy(adapter: AdapterStatus): Promise<void> {

@@ -5,7 +5,7 @@ import {
   remoteToken,
   setRemoteToken,
 } from './client';
-import { WS_SUBPROTOCOL_PREFIX } from '../brand';
+import { PRODUCT_NAME, WS_SUBPROTOCOL_PREFIX } from '../brand';
 import type {
   AgentEvent,
   AgentSession,
@@ -61,7 +61,7 @@ let refreshing = false;
 export function remoteErrorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'Pandu could not reach the host.';
+  return `${PRODUCT_NAME} could not reach the host.`;
 }
 
 function clearSession(error: string | null): void {

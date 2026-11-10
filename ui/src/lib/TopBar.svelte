@@ -3,6 +3,7 @@
   import Logo from './Logo.svelte';
   import { activeSessions, daemonState, inboxAttentionCount } from './api/daemon.svelte';
   import { openAppearance } from './design/appearance.svelte';
+  import { PRODUCT_NAME } from './brand';
   import { t } from './i18n/i18n.svelte';
   import { openQuickPrompt } from './quick-prompt.svelte';
   import { navigate } from './router.svelte';
@@ -15,9 +16,9 @@
 </script>
 
 <header class="topbar float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none" data-glass-neutral>
-  <a class="brand" href="/" data-route aria-label="Pandu home">
+  <a class="brand" href="/" data-route aria-label={`${PRODUCT_NAME} home`}>
     <Logo size={30} />
-    <span class="brand__name">Pandu</span>
+    <span class="brand__name">{PRODUCT_NAME}</span>
   </a>
 
   <button class="search" type="button" onclick={openQuickPrompt} aria-label={t('topbar.search')}>

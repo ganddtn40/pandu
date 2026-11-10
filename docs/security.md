@@ -1,4 +1,4 @@
-# Cockpit security model
+# Pandu security model
 
 Status: Phase 9 (verified models, host-only overrides, context meter). Branch
 `rewrite`.
@@ -7,7 +7,7 @@ not protect yet. It is a working threat model, not a certification.
 
 ## 1. Scope and assets
 
-Cockpit runs on the user's computer. It records agent activity, holds live
+Pandu runs on the user's computer. It records agent activity, holds live
 terminal sessions, asks the user for approvals, and can send a notification when
 an agent needs attention.
 
@@ -33,7 +33,7 @@ terminal the user started, but it cannot start a command, read a credential
 store, or put prompts and code into a notification.** Remote access is opt-in
 and host-controlled: a paired device can see, respond, or prompt within its
 scopes, but it can never manage the host, reach the model proxy, or complete an
-authentication prompt. The market is the one place Cockpit writes outside its
+authentication prompt. The market is the one place Pandu writes outside its
 own state: it copies files and edits agent configuration that the user
 previewed, and it never runs an installer, a package manager, or an MCP server.
 
@@ -51,16 +51,16 @@ previewed, and it never runs an installer, a package manager, or an MCP server.
 | Market | The signed registry, the pinned commit, and a local user confirming a preview | Every registry entry, every downloaded archive, every MCP command, and every README |
 
 The daemon is not a sandbox. The agent runs as the user, in the user's chosen
-working directory, with the user's environment. Cockpit observes that process;
+working directory, with the user's environment. Pandu observes that process;
 it does not contain it.
 
 ## 3. Protected now
 
 ### 3.1 Loopback-only network surface
 
-- `COCKPIT_HOST` must be a loopback address. `Config::from_env` rejects anything
+- `PANDU_HOST` must be a loopback address. `Config::from_env` rejects anything
   else, and `server::bind` checks again before binding.
-- `COCKPIT_ALLOWED_ORIGINS` only accepts loopback origins.
+- `PANDU_ALLOWED_ORIGINS` only accepts loopback origins.
 - CORS is an explicit allowlist: the daemon port, the Vite dev and preview ports
   (`5174`, `4174`), and configured loopback origins. The old permissive CORS
   layer is gone.
@@ -69,7 +69,7 @@ it does not contain it.
   hostname to `127.0.0.1`.
 - Every state-changing host route (`POST`, `PATCH`, `DELETE` under `/api`) must
   carry an allowed loopback `Origin`, `Content-Type: application/json`, and the
-  per-process CSRF token in `X-Cockpit-CSRF`. The token is generated at startup,
+  per-process CSRF token in `X-Pandu-CSRF`. The token is generated at startup,
   served only by the host listener at `GET /api/csrf`, and compared in constant
   time. A missing or foreign `Origin` is `origin_required`/`forbidden_origin`; a
   form or `text/plain` post is `content_type_required` (415); a missing or wrong
@@ -78,7 +78,7 @@ it does not contain it.
   revoke, or panic endpoints. The `/v1` model proxy is unaffected.
 - The UI and the API share the daemon origin, so no cross-origin read is needed
   in normal use. The UI fetches the CSRF token once, caches it, and retries after
-  a stale-token error; the CLI does the same for `cockpit pair` and the PTY
+  a stale-token error; the CLI does the same for `pandu pair` and the PTY
   control plane.
 - This section describes the host listener. The optional remote listener is a
   separate listener and router; see section 3.9.
@@ -90,10 +90,10 @@ Evidence: `config::tests::rejects_non_loopback_hosts`,
 
 ### 3.2 The PTY command boundary
 
-`cockpit run -- <agent>` is the only thing that creates a live session.
+`pandu run -- <agent>` is the only thing that creates a live session.
 
 - The CLI spawns exactly the program and arguments the user typed, in the
-  directory the user ran Cockpit from. There is no shell interpolation and no
+  directory the user ran Pandu from. There is no shell interpolation and no
   API-supplied command or working directory.
 - The daemon never spawns a process. It stores session metadata, queues
   keystrokes, and reads sanitized output.
@@ -110,8 +110,8 @@ Evidence: `config::tests::rejects_non_loopback_hosts`,
   Windows, ConPTY's cursor-position query (`ESC[6n`) is answered so the agent
   cannot hang before producing output.
 
-Evidence: `cockpit-cli::pty::tests::the_pty_runs_a_command_and_returns_its_output`,
-`cockpit-cli::pty::tests::killing_the_child_closes_the_pty_without_waiting_for_it`,
+Evidence: `pandu-cli::pty::tests::the_pty_runs_a_command_and_returns_its_output`,
+`pandu-cli::pty::tests::killing_the_child_closes_the_pty_without_waiting_for_it`,
 `integration::agent_control_relays_sanitized_output_and_queues_input`.
 
 ### 3.3 Agent output is untrusted text
@@ -142,7 +142,7 @@ Evidence: `agents::tests::strips_ansi_colors_and_cursor_movement`,
 Guard approvals are not a boolean the UI can replay.
 
 - A pending guard event gets a 256-bit random nonce and an expiry timestamp. The
-  default window is 120 seconds (`COCKPIT_GUARD_APPROVAL_MS`).
+  default window is 120 seconds (`PANDU_GUARD_APPROVAL_MS`).
 - A decision must match the event id, the nonce, and the session id.
 - Resolution is atomic: the store clears the nonce only when it still matches,
   so a second answer cannot resolve the same event.
@@ -180,9 +180,9 @@ Evidence: `agents::tests::detects_claude_permission_fixture`,
 - An `auth_required` event is shown as "Needs you at the computer".
 - While that event is open, the session screen hides the free-text answer box and
   offers only "I signed in at the computer".
-- Cockpit never asks for a password, API key, or OAuth token, and never stores or
-  forwards one as a Cockpit credential.
-- The user signs in in the agent's own terminal. Cockpit only sees the sanitized
+- Pandu never asks for a password, API key, or OAuth token, and never stores or
+  forwards one as a Pandu credential.
+- The user signs in in the agent's own terminal. Pandu only sees the sanitized
   terminal output.
 
 This is a product boundary, not a claim that terminal output can never contain a
@@ -208,7 +208,7 @@ Evidence: `agents::tests::notification_payload_has_no_content_fields`.
 
 ### 3.8 Local data and redaction
 
-- The database lives under `$COCKPIT_HOME` (default `~/.cockpit/v2`) and is
+- The database lives under `$PANDU_HOME` (default `~/.pandu/v2`) and is
   opened with SQLite WAL mode.
 - Proxy capture redacts sensitive headers and provider-token patterns before
   storage. Forwarded bytes are never modified.
@@ -234,14 +234,14 @@ token, or read the audit log.
 - **Health is not a fingerprint.** `/api/remote/health` answers only a trusted
   loopback caller or a request with a valid device token; everyone else gets the
   same 404 as an unknown path. The version is included only for an authenticated
-  device. The remote UI is detected by the `X-Cockpit-Remote: 1` marker header
+  device. The remote UI is detected by the `X-Pandu-Remote: 1` marker header
   instead of an unauthenticated health probe.
 - **Bind rules.** `Loopback` means off. Tailscale binds only the detected
   tailnet IPv4. Tunnel binds only `127.0.0.1` and requires an explicit public
   URL. LAN binds only the detected LAN IPv4 and always uses TLS. No mode binds
-  `0.0.0.0` by default. A daemon started with `COCKPIT_REMOTE_PORT=0` refuses to
+  `0.0.0.0` by default. A daemon started with `PANDU_REMOTE_PORT=0` refuses to
   start a remote listener.
-- **No auto-install or auto-start.** Cockpit only detects Tailscale and
+- **No auto-install or auto-start.** Pandu only detects Tailscale and
   cloudflared and prints the command to run. It never installs, starts, or
   bundles them. The remote listener does not restart after a daemon restart; the
   host must enable it again. Paired devices persist.
@@ -259,7 +259,7 @@ token, or read the audit log.
   `Authorization: Bearer` header, compared in constant time, and expires at the
   per-device deadline chosen at pairing (7, 14, 30, or 90 days; Tunnel defaults
   to 14, other modes to 30). The token rotates on use: the replacement rides in
-  `X-Cockpit-Token`, and the previous hash is accepted only during a 120-second
+  `X-Pandu-Token`, and the previous hash is accepted only during a 120-second
   overlap so concurrent requests cannot lock the device out. A host-initiated
   rotation invalidates the old token immediately. Revocation closes open
   WebSockets immediately.
@@ -296,12 +296,12 @@ token, or read the audit log.
   with `needs_host`; the device is told to go to the computer.
 - **Remote prompts.** The endpoint requires the Prompt scope, accepts at most
   2,000 characters (no NUL), and is limited to 6 per minute per device. A prompt
-  is only keystrokes into an already-running Cockpit-owned session; it cannot
+  is only keystrokes into an already-running Pandu-owned session; it cannot
   spawn a process or choose a directory. Host confirmation is on by default.
   The audit log stores only the size and a SHA-256 hash, never the text.
 - **WebSocket.** The live route is outside bearer auth and validates its own
   30-second single-use ticket from
-  `Sec-WebSocket-Protocol: cockpit.<ticket>`. It checks `Origin` on upgrade,
+  `Sec-WebSocket-Protocol: pandu.<ticket>`. It checks `Origin` on upgrade,
   re-checks scope and revocation on every message, and is closed by revocation
   or panic. Tokens never appear in the URL.
 - **Headers and origins.** Every remote response sets CSP,
@@ -327,14 +327,14 @@ token, or read the audit log.
   log. The log is exportable as JSON and never contains tokens, passwords, PINs,
   prompt text, or terminal output. Each entry stores the previous entry's hash
   and a SHA-256 hash over length-prefixed fields, including the raw detail JSON.
-  `cockpit audit verify` walks the chain in append order and exits non-zero at
+  `pandu audit verify` walks the chain in append order and exits non-zero at
   the first entry whose contents or predecessor no longer match. The chain is
   tamper-evident, not tamper-proof: a process that can write the database can
   also recompute it.
 - **Panic.** Stops the listener, bumps the revocation epoch, revokes every
   device, and clears pending prompts.
 
-Evidence: `crates/cockpit-daemon/tests/remote.rs`:
+Evidence: `crates/pandu-daemon/tests/remote.rs`:
 `remote_listener_never_mounts_proxy_routes_or_host_management`,
 `remote_listener_never_mounts_model_or_context_management`,
 `every_remote_endpoint_enforces_its_scope`,
@@ -407,7 +407,7 @@ untrusted input, not as a package manager. The full user-facing model is in
   `docs/registry/KEYS.md`.
 - **Pinned sources.** A skill entry names exactly
   `https://github.com/<owner>/<repo>` and a full 40-character lowercase commit
-  SHA. Cockpit downloads `codeload.github.com/<owner>/<repo>/tar.gz/<sha>`,
+  SHA. Pandu downloads `codeload.github.com/<owner>/<repo>/tar.gz/<sha>`,
   does not follow redirects, and verifies a SHA-256 over the normalized tree
   (sorted path, path length, path, byte length, bytes). Branches, tags, ranges,
   and URLs are rejected. Example fixtures must use the reserved, non-registrable
@@ -426,11 +426,11 @@ untrusted input, not as a package manager. The full user-facing model is in
   `env`/`environment` and values with secret-like names are redacted from the
   preview diff. Conflicts block the install. A preview is held in memory for ten
   minutes and can be used once.
-- **No execution.** Cockpit never runs a package manager, installer script, or
+- **No execution.** Pandu never runs a package manager, installer script, or
   MCP server. For MCP it writes the agent configuration and displays the command
   the agent will run, with a warning that the agent executes third-party code.
   User-level files that double as app state (Claude Code's `~/.claude.json`) are
-  never edited: the adapter sets `write_user_config = false`, and Cockpit shows
+  never edited: the adapter sets `write_user_config = false`, and Pandu shows
   the agent's add command or the project-scope `.mcp.json`.
 - **Comment-preserving edits.** TOML is edited with `toml_edit`; JSON/JSONC
   edits preserve comments, unknown keys, trailing commas, CRLF, and a UTF-8 BOM.
@@ -452,17 +452,17 @@ untrusted input, not as a package manager. The full user-facing model is in
   written only to the agent configuration where that agent expects a literal
   value; OpenCode receives an `{env:NAME}` reference. Secret values are never
   written to the registry, the database, or the install manifest.
-- **Uninstall and undo are narrow.** Uninstall removes only files Cockpit
+- **Uninstall and undo are narrow.** Uninstall removes only files Pandu
   created that still match the recorded hashes, and removes a configuration key
   only if its current value still matches. Edited or missing files are listed
-  and require explicit confirmation; a file Cockpit cannot prove it owns is not
+  and require explicit confirmation; a file Pandu cannot prove it owns is not
   deleted. A backup is kept, and undo restores it. A same-user attacker can
   rewrite the manifest too, so this is data-loss protection, not an integrity
   boundary against malware.
 - **Revocation is explicit.** The signed `revoked.json` is checked on every
   registry load. A revoked entry cannot be previewed or installed. An installed
   copy is marked **Revoked** with the public reason and offered one-click
-  removal; Cockpit does not delete it silently. Offline clients keep the last
+  removal; Pandu does not delete it silently. Offline clients keep the last
   verified list until they refresh.
 - **README is untrusted text.** Markdown is rendered as sanitized plain text in
   a `<pre>`. Raw HTML, scripts, dangerous schemes, and remote images are
@@ -483,7 +483,7 @@ untrusted input, not as a package manager. The full user-facing model is in
   for a promoted tier. CODEOWNERS covers the registry, the market code, and the
   policy files.
 
-Evidence: `crates/cockpit-daemon/tests/market.rs`:
+Evidence: `crates/pandu-daemon/tests/market.rs`:
 `signed_registry_lists_only_verified_entries`,
 `signature_failure_and_tampered_index_are_refused`,
 `tampered_revocation_list_is_refused`,
@@ -559,7 +559,7 @@ general request editor.
   hook/log-watch flight, an unverified adapter, or a session without a live PTY
   gets manual instructions instead. The daemon never spawns a process for this.
 
-Evidence: `crates/cockpit-daemon/tests/integration.rs`:
+Evidence: `crates/pandu-daemon/tests/integration.rs`:
 `host_override_rewrites_only_the_forwarded_request`,
 `override_rewrites_streaming_requests_and_passes_sse_bytes_through`,
 `with_the_override_off_the_forwarded_bytes_are_identical`,
@@ -567,7 +567,7 @@ Evidence: `crates/cockpit-daemon/tests/integration.rs`:
 `a_provider_4xx_reverts_the_override_and_never_retries`,
 `an_override_that_exceeds_the_target_context_window_is_blocked`, and
 `pty_model_switch_needs_a_verified_adapter_command`.
-`crates/cockpit-daemon/tests/remote.rs::every_remote_endpoint_enforces_its_scope`.
+`crates/pandu-daemon/tests/remote.rs::every_remote_endpoint_enforces_its_scope`.
 Unit tests: `proxy::rewrite::tests::*`, `cost::tests::*`,
 `context::tests::*`, and `adapter::tests::model_switch_commands_are_templates_only`.
 
@@ -706,7 +706,7 @@ token can still read status until it is revoked.
    login failures, and revocations. Export it before clearing state if you need
    evidence.
 7. **If the host itself is compromised**, treat it as full local compromise:
-   stop Cockpit, rotate agent and provider credentials, and review what the
+   stop Pandu, rotate agent and provider credentials, and review what the
    agent could reach. Remote revocation alone is not enough.
 
 ### 5.3 Endpoints and scopes
@@ -758,15 +758,15 @@ listed so a reviewer can decide whether a later phase must close them.
    Tailscale direct access is plain HTTP inside WireGuard; use
    `tailscale serve` when you want browser HTTPS. Tunnel mode relies on
    `cloudflared` for public TLS, and a quick tunnel URL is public. LAN mode uses
-   a self-signed certificate. Cockpit does not pin or verify the Tailscale or
+   a self-signed certificate. Pandu does not pin or verify the Tailscale or
    cloudflared binaries; a compromised tool can observe the traffic it carries.
 3. **Host mutations depend on a per-process CSRF token.** Every state-changing
    host `/api` route requires a loopback `Origin`, `Content-Type:
-   application/json`, and the `X-Cockpit-CSRF` token served only by the local UI.
+   application/json`, and the `X-Pandu-CSRF` token served only by the local UI.
    Cross-origin form posts and `text/plain` requests are refused. A same-origin
    script that can read the token is already inside the host's trust boundary.
 4. **No sandbox around the agent.** The agent runs with the user's privileges and
-   can read anything the user can read. Cockpit does not inspect the agent binary
+   can read anything the user can read. Pandu does not inspect the agent binary
    or its environment.
 5. **Terminal output is not secret-scanned.** The sanitizer removes control
    sequences, not API keys or passwords. If an agent prints a secret, the live
@@ -776,7 +776,7 @@ listed so a reviewer can decide whether a later phase must close them.
    misclassify one. Unverified adapters intentionally degrade to `needs_you`
    without a typed event. The UI must not be treated as an authoritative
    permission system for the agent itself.
-7. **Notifications leave Cockpit.** Once a Windows toast is shown, the OS decides
+7. **Notifications leave Pandu.** Once a Windows toast is shown, the OS decides
    where it appears, including the lock screen. The payload is minimal, but agent
    and project names are still visible. The optional ntfy ping is generic, but
    public ntfy.sh is a third party that sees the random topic and timing. Use a
@@ -784,7 +784,7 @@ listed so a reviewer can decide whether a later phase must close them.
 8. **No Android or push notifications.** The companion app is Phase 11. There is
    no FCM/APNs path, no cloud relay, and no background update ping. ntfy is a
    user-configured third-party notification path, not a companion app.
-9. **Installed market entries are third-party code.** Cockpit verifies the
+9. **Installed market entries are third-party code.** Pandu verifies the
    registry signature, the pinned commit, and the content hash, and it shows a
    preview before writing. It does not sandbox the skill or the MCP server. A
    skill can instruct the agent to do anything the agent can do, and an MCP
@@ -797,7 +797,7 @@ listed so a reviewer can decide whether a later phase must close them.
     edits are detected, but same-user malware can rewrite the whole chain or
     delete it. The market's uninstall hash check catches ordinary edits, not an
     attacker who can rewrite the manifest. Keep exported copies if you need a
-    record outside the machine. Cockpit is not an anti-malware boundary.
+    record outside the machine. Pandu is not an anti-malware boundary.
 11. **Remote rate limits are in-memory and device identity is self-asserted.**
     Lockouts and connection budgets reset when the daemon restarts, and there is
     no distributed brute-force protection. Device names are supplied by the
@@ -814,7 +814,7 @@ listed so a reviewer can decide whether a later phase must close them.
 13. **Market trust depends on one offline signing key.** A malicious index is
     refused unless it is signed by the embedded key. If that key is compromised,
     an attacker can sign a malicious index until a release embeds a new key.
-    Key rotation therefore needs a Cockpit update, and old clients keep trusting
+    Key rotation therefore needs a Pandu update, and old clients keep trusting
     the old key. The private key is kept offline; the public key and key id are
     in the binary. See `SECURITY.md` for the compromise process.
 14. **Revocation is learned only on refresh.** An offline client keeps the last
@@ -823,13 +823,13 @@ listed so a reviewer can decide whether a later phase must close them.
     even if its upstream repository disappears; the install then fails closed
     because the pinned archive cannot be fetched.
 15. **MCP package provenance is not verified.** An exact `name@version` is
-    pinned, but Cockpit does not verify the npm, PyPI, or other package
+    pinned, but Pandu does not verify the npm, PyPI, or other package
     registry's provenance, signatures, or ownership. The command is shown before
     install; the agent runs it later. A compromised package registry can serve
     different code for the same version.
 16. **MCP secrets are stored in the agent configuration.** Claude Code and Codex
     receive a literal environment value; OpenCode receives an `{env:NAME}`
-    reference. Cockpit does not encrypt the agent's config file, and the agent
+    reference. Pandu does not encrypt the agent's config file, and the agent
     can read the value. Prefer an environment variable that the agent already
     has, and rotate the key if the config is exposed.
 17. **Model prices, limits, and effort levels go stale.** The table is a verified
@@ -837,7 +837,7 @@ listed so a reviewer can decide whether a later phase must close them.
     model id, or an effort level without notice. Cost totals and the relative-cost
     preview are estimates; the `verifiedOn` date is the only freshness claim. The
     UI adds **may be outdated** once that date is more than 60 days old, and
-    `cockpit models audit` (run in CI) fails if a row loses its control type,
+    `pandu models audit` (run in CI) fails if a row loses its control type,
     source, verification date, or price evidence. An unknown price stays unknown
     rather than becoming `$0.00`, but a stale known price is still wrong.
 18. **The context meter can be wrong.** Provider-reported usage is authoritative
@@ -849,7 +849,7 @@ listed so a reviewer can decide whether a later phase must close them.
     the provider still decides when a request exceeds the window.
 19. **A model override changes what the agent sends, not what it is allowed to
     do.** It can raise cost, change answer quality, or make a request fail at the
-    provider. Cockpit validates the model and effort against the compiled table
+    provider. Pandu validates the model and effort against the compiled table
     and fails open, but it does not evaluate whether the new model is appropriate
     for the task. The host user is the only approval step.
 

@@ -27,10 +27,44 @@ pub fn copy_legacy_home(old: &Path, new: &Path) -> io::Result<Option<Migration>>
         return Ok(None);
     }
     copy_tree(old, new)?;
+    rename_copied_database(new)?;
     Ok(Some(Migration {
         source: old.to_path_buf(),
         destination: new.to_path_buf(),
     }))
+}
+
+/// Give the copied database the new file name.
+///
+/// Only the copy is renamed; the old directory keeps its own file. The new
+/// name wins if both are present, so a partially completed copy is never
+/// overwritten.
+fn rename_copied_database(directory: &Path) -> io::Result<()> {
+    const OLD: &str = "cockpit.db";
+    const NEW: &str = pandu_core::brand::DATABASE_FILE;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            rename_copied_database(&entry.path())?;
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        for suffix in ["", "-wal", "-shm"] {
+            let old_name = format!("{OLD}{suffix}");
+            if name != old_name {
+                continue;
+            }
+            let target = directory.join(format!("{NEW}{suffix}"));
+            if !target.exists() {
+                fs::rename(entry.path(), target)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
@@ -87,7 +121,7 @@ mod tests {
         let old = root.path().join("old");
         let new = root.path().join("new");
         fs::create_dir_all(old.join("v2")).unwrap();
-        fs::write(old.join("v2").join("flight.db"), b"old data").unwrap();
+        fs::write(old.join("v2").join("cockpit.db"), b"old data").unwrap();
         fs::write(old.join("legacy.txt"), b"kept").unwrap();
 
         let migration = copy_legacy_home(&old, &new).unwrap().expect("copied");
@@ -95,16 +129,38 @@ mod tests {
         assert_eq!(migration.source, old);
         assert_eq!(migration.destination, new);
         assert_eq!(
-            fs::read(new.join("v2").join("flight.db")).unwrap(),
+            fs::read(new.join("v2").join("pandu.db")).unwrap(),
             b"old data"
         );
         assert_eq!(fs::read(new.join("legacy.txt")).unwrap(), b"kept");
         // The old tree is copied, never moved or deleted.
         assert_eq!(
-            fs::read(old.join("v2").join("flight.db")).unwrap(),
+            fs::read(old.join("v2").join("cockpit.db")).unwrap(),
             b"old data"
         );
         assert_eq!(fs::read(old.join("legacy.txt")).unwrap(), b"kept");
+    }
+
+    #[test]
+    fn an_existing_database_in_the_copy_is_not_overwritten() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("old");
+        let new = root.path().join("new");
+        fs::create_dir_all(old.join("v2")).unwrap();
+        fs::write(old.join("v2").join("cockpit.db"), b"old data").unwrap();
+        fs::write(old.join("v2").join("pandu.db"), b"new data").unwrap();
+
+        let migration = copy_legacy_home(&old, &new).unwrap().expect("copied");
+
+        assert_eq!(migration.source, old);
+        assert_eq!(
+            fs::read(new.join("v2").join("pandu.db")).unwrap(),
+            b"new data"
+        );
+        assert_eq!(
+            fs::read(new.join("v2").join("cockpit.db")).unwrap(),
+            b"old data"
+        );
     }
 
     #[test]

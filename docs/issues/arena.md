@@ -37,7 +37,7 @@ read them from the existing tables.
 - `POST /api/arena/:id/verdict` — mark winner/rejected/tie with an optional note
 - `DELETE /api/arena/:id` — delete the run, keep the underlying flights
 
-Starting variants may reuse `cockpit run -- <agent>` under the hood. The first
+Starting variants may reuse `pandu run -- <agent>` under the hood. The first
 version can require the user to launch each variant manually and attach the
 resulting flight; automatic launching is a stretch goal, not an acceptance
 criterion.

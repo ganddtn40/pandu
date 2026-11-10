@@ -13,5 +13,5 @@ version_args = ["--version"]
 protocols = ["openai-chat", "anthropic"]
 base_url_env = ["OPENAI_BASE_URL", "ANTHROPIC_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-setup_note = "Configure an OpenAI-compatible or Anthropic provider inside the extension and point it at Cockpit."
+setup_note = "Configure an OpenAI-compatible or Anthropic provider inside the extension and point it at Pandu."
 verified = false

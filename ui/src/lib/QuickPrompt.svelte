@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import { daemonState } from './api/daemon.svelte';
+  import { CLI_COMMAND } from './brand';
   import { copyText } from './clipboard';
   import { t } from './i18n/i18n.svelte';
   import { closeQuickPrompt, quickPromptState } from './quick-prompt.svelte';
@@ -14,7 +15,7 @@
 
   const agents = $derived(daemonState.adapters);
   const selected = $derived(agents.find((adapter) => adapter.id === agentId) ?? agents[0]);
-  const command = $derived(selected ? `pandu run -- ${selected.command}` : '');
+  const command = $derived(selected ? `${CLI_COMMAND} run -- ${selected.command}` : '');
 
   $effect(() => {
     if (!quickPromptState.open) return;

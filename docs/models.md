@@ -2,7 +2,7 @@
 
 Status: Phase 9. Branch `rewrite`.
 
-Cockpit ships a small, verified table of popular models so it can price a flight,
+Pandu ships a small, verified table of popular models so it can price a flight,
 show how full the context window is, and offer a host-only model override without
 guessing. The table lives in [`models.json`](../models.json) at the repository
 root and is compiled into the binary with `include_str!`; it is not fetched at
@@ -33,7 +33,7 @@ are tokens.
 | `gpt-4.1` (deprecated) | 1,047,576 | 32,768 | $2.00 | $0.50 | $8.00 | none | — |
 
 Source: `https://developers.openai.com/api/docs/models/<model>`. On the
-Responses API the effort field is `reasoning.effort`; Cockpit uses that spelling
+Responses API the effort field is `reasoning.effort`; Pandu uses that spelling
 when the request path is a `/responses` endpoint and `reasoning_effort`
 otherwise.
 
@@ -70,12 +70,12 @@ Source: `https://ai.google.dev/gemini-api/docs/pricing` and
 standard rate is in effect through `2026-11-30` ($4 / $20 from `2026-12-01`).
 The two Flash rows are promotional through `2026-12-31` ($1.50 / $7.50 from
 `2027-01-01`). `gemini-2.5-pro` is deprecated; from `2026-12-01` requests route
-to Gemini 3.8 Flash and are billed at its rates. Cockpit keeps the recorded
+to Gemini 3.8 Flash and are billed at its rates. Pandu keeps the recorded
 model id and flags the row as deprecated rather than rewriting history.
 
 Gemini 2.5 uses a numeric `thinkingBudget`; Gemini 3 and 4 use a string
 `thinkingLevel`. The two are mutually exclusive at the provider: sending both
-returns `400`. A row declares exactly one of `levels` or `budget`, and Cockpit
+returns `400`. A row declares exactly one of `levels` or `budget`, and Pandu
 never sends both fields in one request.
 
 For Gemini, the model is part of the URL path as well as the body. An override
@@ -194,13 +194,13 @@ original body, so replay and export always show what the agent actually sent.
 | DeepSeek (OpenAI format) | `model` | `reasoning_effort` |
 | DeepSeek (Anthropic format) | `model` | `output_config.effort` |
 
-Before writing, Cockpit:
+Before writing, Pandu:
 
 1. Finds the target model in `models.json` for the same canonical provider.
    `google` and `gemini` are the same provider for this check.
 2. Validates the requested effort against that model's allowed levels, or
    against its verified budget range, `dynamic`, and `off` support.
-3. Removes every effort spelling Cockpit knows about from the body, including
+3. Removes every effort spelling Pandu knows about from the body, including
    both `thinkingLevel` and `thinkingBudget`, then writes only the field the
    target model and protocol expect. This prevents a switch from leaving an
    incompatible `reasoning_effort` next to `output_config.effort`, or leaving
@@ -211,21 +211,21 @@ Before writing, Cockpit:
 
 ### 3.2 Window and provider rejection safety
 
-- **Window preflight.** Before installing an override, Cockpit reads the flight's
+- **Window preflight.** Before installing an override, Pandu reads the flight's
   latest context meter. If its token count is larger than the target model's
   `contextWindow`, the switch is rejected with `context_window_exceeded` (HTTP
   `409`). The preview applies the same check. A model switch cannot compact a
   prompt, so installing it would only guarantee that the next request fails.
 - **One-shot auto-revert.** If the provider returns a 4xx for a request whose
-  override was applied, Cockpit reverts the override immediately, records
-  `model.override.reverted` (actor `cockpit`, reason `provider_rejected`, provider
+  override was applied, Pandu reverts the override immediately, records
+  `model.override.reverted` (actor `pandu`, reason `provider_rejected`, provider
   status), and flags the step metadata with `providerRejected: true`,
   `reverted: true`, `revertReason`, `providerStatus`, and a truncated
-  `providerError`. The provider response is forwarded unchanged. Cockpit never
+  `providerError`. The provider response is forwarded unchanged. Pandu never
   retries the request in a loop; the next request uses the agent's original
   model.
 - **Provider-bound artifacts.** Signatures, thinking blocks, cache keys, and some
-  tool-call references are issued for a specific provider and model. Cockpit
+  tool-call references are issued for a specific provider and model. Pandu
   rewrites only the model and effort fields, so a mid-flight switch can leave an
   artifact the target model rejects. That rejection is handled by the one-shot
   revert above; the artifact is not rewritten or stripped. Start a new flight
@@ -261,7 +261,7 @@ and key order.
 ## 4. PTY and hook model switching
 
 A log-watch, hook, or PTY session is not proxied, so there is nothing to rewrite.
-Cockpit can only type a command into a live terminal, and only when the adapter
+Pandu can only type a command into a live terminal, and only when the adapter
 declares that it has verified the command.
 
 ```toml
@@ -274,11 +274,11 @@ verified = true
 - `Adapter::model_switch_command` substitutes only `{model}`. It does not shell
   out, and the daemon does not spawn anything.
 - `POST /api/sessions/{id}/model/switch` is host-only. If the session has a live
-  PTY and the adapter command is verified, Cockpit queues the command as
+  PTY and the adapter command is verified, Pandu queues the command as
   keystrokes and returns `mode: "pty"`.
 - Otherwise it returns `mode: "manual"` with instructions to change the model
   inside the agent and start a new flight. A hook or log-watch flight always gets
-  manual instructions because Cockpit has no terminal to type into.
+  manual instructions because Pandu has no terminal to type into.
 - Claude Code and Codex currently declare `command = "/model {model}"` with
   `verified = true`. The adapter `verified` flag and the model-switch `verified`
   flag are separate: an adapter can be unverified for prompt detection and still
@@ -292,7 +292,7 @@ percentage only.
 
 - **Tokens.** Provider-reported prompt usage wins when it is non-zero
   (`input_tokens + cache_read_tokens + cache_creation_tokens`, as the provider
-  reports them). Otherwise Cockpit estimates from the recorded request body.
+  reports them). Otherwise Pandu estimates from the recorded request body.
   `source` says `provider` or `estimated`.
 - **Window.** The context window comes from `models.json`. If the model is
   unknown, `window` and `percent` are absent and the UI says the window is
@@ -335,14 +335,14 @@ percentage only.
    kept only to price historical flights, and claiming a fresh verification for
    a retired model would be false. Every row, deprecated included, still needs a
    control type, an HTTPS source, and both input and output prices.
-5. Run `cargo run -p cockpit-cli -- models audit`. It fails on a missing control
+5. Run `cargo run -p pandu-cli -- models audit`. It fails on a missing control
    type, source, `verifiedOn` (except a deprecated row), or price evidence. CI
    runs the same command, so a local pass and CI cannot disagree.
-6. Run `cargo test -p cockpit-core cost::` and
-   `cargo test -p cockpit-daemon --test integration override`.
+6. Run `cargo test -p pandu-core cost::` and
+   `cargo test -p pandu-daemon --test integration override`.
 7. Re-check the demo seed's single unknown-cost call and the cost fixtures before
    changing a price.
 
 The compiled table is a convenience, not a billing system. Provider prices and
-model availability change; the `verifiedOn` date is the only claim Cockpit makes
+model availability change; the `verifiedOn` date is the only claim Pandu makes
 about freshness.

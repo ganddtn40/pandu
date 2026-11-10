@@ -7,156 +7,156 @@
       "kind": "skill",
       "id": "algorithmic-art",
       "path": "skills/algorithmic-art.yaml",
-      "sha256": "26aabaa3f5861cbc7bcd6cedbc436fcf8290c5c726d2328c4abc2dfcc8c2ba52",
+      "sha256": "dd491d63e7fa14d6e5fe6530200dfb9b3da927d7bde0b12a5d508d6323e71a8b",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "brand-guidelines",
       "path": "skills/brand-guidelines.yaml",
-      "sha256": "217d8f4c76bfa4ca204a8d6c0afeb771776f5827582998bd547b54917f93dc36",
+      "sha256": "accc31c3e5a50556be7492e6fe155a9b9e71f1a6bdbd873b4f46cbd2c31a5e22",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "canvas-design",
       "path": "skills/canvas-design.yaml",
-      "sha256": "ddd0112c8dcdb628cfffa97e054fa5a602d11a4313b7b3ceabb88f4b6b058b71",
+      "sha256": "740f268e563728dab9888f510ca8a44e2fbc9d6f654b3aeac6d72d5e5b760f33",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "example-changelog-writer",
       "path": "skills/example-changelog-writer.yaml",
-      "sha256": "6be9ad7343553c5f3fee0a5175c9a42a37d6b01400fc0186e21f0e5da5cb67f8",
+      "sha256": "5de1188cef22ee35982df87c283621c74acd3e33dd1452a95e904d05ab8d9243",
       "version": "1.0.0"
     },
     {
       "kind": "skill",
       "id": "example-commit-messages",
       "path": "skills/example-commit-messages.yaml",
-      "sha256": "553a61fec57da14b45c71b473b7a8f880b039a0664a8c7a77903c2b7a7342195",
+      "sha256": "114929fe9cc663b4d50bac5b292d6a0286221f9b3ec35677dbe27c792537b8f4",
       "version": "1.0.0"
     },
     {
       "kind": "skill",
       "id": "frontend-design",
       "path": "skills/frontend-design.yaml",
-      "sha256": "abb5597b6a163b501bb56c790820bdb2abf238880333da7fc6092398b25afc68",
+      "sha256": "2b3e20a323db85a9ff1161a6acf498efddaa51d00447e44b0532c96b73672fe3",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "internal-comms",
       "path": "skills/internal-comms.yaml",
-      "sha256": "e547c04ed6e21acbeb51208ad70c67a7b1de438121cdbb64c61ba9f14bb44d3d",
+      "sha256": "c6444cf07a6c9b3fe66cf4bf2651a4bbfee2646fbe1226b511c1d2e337243b42",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "mcp-builder",
       "path": "skills/mcp-builder.yaml",
-      "sha256": "719d893d20e361ff65f3a617c397fcd75d5b7137d9ae4846c766251fb0c4df72",
+      "sha256": "5fc695584aad0b71eadc4fc887882252df2bb84e4ef162f306ccd3439fef832d",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "skill-creator",
       "path": "skills/skill-creator.yaml",
-      "sha256": "bf954d79518a5bc45b4378b0b1a6175b937a871db482c5b75ce2fc82e6e88666",
+      "sha256": "fa519f809719c3fea40b37e38fc689eea58e710ab5dbf8042d7f219e6b146a2d",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "slack-gif-creator",
       "path": "skills/slack-gif-creator.yaml",
-      "sha256": "eefecd7f9583b2fb16ed7f04d7fe89997328cf0d3de1a050763f5ffff3c024e7",
+      "sha256": "7f47dccaf3d4a05ecf509dd42e4ae3c5eb650f86187ef2915594d35199708da5",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "theme-factory",
       "path": "skills/theme-factory.yaml",
-      "sha256": "399b3346176c14e60eb2fb41e30846bbf15a5aceebeb4867a53602c4c1eca458",
+      "sha256": "6e55979e1276ec7007712c804ffec3e997548604e980012024ae5a302d04efe3",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "web-artifacts-builder",
       "path": "skills/web-artifacts-builder.yaml",
-      "sha256": "63e7fd11ae456ece8d592faac693564b71600e6b8f277aa40f7e4ddaa2182753",
+      "sha256": "de4caf98499c9a393da9c7b48ff27abfe778105f9a3c44c234b75ca6ede18b26",
       "version": "2c5958e"
     },
     {
       "kind": "skill",
       "id": "webapp-testing",
       "path": "skills/webapp-testing.yaml",
-      "sha256": "b7b62cf702a586fab5586df19cabe7fdf8de364e0c10ac0ba1d3b774444b3609",
+      "sha256": "2293b287593f95ab22bf1d181a761335848ae63b7d7e71a739befa030ea121d2",
       "version": "2c5958e"
     },
     {
       "kind": "mcp",
       "id": "context7",
       "path": "mcp/context7.yaml",
-      "sha256": "0ad0b84706f5dfef4c4478d2e3e0b2890490fa516a90a5238fd76bff724281e6",
+      "sha256": "24af2ba1e4b60b1ff226864dace93f7c77cb93b6a97b894d7cce68fb7534f47f",
       "version": "4.6.0"
     },
     {
       "kind": "mcp",
       "id": "example-weather",
       "path": "mcp/example-weather.yaml",
-      "sha256": "363f4dded5cc6e876cf1b43642727b9419b7b5dd0aff4e1b1a3ade2eb65ebee5",
+      "sha256": "d5fe4d88fb631a24b8d9897b1a04ff85f6cb8b0f0d341d865cf81b8c4fec6d69",
       "version": "1.0.0"
     },
     {
       "kind": "mcp",
       "id": "fetch",
       "path": "mcp/fetch.yaml",
-      "sha256": "365af76144226b04a69ca38f50cf009636350e02d88ef43b0cb72b92af9aba2b",
+      "sha256": "cce01037fa3640f5928ba8940ed765aa4cb362b0c370808719403f2b9fb93898",
       "version": "2026.11.4"
     },
     {
       "kind": "mcp",
       "id": "git",
       "path": "mcp/git.yaml",
-      "sha256": "b508df9ddd0bf57cf88b226fd11d1cd99f80779bcedc7ffecefd7de6cda261b6",
+      "sha256": "ba2be5ff63b5d62fc41794cae5fefd52602243c21cf2aa759a1398f7822e1c9a",
       "version": "2026.11.4"
     },
     {
       "kind": "mcp",
       "id": "github-mcp-remote",
       "path": "mcp/github-mcp-remote.yaml",
-      "sha256": "3da62bc0ea804f4d5f05277ab60114beb91bbc9677a2d39342715b027bcd69ed",
+      "sha256": "1d51eab9ea08b5a5ee31aa60ec32108a6bdfdc8c3044ba54f394d3329969b8b0",
       "version": "2.1.0"
     },
     {
       "kind": "mcp",
       "id": "github-mcp-server",
       "path": "mcp/github-mcp-server.yaml",
-      "sha256": "ca125917a40d66763b969de74d71a858b8ecf817abd752c2e0fb8fbc7de9fc35",
+      "sha256": "68922cfafeef84f64c15b55dd8e4c249c961a40a4e78fcd22ae88aa06cc76973",
       "version": "2.1.0"
     },
     {
       "kind": "mcp",
       "id": "playwright",
       "path": "mcp/playwright.yaml",
-      "sha256": "c16ba86f71c0a145253bad0a13797935b354b9c2e350fb6f95b0ece9f0361cf7",
+      "sha256": "adbe339645b0a8b473bf943a6e560dcf4a33eb3c9f8c03d4e584dab954346590",
       "version": "0.0.85"
     },
     {
       "kind": "mcp",
       "id": "sequential-thinking",
       "path": "mcp/sequential-thinking.yaml",
-      "sha256": "2960e298d6fb5ccbc30e27bc042f25e0daec432cc2116c08f1e1458339dcca24",
+      "sha256": "76732ac9acb9a7a5fab1a5f7eeaaefe92d3d4abac05b5be1c9d9787c899bfbb9",
       "version": "2.1.1"
     },
     {
       "kind": "mcp",
       "id": "time",
       "path": "mcp/time.yaml",
-      "sha256": "2bd8528c8e5189988709b89f3281e0714ed9ae7fbbf6d8a9498ffdd57601cb7c",
+      "sha256": "ee0a520da0f741ad5c643291acdbc9de42d7ed1e3e963419b3fa099c1cf13d64",
       "version": "2026.11.4"
     }
   ],
-  "signature": "81pvMzAig3+FCfEGCdcI6BFLGD24cEQ8Dp1Hsjr6ucyO8rBFGDKAvMgSnGoZi5je8ojCWzTEGELkNatXgIffCg=="
+  "signature": "aqKdo0hS/hNuk11gzG9cdnxmrGvNZffDZMSWOYHkcjfUDaXc+IxvvAe6BYITodBUThYCzy3GAoBfeajuLcnjCQ=="
 }

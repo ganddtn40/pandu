@@ -4,6 +4,7 @@
   import Logo from './Logo.svelte';
   import { openAddAgent } from './add-agent.svelte';
   import { daemonState, seedDemoData } from './api/daemon.svelte';
+  import { PRODUCT_NAME } from './brand';
   import { t, type MessageKey } from './i18n/i18n.svelte';
   import { completeOnboarding } from './onboarding.svelte';
   import { navigate } from './router.svelte';
@@ -76,9 +77,9 @@
 
 <div class="onboarding">
   <header class="onboarding__top">
-    <a class="brand" href="/" data-route aria-label="Pandu home">
+    <a class="brand" href="/" data-route aria-label={`${PRODUCT_NAME} home`}>
       <Logo size={32} />
-      <span class="brand__name">Pandu</span>
+      <span class="brand__name">{PRODUCT_NAME}</span>
     </a>
     <button class="btn btn--small btn--ghost" type="button" onclick={finish}>
       {t('onboarding.skip')}

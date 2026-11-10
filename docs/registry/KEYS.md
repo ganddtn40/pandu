@@ -1,6 +1,6 @@
 # Registry signing keys
 
-Cockpit verifies the market registry with an Ed25519 key embedded in the
+Pandu verifies the market registry with an Ed25519 key embedded in the
 binary. The private key never belongs in this repository, a debug build, a
 contributor pull request, or an agent transcript. This document covers the two
 trust roots, offline key generation, the CI signing flow, rotation, and what to
@@ -10,18 +10,25 @@ do if a key is compromised.
 
 | | Production | Test |
 | --- | --- | --- |
-| Public key | `iE0AJlU1Nd+iTodC0vgTYx7aMFCETJisOnFEIsP6hMc=` | `6Zxqlnu7Ci8srz7rzhSxmrnCyyWMZYKNWPMTtXxZloY=` |
-| Key id | `cockpit-market-2026` | `cockpit-market-test-2026` |
+| Public key | `iE0AJlU1Nd+iTodC0vgTYx7aMFCETJisOnFEIsP6hMc=` | `BU/+PJwKB5yqebHqAd3lANMGOC3HAAMsfjI0m/U48l8=` |
+| Key id | frozen pre-rename id (see below) | `pandu-market-test-2026` |
 | Registry files | `registry/index.json`, `registry/revoked.json` | `registry/index.test.json`, `registry/revoked.test.json` |
 | Embedded by | release builds | debug and test builds |
 | Signing tool | `node registry/sign.mjs` (default variant) | `node registry/sign.mjs --variant test` |
-| Rust signer | release `cockpit market sign` | debug `cockpit market sign` |
+| Rust signer | release `pandu market sign` | debug `pandu market sign` |
+
+The production key id and signatures predate the rename and are frozen: the
+offline production key was not available to re-sign `index.json` and
+`revoked.json`. The id lives in
+`crates/pandu-daemon/src/market/legacy_key.rs` so the rest of the tree can use
+the new name. Rotating it is the release task described under **Rotation**; do
+not edit the signed documents by hand.
 
 A release build embeds only the production public key and loads only the
 production registry files. A debug or test build embeds only the test public
 key and loads only the `.test.json` files. The two key ids and public keys must
 stay distinct; `trust_root_error` in
-`crates/cockpit-daemon/src/market/mod.rs` refuses to open the market in a
+`crates/pandu-daemon/src/market/mod.rs` refuses to open the market in a
 release build that embeds the test key or an unrecognised key.
 
 The test key is a test fixture. Its private half may be used locally to
@@ -33,7 +40,7 @@ and must never be copied into a release configuration.
 Run these checks before a release and after any key change:
 
 ```powershell
-git grep -n -I -E "BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|BEGIN COCKPIT MARKET SIGNING KEY"
+git grep -n -I -E "BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|BEGIN PANDU MARKET SIGNING KEY"
 git log --all -S "BEGIN PRIVATE KEY" --oneline
 git log --all -S "<first bytes of the private key seed>" --oneline
 git rev-list --all --objects | Select-String -Pattern "\.pem$|\.key$"
@@ -52,7 +59,7 @@ Generate the production key on an offline machine, not in CI and not on a
 developer workstation that runs agents:
 
 ```powershell
-cargo run --release -p cockpit-cli -- market keygen --out C:\secure\cockpit-market-2026.pem
+cargo run --release -p pandu-cli -- market keygen --out C:\secure\pandu-market-2026.pem
 ```
 
 The command prints the public key and writes a 32-byte Ed25519 seed in a
@@ -60,22 +67,22 @@ PEM-like wrapper. Keep the private file on encrypted offline media with
 permissions for one account only. On Unix:
 
 ```sh
-chmod 600 /secure/cockpit-market-2026.pem
+chmod 600 /secure/pandu-market-2026.pem
 ```
 
 Record the public key in two places:
 
 1. `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64` and
    `PRODUCTION_REGISTRY_KEY_ID` in
-   `crates/cockpit-daemon/src/market/mod.rs`.
+   `crates/pandu-daemon/src/market/mod.rs`.
 2. This document's trust-root table.
 
 Then sign the production registry from a release build (or with the Node
 script, which does not depend on the build mode):
 
 ```powershell
-node registry/sign.mjs --key C:\secure\cockpit-market-2026.pem --build --dir registry
-cargo run --release -p cockpit-cli -- market check --dir registry --online --links
+node registry/sign.mjs --key C:\secure\pandu-market-2026.pem --build --dir registry
+cargo run --release -p pandu-cli -- market check --dir registry --online --links
 ```
 
 The signer refuses a key whose public half does not match the key the build
@@ -89,7 +96,7 @@ of the production key. Generate it once on a development machine, keep it out
 of the repository, and regenerate the test registry after any YAML change:
 
 ```powershell
-node registry/sign.mjs --key C:\secure\cockpit-market-test-2026.pem --variant test --build --dir registry
+node registry/sign.mjs --key C:\secure\pandu-market-test-2026.pem --variant test --build --dir registry
 ```
 
 Commit `registry/index.test.json` and `registry/revoked.test.json` together
@@ -126,11 +133,11 @@ and committing only the resulting signature.
 
 ## Rotation
 
-A Cockpit build trusts exactly one key id. Rotation is therefore a release
+A Pandu build trusts exactly one key id. Rotation is therefore a release
 operation:
 
 1. Generate a new keypair offline and choose a new key id, for example
-   `cockpit-market-2027`.
+   `pandu-market-2027`.
 2. Update `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64` and
    `PRODUCTION_REGISTRY_KEY_ID` in the market module, and update this document.
 3. Re-sign `index.json` and `revoked.json` with the new key and publish a

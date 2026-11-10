@@ -1,8 +1,8 @@
 # Market
 
-Status: Phase 8. Market is the Cockpit catalogue for agent skills and MCP
+Status: Phase 8. Market is the Pandu catalogue for agent skills and MCP
 servers. It is **host-only**, **signed**, and **never executes an installer**.
-Cockpit copies files and edits configuration; the agent runs the installed
+Pandu copies files and edits configuration; the agent runs the installed
 skill or MCP server later, under the user's account.
 
 ![Market catalogue](screenshots/phase8/market-list.png)
@@ -10,16 +10,16 @@ skill or MCP server later, under the user's account.
 ## The promise
 
 - Every card shows a trust tier: **Official**, **Community-reviewed**, or
-  **Unreviewed**. Cockpit does not use "Verified" as a tier.
+  **Unreviewed**. Pandu does not use "Verified" as a tier.
 - Every entry pins a GitHub repository and a full commit SHA. The downloaded
   tree must match a content SHA-256 before anything is written.
 - The index and the revocation list are signed with Ed25519. If a signature,
-  an entry hash, or the revocation list fails, Cockpit refuses the registry and
+  an entry hash, or the revocation list fails, Pandu refuses the registry and
   explains why. It does not fall back to unverified data.
 - Nothing is installed from a card click. The preview shows the exact files,
   configuration keys, real diff, permissions, source, license, tier, and (for
   MCP) the command the agent will run. The user confirms.
-- Cockpit never runs `npm`, `npx`, `pip`, `uv`, a shell script, or an MCP server
+- Pandu never runs `npm`, `npx`, `pip`, `uv`, a shell script, or an MCP server
   during install. It only writes files and configuration.
 - Installs happen on the computer running the daemon. A paired remote device
   cannot reach `/api/market/*`; those paths return 404 on the remote listener.
@@ -35,9 +35,9 @@ Read the source and the preview before installing.
 
 ## Trust tiers
 
-| Tier | Meaning | What Cockpit checks |
+| Tier | Meaning | What Pandu checks |
 | --- | --- | --- |
-| **Official** | Maintained by the Cockpit project. | A named reviewer, a review date, and CI passed. |
+| **Official** | Maintained by the Pandu project. | A named reviewer, a review date, and CI passed. |
 | **Community-reviewed** | Inspected by a named maintainer. | A named reviewer, a review date, and CI passed. |
 | **Unreviewed** | Not reviewed. Shown last by default. | Schema, signature, pinned commit, content hash, and static scans only. |
 
@@ -54,7 +54,7 @@ Market is a tab in the main UI.
 
 - **Skills** lists skill entries.
 - **MCP servers** lists MCP entries.
-- **Installed** lists everything Cockpit installed, including uninstalled rows
+- **Installed** lists everything Pandu installed, including uninstalled rows
   that can be restored with Undo.
 
 Catalogue controls:
@@ -73,7 +73,7 @@ Catalogue controls:
 - **Refresh registry** downloads the signed index, revocation list, and every
   entry, verifies all of them, and only then replaces the cache. A failed
   refresh leaves the previous verified cache untouched.
-- **Refresh daily** is off by default. When enabled, Cockpit checks at most once
+- **Refresh daily** is off by default. When enabled, Pandu checks at most once
   per 24 hours. It still never installs or updates automatically.
 
 The list is virtualized, so a registry with more than a thousand entries keeps
@@ -95,13 +95,13 @@ Selecting a card opens a sheet with:
 
 ### Install preview
 
-Choose an agent and a scope, then **Preview install**. Cockpit resolves the
+Choose an agent and a scope, then **Preview install**. Pandu resolves the
 adapter target, downloads the pinned tree, verifies its hash, and builds a plan.
 Nothing is written yet. The preview shows:
 
 - every file with **New**, **Overwrite**, **Unchanged**, or **Conflict**;
 - a real line diff for text files that already exist;
-- the configuration path and key path for MCP, and the value Cockpit will add;
+- the configuration path and key path for MCP, and the value Pandu will add;
 - required secret names and local inputs;
 - declared permissions, source, license, and tier;
 - the exact MCP command, with the warning that the agent will execute
@@ -115,7 +115,7 @@ minutes and can be used once; a stale or reused preview is refused.
 
 For MCP, secrets are asked for locally and only at install time. They are
 written to the agent configuration where the agent expects a literal value.
-They are **not** stored in the registry, the Cockpit database, or the install
+They are **not** stored in the registry, the Pandu database, or the install
 manifest. OpenCode always receives `{env:NAME}` references instead of literal
 values.
 
@@ -131,23 +131,23 @@ and removes the install record.
 The **Installed** tab keeps a row for every install:
 
 - **Installed** with an available update shows an **Update available** pill and
-  **Update**. An update is a new preview and a new confirmation; Cockpit never
+  **Update**. An update is a new preview and a new confirmation; Pandu never
   auto-updates.
 - **Modified since install** appears when any installed file no longer matches
-  the recorded hash, or the configuration Cockpit wrote changed. The row also
+  the recorded hash, or the configuration Pandu wrote changed. The row also
   shows **Needs attention** with the specifics. Local edits never trigger an
   update or an automatic overwrite.
 - **Revoked** means the signed revocation list marks the entry as unsafe or
   broken. The row explains why and offers **Remove now**.
 - **Needs attention** means a file or configuration key changed on disk, is
-  missing, or no longer matches the manifest. Cockpit does not delete a file it
+  missing, or no longer matches the manifest. Pandu does not delete a file it
   cannot prove it created.
 - **Uninstalled** rows stay visible so **Undo** can restore them.
 
-Uninstall removes only files Cockpit created and that still match the recorded
+Uninstall removes only files Pandu created and that still match the recorded
 hashes. If a file was edited, the preview lists it and requires an explicit
 confirmation before removing it. Configuration keys are removed only if their
-current value still matches what Cockpit wrote. A backup is kept so the removal
+current value still matches what Pandu wrote. A backup is kept so the removal
 can be undone.
 
 ![Installed entries](screenshots/phase8/market-installed.png)
@@ -162,12 +162,12 @@ can be undone.
    registry.
 2. **Resolve the target.** The entry must name the chosen agent. The adapter
    must have a verified `[skills]` or `[mcp]` section. If the target is not
-   verified, Cockpit writes nothing and shows manual instructions with a copy
+   verified, Pandu writes nothing and shows manual instructions with a copy
    button. Some agents keep app state in their user-level MCP file; those
-   adapters set `write_user_config = false` and Cockpit offers the agent's own
+   adapters set `write_user_config = false` and Pandu offers the agent's own
    add command or the project-scope file instead. Claude Code's `~/.claude.json`
    is one of these files.
-3. **Fetch the pinned source.** For a skill, Cockpit downloads
+3. **Fetch the pinned source.** For a skill, Pandu downloads
    `https://codeload.github.com/<owner>/<repo>/tar.gz/<commit>`. Redirects are
    not followed; the host is GitHub. The archive is capped at 20 MiB and the
    extracted tree at 40 MiB, 1,000 files, and 4 MiB per file.
@@ -176,7 +176,7 @@ can be undone.
    case-colliding paths, over-long components, and over-long full paths are
    rejected. The whole tree is hashed and compared with
    `source.content_sha256`.
-5. **Build the plan.** Cockpit plans file writes and a configuration edit. TOML
+5. **Build the plan.** Pandu plans file writes and a configuration edit. TOML
    edits use `toml_edit`; JSON/JSONC edits preserve comments and unknown keys.
    BOM, CRLF, trailing commas, and everything outside the edited key keep their
    exact bytes. Existing values are compared so an unchanged key is not
@@ -184,10 +184,10 @@ can be undone.
 6. **Preview and confirm.** The preview shows the resolved absolute path and a
    compact diff of only the edited key, not the whole file. Values under
    `env`/`environment` and values with secret-like names are redacted. A
-   conflict blocks the install. Cockpit records the file hash, size, and
+   conflict blocks the install. Pandu records the file hash, size, and
    modification time at preview time.
 7. **Back up and write.** Existing files and configuration are backed up under
-   the Cockpit home in a timestamped folder. Before writing, Cockpit re-checks
+   the Pandu home in a timestamped folder. Before writing, Pandu re-checks
    that every previewed file still matches; if an editor saved in between, the
    install aborts and asks for a new preview. A journal is written, files are
    written to a temporary path and renamed atomically, and the target's existing
@@ -197,10 +197,10 @@ can be undone.
    tier, source, license, agent, scope, target root, file hashes, config path and
    redacted value, backup id, permissions, and secret **names**. Secret values
    are never stored.
-9. **Uninstall or undo.** Uninstall removes only matching Cockpit-created files
+9. **Uninstall or undo.** Uninstall removes only matching Pandu-created files
    and unchanged configuration keys. Undo restores the backup.
 
-An MCP install has no source files to copy. Cockpit writes the server recipe to
+An MCP install has no source files to copy. Pandu writes the server recipe to
 the agent configuration and shows the command. The agent starts the server; the
 daemon never does.
 
@@ -213,8 +213,8 @@ manual-only, with the exact path and steps shown in the UI.
 | --- | --- | --- | --- |
 | **Claude Code** | Yes | Yes | Skills: `~/.claude/skills`, `.claude/skills`. MCP: `.mcp.json` (`mcpServers`). User-scope `~/.claude.json` is manual-only because it also holds app state. |
 | **OpenCode** | Yes | Yes | Skills: `~/.config/opencode/skills`, `.opencode/skills`. MCP: `~/.config/opencode/opencode.json(c)`, `opencode.json(c)`, `.opencode/opencode.json(c)` (`mcp.servers`, JSONC). |
-| **Codex CLI** | Yes | Yes | Skills: `~/.agents/skills`, `.agents/skills`. MCP: `~/.codex/config.toml`, `.codex/config.toml` (`[mcp_servers.<name>]`). Codex also reads ancestor `.agents/skills` and admin `/etc/codex/skills`; Cockpit writes only the user or project path. |
-| Other adapters | Manual only | Manual only | No verified market target; Cockpit refuses to guess. |
+| **Codex CLI** | Yes | Yes | Skills: `~/.agents/skills`, `.agents/skills`. MCP: `~/.codex/config.toml`, `.codex/config.toml` (`[mcp_servers.<name>]`). Codex also reads ancestor `.agents/skills` and admin `/etc/codex/skills`; Pandu writes only the user or project path. |
+| Other adapters | Manual only | Manual only | No verified market target; Pandu refuses to guess. |
 
 Scope:
 
@@ -223,7 +223,7 @@ Scope:
   agent's add command and a project-scope alternative instead of editing an
   app-state file.
 - **Project** writes inside the current workspace and affects that project.
-  Cockpit only offers project scope when the daemon knows a workspace.
+  Pandu only offers project scope when the daemon knows a workspace.
 
 ## Updates and revocation
 
@@ -241,17 +241,17 @@ Scope:
 
 ## Offline behavior
 
-Cockpit keeps the last verified registry under `$COCKPIT_HOME/market/registry`.
+Pandu keeps the last verified registry under `$PANDU_HOME/market/registry`.
 When it cannot reach the registry, it loads that cache and shows a banner:
 
-> Showing the cached registry. Cockpit cannot reach the registry right now, so
+> Showing the cached registry. Pandu cannot reach the registry right now, so
 > this is the last verified copy. Refreshing and updates need a connection.
 > Last verified 3 days ago.
 
 The age comes from the last successful refresh time, or the cache index file's
 mtime for older caches. Once the cache is more than seven days old, the banner
 adds: **This cache is more than 7 days old. New revocations may be missed until
-Cockpit refreshes online.** The catalogue and detail views still work. Refresh
+Pandu refreshes online.** The catalogue and detail views still work. Refresh
 is disabled. A skill install still needs the pinned archive, so it fails cleanly
 if the source is not already available; an MCP configuration edit can be
 previewed from the cached entry. A failed refresh never replaces or deletes the
@@ -261,25 +261,25 @@ cache.
 
 The production source order is:
 
-1. `$COCKPIT_HOME/market/registry` (the verified cache);
+1. `$PANDU_HOME/market/registry` (the verified cache);
 2. the embedded bundled production registry.
 
-Debug builds additionally check `COCKPIT_MARKET_REGISTRY` (an explicit local
+Debug builds additionally check `PANDU_MARKET_REGISTRY` (an explicit local
 registry directory) and the repository's `registry/` directory, and load the
 test-signed `index.test.json` / `revoked.test.json` variant. Release builds
-ignore `COCKPIT_MARKET_REGISTRY` and `COCKPIT_MARKET_REGISTRY_URL`; the override
+ignore `PANDU_MARKET_REGISTRY` and `PANDU_MARKET_REGISTRY_URL`; the override
 is a development convenience only. When a debug build uses it, the UI shows a
 **Dev registry override** chip.
 
 Example fixtures are included only in debug builds and are hidden in
 production. The default refresh URL is
-`https://raw.githubusercontent.com/ganddtn40/cockpit/main/registry`.
-`COCKPIT_MARKET_OFFLINE=1` is a debug/test switch that forces offline mode.
+`https://raw.githubusercontent.com/ganddtn40/pandu/main/registry`.
+`PANDU_MARKET_OFFLINE=1` is a debug/test switch that forces offline mode.
 
 ## Registry
 
 The registry is a separate, signed repository designed to move to its own
-GitHub repository. Cockpit embeds a copy for first run and refreshes from the
+GitHub repository. Pandu embeds a copy for first run and refreshes from the
 network only on user action or the opt-in daily check.
 
 ```text
@@ -318,16 +318,16 @@ and `signature`. Each index entry binds `kind`, `id`, `path`, `sha256`, and
 
 ```powershell
 # Validate a signed registry offline. Use a release build for production.
-cargo run --release -p cockpit-cli -- market check --dir registry
+cargo run --release -p pandu-cli -- market check --dir registry
 
 # Also download pinned sources and verify content hashes.
-cargo run --release -p cockpit-cli -- market check --dir registry --online
+cargo run --release -p pandu-cli -- market check --dir registry --online
 
 # Also check source and homepage links.
-cargo run --release -p cockpit-cli -- market check --dir registry --online --links
+cargo run --release -p pandu-cli -- market check --dir registry --online --links
 
 # Validate loose YAML files on a contributor PR, before signing.
-cargo run -p cockpit-cli -- market check --dir registry --staged --online --links
+cargo run -p pandu-cli -- market check --dir registry --staged --online --links
 
 # Rebuild the production index from the YAML files and sign both JSON files.
 node registry/sign.mjs --key C:\secure\private.pem --build --dir registry
@@ -336,7 +336,7 @@ node registry/sign.mjs --key C:\secure\private.pem --build --dir registry
 node registry/sign.mjs --key C:\secure\test-private.pem --variant test --build --dir registry
 
 # Sign existing production files; refuses a key that does not match the embedded key.
-cargo run --release -p cockpit-cli -- market sign --key C:\secure\private.pem --dir registry
+cargo run --release -p pandu-cli -- market sign --key C:\secure\private.pem --dir registry
 ```
 
 The private key stays offline. Debug and release builds embed different public
@@ -344,7 +344,7 @@ keys: debug builds trust only the test key and load the `.test.json` files;
 release builds trust only the production key and load `index.json` /
 `revoked.json`. A release build refuses to open the market if it detects a test
 key. The keys, offline generation, rotation, and compromise procedure are
-documented in [`docs/registry/KEYS.md`](registry/KEYS.md). `cockpit market
+documented in [`docs/registry/KEYS.md`](registry/KEYS.md). `pandu market
 keygen` generates a keypair for a fork or a new registry; the public half must
 be embedded in a build before that build can trust the registry.
 
@@ -377,12 +377,12 @@ The scans are heuristics. A reviewer still has to read the code.
   anything the agent can do. An MCP server is a process the agent starts. Read
   the preview and the source.
 - **The pinned package can still resolve differently later.** A `npx` package
-  version is exact, but Cockpit does not verify npm provenance or the registry
+  version is exact, but Pandu does not verify npm provenance or the registry
   that serves it. The command is shown before install.
 - **Secrets live in the agent configuration.** Claude Code and Codex receive a
-  literal value; OpenCode receives an env reference. Cockpit does not encrypt
+  literal value; OpenCode receives an env reference. Pandu does not encrypt
   the agent's config file, and the agent can read the value.
-- **Config edits can be rejected by the agent.** Cockpit preserves comments and
+- **Config edits can be rejected by the agent.** Pandu preserves comments and
   unknown keys, but a future agent version may change its format. The backup and
   undo path are the recovery.
 - **A signing-key compromise breaks the trust root.** The key is offline, but a
@@ -401,11 +401,11 @@ The scans are heuristics. A reviewer still has to read the code.
 
 | Symptom | Meaning | What to do |
 | --- | --- | --- |
-| "Cockpit refused the registry" | A signature, index hash, or revocation signature failed. | Refresh again. If it persists, the registry is compromised or broken; do not install. Check the advisory. |
+| "Pandu refused the registry" | A signature, index hash, or revocation signature failed. | Refresh again. If it persists, the registry is compromised or broken; do not install. Check the advisory. |
 | "This preview expired" | The preview is older than ten minutes or was already used. | Preview again. |
-| "changed after the preview" | A file or config was edited after Cockpit captured its hash and modification time. | Preview the install again; nothing was overwritten. |
-| "Cockpit will not overwrite these files" | A planned file conflicts with a file Cockpit did not create or cannot prove it owns. | Move the file, choose another scope, or install manually. |
-| "Manual install only" | The adapter has no verified target for this agent, or the user-level file also holds app state. | Follow the add command and project-scope alternative shown; Cockpit writes nothing. |
+| "changed after the preview" | A file or config was edited after Pandu captured its hash and modification time. | Preview the install again; nothing was overwritten. |
+| "Pandu will not overwrite these files" | A planned file conflicts with a file Pandu did not create or cannot prove it owns. | Move the file, choose another scope, or install manually. |
+| "Manual install only" | The adapter has no verified target for this agent, or the user-level file also holds app state. | Follow the add command and project-scope alternative shown; Pandu writes nothing. |
 | "Revoked" | The signed revocation list marks the entry. | Read the reason, then remove it from the Installed tab. |
 | "Needs attention" | A file or config key changed on disk. | Review the diff, then uninstall with the edited-file confirmation or repair the file. |
 | Offline banner | The registry cannot be reached. | Keep using the verified cache or reconnect and refresh. |

@@ -6,7 +6,7 @@
  * instead of writing the product name, identifiers, storage keys, or titles by
  * hand.
  */
-import brand from '../../../brand.json';
+import brand from '../../../brand.json' with { type: 'json' };
 
 export const PRODUCT_NAME = brand.name;
 export const SLUG = brand.slug;

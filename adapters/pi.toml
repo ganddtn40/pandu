@@ -13,5 +13,5 @@ version_args = ["--version"]
 protocols = ["openai-chat"]
 base_url_env = ["OPENAI_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY"]
-setup_note = "Point the OpenAI-compatible base URL at Cockpit before starting Pi."
+setup_note = "Point the OpenAI-compatible base URL at Pandu before starting Pi."
 verified = false

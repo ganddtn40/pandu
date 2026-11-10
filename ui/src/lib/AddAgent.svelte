@@ -3,6 +3,7 @@
   import { addAgentState, closeAddAgent } from './add-agent.svelte';
   import { daemonState } from './api/daemon.svelte';
   import type { AdapterStatus } from './api/types';
+  import { CLI_COMMAND } from './brand';
   import { copyText } from './clipboard';
   import { t } from './i18n/i18n.svelte';
   import { toast } from './toast-store.svelte';
@@ -13,7 +14,7 @@
   const installed = $derived(daemonState.adapters.filter((adapter) => adapter.installed).length);
 
   function commandFor(adapter: AdapterStatus): string {
-    return `pandu run -- ${adapter.command}`;
+    return `${CLI_COMMAND} run -- ${adapter.command}`;
   }
 
   async function copy(adapter: AdapterStatus): Promise<void> {

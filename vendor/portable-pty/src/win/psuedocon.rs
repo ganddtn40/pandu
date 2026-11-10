@@ -143,12 +143,12 @@ impl PsuedoCon {
                 ptr::null_mut(),
                 ptr::null_mut(),
                 0,
-                // Cockpit patch: the child must not share the host console's
+                // Pandu patch: the child must not share the host console's
                 // process group. A console control event (Ctrl+C, Ctrl+Break,
                 // close) aimed at the process group of the CLI would otherwise
                 // be able to reach the agent. Interrupts are delivered as a
                 // 0x03 byte on the pseudoconsole instead. See
-                // `README.cockpit.md`.
+                // `README.pandu.md`.
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP,
                 cmd.environment_block().as_mut_slice().as_mut_ptr() as *mut _,
                 cwd.as_ref()

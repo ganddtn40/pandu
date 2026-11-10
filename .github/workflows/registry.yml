@@ -2,7 +2,7 @@ name: Registry
 
 # The registry is a security boundary. Pull requests are checked without the
 # signing key; pushes to a protected branch verify the signed index that
-# Cockpit actually loads. A contributor never needs the private key. The signed
+# Pandu actually loads. A contributor never needs the private key. The signed
 # job uses a release binary because debug builds embed the test trust root.
 
 on:
@@ -45,7 +45,7 @@ jobs:
 
       - name: Validate loose entries, hashes, and scans
         run: |
-          cargo run --locked -p cockpit-cli -- market check \
+          cargo run --locked -p pandu-cli -- market check \
             --dir registry --staged --online --links
 
   signed:
@@ -68,11 +68,11 @@ jobs:
 
       - name: Verify signatures, index hashes, and pinned sources
         run: |
-          cargo run --release --locked -p cockpit-cli -- market check \
+          cargo run --release --locked -p pandu-cli -- market check \
             --dir registry --online --links
 
       - name: Run market registry tests
-        run: cargo test --locked -p cockpit-daemon --lib "market::"
+        run: cargo test --locked -p pandu-daemon --lib "market::"
 
   policy:
     name: Security policy files

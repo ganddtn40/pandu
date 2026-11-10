@@ -28,7 +28,7 @@ source:
 license: "MIT"
 trust: "official"
 reviewer:
-  name: "Cockpit maintainers"
+  name: "Pandu maintainers"
   date: "2026-11-10"
   ci_passed: true
 reviewed_on: "2026-11-10"
@@ -59,16 +59,16 @@ readme: |
 
   An MCP server that retrieves current library documentation and code examples from Context7. It exposes tools for resolving a library name and querying its documentation.
 
-  The stdio package works without an API key. A key only raises rate limits. The remote Context7 URL requires an Authorization bearer header, which Cockpit does not write; use the local package instead.
+  The stdio package works without an API key. A key only raises rate limits. The remote Context7 URL requires an Authorization bearer header, which Pandu does not write; use the local package instead.
 
   ## Command
 
   npx -y @upstash/context7-mcp@4.6.0
 
-  Cockpit writes this command to the agent configuration. The agent runs it when it starts the server.
+  Pandu writes this command to the agent configuration. The agent runs it when it starts the server.
 
   ## Source and license
 
   Source: https://github.com/upstash/context7 at commit 6e68ffcbad0e23cf4fa8c11795ce9e551aeef19b. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
 
-  The repository and the MCP package are MIT. Cockpit records the source tree hash and license evidence in the entry.
+  The repository and the MCP package are MIT. Pandu records the source tree hash and license evidence in the entry.

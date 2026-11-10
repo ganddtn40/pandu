@@ -13,7 +13,7 @@ version_args = ["--version"]
 protocols = ["openai-responses", "openai-chat"]
 base_url_env = ["OPENAI_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY"]
-setup_note = "Set OPENAI_BASE_URL to Cockpit's local /v1 endpoint and use any local key."
+setup_note = "Set OPENAI_BASE_URL to Pandu's local /v1 endpoint and use any local key."
 verified = false
 
 [log_watch]
@@ -30,7 +30,7 @@ verified = true
 
 # Skills live in ~/.agents/skills (user) and .agents/skills (project).
 # Codex also reads ancestor .agents/skills directories and an admin
-# /etc/codex/skills directory; Cockpit writes only the user or project path.
+# /etc/codex/skills directory; Pandu writes only the user or project path.
 # Checked against https://developers.openai.com/codex/skills
 [skills]
 user_paths = ["~/.agents/skills"]

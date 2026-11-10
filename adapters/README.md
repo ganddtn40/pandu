@@ -1,6 +1,6 @@
 # Agent adapters
 
-Adapters tell Cockpit how to detect an agent, how to wrap it with proxy
+Adapters tell Pandu how to detect an agent, how to wrap it with proxy
 environment variables, and where its local session files live. They are
 data-driven TOML files so adding an agent is a one-file pull request, not a
 daemon change.
@@ -12,13 +12,13 @@ daemon change.
 
 ## Principles
 
-- **No TLS interception. No credential capture.** Cockpit never proxies HTTPS
+- **No TLS interception. No credential capture.** Pandu never proxies HTTPS
   by installing a certificate and never reads an agent's keychain or token
   store.
 - **Observe or redirect, never modify.** Proxy mode changes only the base URL
   and API key the agent is told to use. Log-watch mode is read-only.
 - **Fail open.** A missing session file or a parser error must not break the
-  agent. It produces a warning in `cockpit doctor` and the UI.
+  agent. It produces a warning in `pandu doctor` and the UI.
 - **Data, not code.** The daemon ships named parsers; adapters select one and
   describe where files are. Arbitrary scripts in adapter files are forbidden.
 - **Honest labels.** A flight recorded through the proxy says `Recorded via
@@ -48,11 +48,11 @@ version_args = ["--version"]
 [proxy]
 # Protocols the agent speaks through this endpoint.
 protocols = ["openai-chat"] # openai-chat | openai-responses | anthropic | gemini
-# Environment variables Cockpit sets when running the agent.
+# Environment variables Pandu sets when running the agent.
 base_url_env = ["OPENAI_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY"]
 # Human-readable setup note shown in the wizard.
-setup_note = "Point the agent at Cockpit's local base URL."
+setup_note = "Point the agent at Pandu's local base URL."
 # Anything still unconfirmed must stay false.
 verified = false
 
@@ -61,7 +61,7 @@ verified = false
 roots = ["~/.example-agent/sessions"]
 # Glob patterns relative to each root.
 include = ["**/*.jsonl"]
-# A named parser implemented in cockpit-daemon. Unknown names are rejected.
+# A named parser implemented in pandu-daemon. Unknown names are rejected.
 parser = "example-jsonl"
 verified = false
 
@@ -111,7 +111,7 @@ issue; it never reaches the watcher.
 ## Shipped adapters
 
 The following adapters ship with 0.2.0. Capture modes are provisional until
-verified against current vendor docs. `cockpit doctor` lists installed and
+verified against current vendor docs. `pandu doctor` lists installed and
 verified counts; the API returns the same status per adapter.
 
 | Agent | File | Planned capture | Verified |
@@ -138,9 +138,9 @@ verified counts; the API returns the same status per adapter.
 2. Check the vendor's current docs for env vars, flags, and session paths.
 3. Keep `verified = false` until you have tested the adapter against a real
    install.
-4. Add a fixture under `crates/cockpit-daemon/tests/fixtures/<id>/` if you add a
+4. Add a fixture under `crates/pandu-daemon/tests/fixtures/<id>/` if you add a
    log parser.
-5. Run `cargo test -p cockpit-daemon adapters` and `cockpit doctor`.
+5. Run `cargo test -p pandu-daemon adapters` and `pandu doctor`.
 6. Open a PR using the new-agent-adapter issue form.
 
 ## Security review checklist

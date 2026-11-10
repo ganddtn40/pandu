@@ -11,7 +11,7 @@
 
 Developers will always want one more integration: a custom guard, a cost
 exporter, a notification, a report format. Plugins let the community extend
-Cockpit without adding every request to the core binary.
+Pandu without adding every request to the core binary.
 
 A plugin system is also the easiest way to destroy trust. This issue must ship
 with a security model, not after it.

@@ -1,4 +1,5 @@
 import { DaemonError, remoteApi } from './client';
+import { PRODUCT_NAME } from '../brand';
 import type {
   RemoteAuditEntry,
   RemoteDevice,
@@ -44,7 +45,7 @@ let tickCount = 0;
 export function remoteHostErrorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'Pandu could not update remote access.';
+  return `${PRODUCT_NAME} could not update remote access.`;
 }
 
 export async function refreshRemoteStatus(): Promise<void> {

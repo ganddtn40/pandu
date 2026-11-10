@@ -1,4 +1,4 @@
-# Cockpit design system
+# Pandu design system
 
 Status: Phase 4B (Design v2) complete. This document is the source of truth for
 the visual language, design tokens, appearance settings, theme file format, and
@@ -196,7 +196,7 @@ Controls:
   note when the surface style is Matte.
 - **Wallpaper** — procedural, your image, or none. An uploaded image is
   downscaled to a maximum edge of 1920 px, stored as a JPEG data URL under
-  `cockpit.wallpaperImage`, and never exported in a theme file.
+  `pandu.wallpaperImage`, and never exported in a theme file.
 - **Card borders** — on/off.
 - **Motion** — Full, Reduced, Off.
 - **Performance mode** — pauses WebGL and uses CSS surfaces; no reload.
@@ -204,8 +204,8 @@ Controls:
   catalogs land in Phase 5.
 
 Preferences are per-device. They persist in `localStorage` under
-`cockpit.design`; the wallpaper image uses its own key. The legacy keys
-`cockpit.theme`, `cockpit.performance`, and `cockpit.glassPattern` are migrated
+`pandu.design`; the wallpaper image uses its own key. The legacy keys
+`pandu.theme`, `pandu.performance`, and `pandu.glassPattern` are migrated
 automatically when the new key is absent. URL overrides
 (`?theme=`, `?surface=`, `?accent=`, `?radius=`, `?density=`, `?font=`,
 `?fontScale=`, `?motion=`, `?borders=`, `?wallpaper=`, `?lang=`, `?perf=1`,
@@ -213,7 +213,7 @@ automatically when the new key is absent. URL overrides
 
 ## 6. Theme JSON
 
-Themes are versioned JSON. Export writes `cockpit-theme.json`; import validates
+Themes are versioned JSON. Export writes `pandu-theme.json`; import validates
 the file before applying anything; share encodes the same object in a `?share=`
 URL. Imported themes are never executed — the parser only reads known fields,
 rejects unknown enum values, clamps numbers to their allowed ranges, and ignores
@@ -221,7 +221,7 @@ unknown keys for forward compatibility.
 
 ```json
 {
-  "schema": "cockpit.theme",
+  "schema": "pandu.theme",
   "version": 1,
   "theme": "dark",
   "surface": "hybrid",
@@ -240,7 +240,7 @@ unknown keys for forward compatibility.
 
 Rules:
 
-- `schema` must be `cockpit.theme`; `version` must be an integer this build
+- `schema` must be `pandu.theme`; `version` must be an integer this build
   supports (currently 1).
 - Files are limited to 32 KB of text.
 - `wallpaper` may be `procedural`, `image`, or `none`. A shared `image` theme
@@ -267,7 +267,7 @@ Implementation: `ui/src/lib/design/theme-json.ts`. Tests:
 
 Rendering is on demand: a geometry sync runs only when the DOM changes, the
 canvas redraws only when a uniform, shape, theme, wallpaper, or size changes,
-and the loop pauses while the page is hidden. `window.__cockpitGlassStats`
+and the loop pauses while the page is hidden. `window.__panduGlassStats`
 exposes `{ mode, shapes, fps, redrawsPerSecond, redrawsTotal }`; the idle gate
 asserts `redrawsTotal` does not change over three seconds.
 

@@ -13,5 +13,5 @@ version_args = ["--version"]
 protocols = ["openai-chat"]
 base_url_env = ["OPENAI_BASE_URL"]
 api_key_env = ["OPENAI_API_KEY"]
-setup_note = "Configure an OpenAI-compatible LLM with Cockpit as its base URL."
+setup_note = "Configure an OpenAI-compatible LLM with Pandu as its base URL."
 verified = false

@@ -1,4 +1,4 @@
-# Cockpit UI
+# Pandu UI
 
 Svelte 5 + TypeScript + Vite. No heavy UI or animation libraries. The glass
 renderer is custom WebGL2 code in `src/glass`.
@@ -31,7 +31,7 @@ accent colour per theme.
 
 `src/lib/api/` is a typed client plus a reactive store:
 
-- `client.ts` resolves the daemon base URL (`window.__cockpitDaemonUrl`, then
+- `client.ts` resolves the daemon base URL (`window.__panduDaemonUrl`, then
   `http://127.0.0.1:4319` on dev/preview ports, else same origin) and wraps
   every route the UI uses, including `/api/snapshots/{id}`.
 - `daemon.svelte.ts` polls sessions, guards, adapters, and settings, keeps a
@@ -56,7 +56,7 @@ surface is labeled with a `Demo` badge or chip.
   copyable run commands, demo seeding, privacy, platform support, daemon info,
   and the tour replay.
 
-First run redirects to `/welcome` until `cockpit.onboarded` is set; Settings can
+First run redirects to `/welcome` until `pandu.onboarded` is set; Settings can
 replay the tour. `/glass-preview` is development-only and resolves to Home in a
 production build.
 
@@ -79,9 +79,9 @@ Settings → Appearance is a live customization sheet:
 - Wallpaper: procedural, your image, or none
 - Card borders, motion (Full/Reduced/Off), Performance mode, language
 
-Preferences persist per device under `cockpit.design`; the wallpaper image uses
-`cockpit.wallpaperImage`. Legacy theme/performance keys migrate automatically.
-Themes export as `cockpit-theme.json` (`cockpit.theme`, version 1), import with
+Preferences persist per device under `pandu.design`; the wallpaper image uses
+`pandu.wallpaperImage`. Legacy theme/performance keys migrate automatically.
+Themes export as `pandu-theme.json` (`pandu.theme`, version 1), import with
 validation, and share through a `?share=` link. Theme files never execute code,
 and wallpaper images and Performance mode are never exported.
 

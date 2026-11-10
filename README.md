@@ -1,10 +1,12 @@
-# Cockpit
+# Pandu
 
 **A local flight recorder and control tower for AI coding agents.**
 
-Cockpit records what your agents do, shows it live, lets you replay every step,
+Pandu records what your agents do, shows it live, lets you replay every step,
 and asks permission before risky actions. Everything stays on your machine. No
 account, no cloud, no telemetry.
+
+Pandu is not an AI agent; it guides, records and protects the agents you already use.
 
 > **Status:** the 0.2.0 rewrite is in progress on the `rewrite` branch. Phases
 > 0–8 are complete: the Rust core, proxy, adapters, guards, snapshots, the
@@ -15,7 +17,7 @@ account, no cloud, no telemetry.
 
 ## What v0.2.0 will be
 
-- **One binary.** `cockpit` starts the local daemon and opens the embedded UI.
+- **One binary.** `pandu` starts the local daemon and opens the embedded UI.
 - **Five tabs.** Home, Inbox, Flights, Market, Settings, plus a global quick
   prompt (`Ctrl/Cmd+K`).
 - **Design v2.** Dark graphite bento dashboards with matte cards, hairline
@@ -26,7 +28,7 @@ account, no cloud, no telemetry.
   per flight.
 - **Local by default.** SQLite on disk, no telemetry, no TLS interception, no
   credential capture.
-- **Fail-open.** If Cockpit breaks, your agent keeps working.
+- **Fail-open.** If Pandu breaks, your agent keeps working.
 
 ## Platform support
 
@@ -53,7 +55,7 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
   density, font and size, glass intensity/blur/refraction, wallpaper
   (procedural/own image/none), card borders, motion, Performance mode, and
   language, with instant live preview.
-- Preferences are per-device. Themes are versioned JSON (`cockpit.theme`,
+- Preferences are per-device. Themes are versioned JSON (`pandu.theme`,
   version 1) that can be exported, imported, and shared; imports are validated
   and never execute code. Wallpaper images stay on the device.
 - Home widgets are rearrangeable and hideable: drag on desktop, long-press on
@@ -61,7 +63,7 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 - Demo mode is explicit: a `Demo` badge appears in the top bar, sessions and
   approvals carry a `Demo` chip, and live data is never mixed with seeded rows
   silently. Demo data is only offered when the daemon runs with
-  `COCKPIT_DEMO=1`.
+  `PANDU_DEMO=1`.
 
 The full contract is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -69,9 +71,10 @@ The full contract is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 | Path | Purpose |
 | --- | --- |
-| `crates/cockpit-core` | Domain types, pricing, adapters, redaction, SSE parsing |
-| `crates/cockpit-daemon` | Proxy, API, WebSocket, SQLite, watchers, guards |
-| `crates/cockpit-cli` | The `cockpit` binary; embeds UI assets |
+| `brand.json` | Single source of truth for every product name and identifier |
+| `crates/pandu-core` | Domain types, pricing, adapters, redaction, SSE parsing |
+| `crates/pandu-daemon` | Proxy, API, WebSocket, SQLite, watchers, guards |
+| `crates/pandu-cli` | The `pandu` binary; embeds UI assets |
 | `app` | Tauri 2 desktop app and Android companion |
 | `ui` | Svelte 5 + TypeScript + Vite UI and WebGL2 glass |
 | `design` | Logo sources and export scripts |
@@ -94,7 +97,7 @@ Rust gates:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo build --release -p cockpit-cli
+cargo build --release -p pandu-cli
 ```
 
 UI gates:
@@ -110,7 +113,7 @@ pnpm exec playwright test
 
 The UI preview is available at `http://127.0.0.1:5174` with `pnpm dev`, or
 `http://127.0.0.1:4174` with `pnpm preview` after a build. Start the daemon with
-`cockpit serve` (or `cockpit demo` for seeded data); the UI calls
+`pandu serve` (or `pandu demo` for seeded data); the UI calls
 `http://127.0.0.1:4319` on dev/preview ports and the same origin otherwise.
 Playwright starts its own disposable demo and live daemons, so it never touches
 your local database.
@@ -133,6 +136,8 @@ your local database.
 - [Issue drafts](docs/issues/) — ready-to-paste `help wanted` work
 - [Adapter format](adapters/README.md) — how to add an agent
 - [UI notes](ui/README.md) — glass engine, budgets, and commands
+- [Releasing](docs/RELEASING.md) — gates, package-name checks, and registry signing
+- [Install for agents](INSTALL-FOR-AGENTS.md) — copy-paste setup for an AI agent
 
 ## License
 

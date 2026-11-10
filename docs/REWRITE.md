@@ -1,24 +1,24 @@
-# Cockpit 0.2.0 — Rewrite decision record
+# Pandu 0.2.0 — Rewrite decision record
 
 Status: Phase 5 complete
 Branch: `rewrite`
-Baseline: `main` at `1d65df2` (`feat: release Cockpit 0.1.0`)
+Baseline: `main` at `1d65df2` (the 0.1.0 release commit)
 
-This document records what Cockpit 0.1.0 does, what the rewrite keeps, what it
+This document records what release 0.1.0 does, what the rewrite keeps, what it
 drops, and how the new system is put together. The old TypeScript/Node code is
 kept under `legacy/` as the behavior spec until the Rust implementation reaches
 parity. It is not a dependency of the new build.
 
 ## 1. Why rewrite
 
-Cockpit 0.1.0 proved the product idea but grew into a 9-screen monorepo:
+Release 0.1.0 proved the product idea but grew into a 9-screen monorepo:
 React web app, Tauri desktop shell, Capacitor Android shell, a Node daemon, a
 Node CLI, and a shared TypeScript package. It worked, but it was hard to install,
 hard to explain, and heavy for a tool that should feel invisible.
 
 The rewrite has three goals:
 
-1. **One small binary.** `cockpit` starts the daemon and serves an embedded UI.
+1. **One small binary.** `pandu` starts the daemon and serves an embedded UI.
    No Node runtime, no package manager, no background service to babysit.
 2. **Five tabs a beginner can understand.** Home, Inbox, Flights, Market,
    Settings, plus one global quick prompt. Everything else is deferred, not
@@ -87,12 +87,17 @@ Cut tables belong to the deferred features and are listed in
 `hook_otel`), `agent_id`, and `source_label` columns so every flight can say
 `Recorded via proxy` or `Observed from logs` without guessing.
 
-The old database is not migrated in v1. The new daemon uses a fresh database at
-`~/.cockpit/v2/cockpit.db` (or `$COCKPIT_HOME/cockpit.db`), so a 0.1.0
-`~/.cockpit/cockpit.db` is never opened by accident. The store refuses a
-database whose `sessions` table lacks the new `capture_mode` column. Importing a
-0.1.0 database is a future, separate migration because the cut tables and new
-capture columns make a blind copy unsafe.
+The 0.1.0 database is not imported. The new daemon uses a fresh database at
+`~/.pandu/v2/pandu.db` (or `$PANDU_HOME/pandu.db`), so a 0.1.0 database is never
+opened by accident. The store refuses a database whose `sessions` table lacks the
+new `capture_mode` column. Importing a 0.1.0 database is a future, separate
+migration because the cut tables and new capture columns make a blind copy
+unsafe.
+
+The rename itself is handled at first start: if the pre-rename data directory
+exists and the new one does not, the daemon copies the whole tree, gives the
+copied database its new file name, and leaves the old directory untouched. If
+both directories exist, the new one wins and nothing is copied.
 
 ### 2.3 Guard rules worth keeping
 
@@ -130,8 +135,7 @@ an honest empty state instead of claiming a snapshot exists.
 
 - Codes use `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, 8 characters, displayed
   `XXXX-XXXX`, 5-minute default TTL, single use, SHA-256 hashed at rest.
-- Device tokens use the `ckp_` prefix plus 32 random bytes, SHA-256 hashed at
-  rest.
+- Device tokens use 32 random bytes, hex encoded, SHA-256 hashed at rest.
 - Loopback is trusted. Non-loopback `/api/*` and `/s/*` require a Bearer token.
   `/api/health` and `/api/pairing/claim` stay public. WebSocket accepts
   `?token=`.
@@ -189,7 +193,7 @@ Old screens also fold into the five new tabs:
 | Desktop | Tauri 2 + Node daemon | Tauri 2 embedding the Rust daemon |
 | Mobile | Capacitor app | Tauri 2 Android companion |
 | UI | React + Vite, amber terminal style | Svelte 5 + Vite, WebGL2 glass, design v2 bento |
-| CLI | Node CLI | Single static `cockpit` binary |
+| CLI | Node CLI | Single static `pandu` binary |
 | Capture | Proxy only | Proxy, log-watch, hook/OTel, labeled per flight |
 | Agents | Hand-written integrations | Data-driven TOML adapters |
 | Onboarding | Multi-page setup | 3-step wizard, one copyable command |
@@ -234,12 +238,12 @@ with `verified = false` until checked against current vendor documentation.
 ### CLI
 
 ```
-cockpit                 start the daemon and open the UI
-cockpit run -- <agent>  start the agent with Cockpit's environment
-cockpit demo            seed a demo flight
-cockpit doctor          check install, ports, database, git, adapters
-cockpit report          build a redacted diagnostics bundle
-cockpit pair            show a pairing code for the Android companion
+pandu                 start the daemon and open the UI
+pandu run -- <agent>  start the agent with Pandu's environment
+pandu demo            seed a demo flight
+pandu doctor          check install, ports, database, git, adapters
+pandu report          build a redacted diagnostics bundle
+pandu pair            show a pairing code for the Android companion
 ```
 
 Every error states what happened and the exact fix.
@@ -248,9 +252,9 @@ Every error states what happened and the exact fix.
 
 ```
 crates/
-  cockpit-core/     domain types, pricing, adapter model, redaction, SSE parsing
-  cockpit-daemon/   axum proxy + API + WebSocket, SQLite, watchers, guards, snapshots
-  cockpit-cli/      the `cockpit` binary; embeds UI assets via rust-embed
+  pandu-core/     domain types, pricing, adapter model, redaction, SSE parsing
+  pandu-daemon/   axum proxy + API + WebSocket, SQLite, watchers, guards, snapshots
+  pandu-cli/      the `pandu` binary; embeds UI assets via rust-embed
 app/                Tauri 2 desktop + Android companion
 ui/                 Svelte 5 + TypeScript + Vite; custom WebGL2 glass
 adapters/           TOML agent definitions
@@ -259,8 +263,8 @@ packaging/          cargo-dist, npm wrapper, winget, scoop, Tauri, Android
 legacy/             0.1.0 TypeScript/Node behavior spec (delete after parity)
 ```
 
-Dependency direction is one-way: `cockpit-cli` → `cockpit-daemon` →
-`cockpit-core`. The Tauri app embeds the daemon crate. The UI talks to the
+Dependency direction is one-way: `pandu-cli` → `pandu-daemon` →
+`pandu-core`. The Tauri app embeds the daemon crate. The UI talks to the
 daemon over loopback HTTP/WebSocket. The Android companion uses the same API
 over the LAN with a paired device token.
 
@@ -269,7 +273,7 @@ over the LAN with a paired device token.
 If recording, guards, redaction, snapshots, or SQLite fail, the proxy still
 forwards the request and response bytes. The failure is logged, surfaced as a
 warning in the UI, and never changes the upstream payload. The user's agent must
-not break because Cockpit broke.
+not break because Pandu broke.
 
 ### Performance budgets
 
@@ -312,7 +316,7 @@ Fallbacks: CSS `backdrop-filter`, matte surfaces, reduced transparency, reduced
 motion, Performance mode, and `?glass=off`. Overlay sheets use CSS glass over an
 opaque `--sheet-bg` because the canvas sits below the scrims.
 
-Themes are versioned JSON (`cockpit.theme`, version 1), validated on import and
+Themes are versioned JSON (`pandu.theme`, version 1), validated on import and
 never executed. Wallpaper images and Performance mode are device-local and are
 never exported. The full token and component contract is in
 [`DESIGN.md`](DESIGN.md).
@@ -322,7 +326,7 @@ never exported. The full token and component contract is in
 - No cloud account, sync, or telemetry.
 - No TLS interception and no reading agent credentials.
 - No blocking in log-watch or hook mode.
-- No old database migration.
+- No 0.1.0 database import; the rename only copies the current data directory.
 - No plugin runtime.
 - No team/multi-user server.
 - No mobile recorder; Android is a viewer/approver companion.
@@ -366,7 +370,7 @@ never exported. The full token and component contract is in
 - Adapters are embedded from `adapters/*.toml` with rust-embed. User files in
   `<home>/adapters/*.toml` override built-ins by id; a broken user file becomes
   an `AdapterIssue`, never a startup failure.
-- All 15 adapters ship with `verified = false`. `cockpit doctor` reports
+- All 15 adapters ship with `verified = false`. `pandu doctor` reports
   installed and verified counts, adapter issues, log-watch state, and daemon
   version drift.
 - Parsers are compiled into the daemon: `claude-code-jsonl`, `codex-jsonl`,
@@ -381,11 +385,11 @@ never exported. The full token and component contract is in
   A content hash cannot identify an appended log.
 - Observed steps are stored as completed rows with historical timestamps; they
   never pass through a fake running state.
-- `cockpit pair` issues a six-digit, hashed, single-use code with a five-minute
+- `pandu pair` issues a six-digit, hashed, single-use code with a five-minute
   TTL and five attempts. A claim returns a 64-hex device token; only its hash is
   stored. Requiring the token on non-loopback requests lands in Phase 7.
 - CLI commands `run`, `demo`, `doctor`, `report`, and `pair` are in place.
-  `cockpit run` starts an owned daemon if needed, sets proxy environment
+  `pandu run` starts an owned daemon if needed, sets proxy environment
   variables from the matched adapter, and passes a local sentinel instead of the
   user's real API key.
 - 123 tests pass at the Phase 2 gate (4 CLI, 65 core, 47 daemon unit, 7
@@ -393,14 +397,14 @@ never exported. The full token and component contract is in
 
 ### Phase 3 implementation notes
 
-- Guards and redaction share one pattern list in `cockpit-core`. A secret is
+- Guards and redaction share one pattern list in `pandu-core`. A secret is
   masked before storage; the forwarded bytes are never changed. Overlapping
   patterns are both reported, matching 0.1.0 behavior.
 - Seven built-in guard rules are seeded idempotently: private key (pause), API
   key (warn), destructive command (pause), exfiltration endpoint (pause), git
   rewrite (warn), release command (warn), and instruction loop (warn).
 - Pauses wait on an in-memory, single-use approval broker. The default window is
-  120 s (`COCKPIT_GUARD_APPROVAL_MS`). Deny and expiry return 403
+  120 s (`PANDU_GUARD_APPROVAL_MS`). Deny and expiry return 403
   `guard_blocked`; a budget block returns 402 `budget_exceeded`. Every detector
   fails open: a guard or budget error is logged and the request continues.
 - Budgets are local arithmetic over recorded spend. Warn policies raise one
@@ -446,7 +450,7 @@ never exported. The full token and component contract is in
   sets `data-glass-mode` to `webgl` or `fallback`; CSS `backdrop-filter` is the
   fallback. Reduced transparency also disables backdrop blur.
 - Light and dark themes resolve from a forced URL value, then
-  `localStorage['cockpit.theme']`, then the OS preference. The theme is applied
+  `localStorage['pandu.theme']`, then the OS preference. The theme is applied
   before first paint and survives reloads.
 - The bundled font is a 48 KB Inter variable Latin subset, used after system UI
   fonts with `font-display: swap`. No font-loading layout shift.
@@ -511,16 +515,16 @@ never exported. The full token and component contract is in
   theme, surface, accent, radius, density, font and size, glass
   intensity/blur/refraction, procedural/user/none wallpaper, card borders,
   motion, Performance mode, and language. Preferences persist per device under
-  `cockpit.design`; the wallpaper image uses `cockpit.wallpaperImage`. Legacy
+  `pandu.design`; the wallpaper image uses `pandu.wallpaperImage`. Legacy
   theme/performance/pattern keys migrate automatically.
-- Themes are versioned JSON (`cockpit.theme`, version 1). Export writes
-  `cockpit-theme.json`; import validates every field, clamps numbers, rejects
+- Themes are versioned JSON (`pandu.theme`, version 1). Export writes
+  `pandu-theme.json`; import validates every field, clamps numbers, rejects
   unknown enum values, limits files to 32 KB, and never executes code. Share
   links encode the same object in `?share=`. Wallpaper images and Performance
   mode are device-local and are never exported.
 - Home is a bento grid of rearrangeable and hideable widgets. Desktop uses drag
   and drop; phone uses long-press edit mode. Order and visibility persist under
-  `cockpit.widgets`; a reset action restores the default layout.
+  `pandu.widgets`; a reset action restores the default layout.
 - The glass engine now supports theme-aware tint and wallpaper scrims (light and
   frost are light surfaces; only dark is smoked), accent tinting, surface layer
   filtering (`card` vs `float`), intensity/blur/refraction uniforms, image
@@ -569,7 +573,7 @@ never exported. The full token and component contract is in
 ### Phase 5 implementation notes (real data)
 
 - `ui/src/lib/api/` adds a typed daemon client and a reactive store. The client
-  resolves the base URL from `window.__cockpitDaemonUrl`, then
+  resolves the base URL from `window.__panduDaemonUrl`, then
   `http://127.0.0.1:4319` on dev/preview ports, then the page origin. The store
   polls sessions, guards, adapters, and settings, and keeps a reconnecting
   WebSocket to `/api/live`. `liveEvents` and `pendingGuards()` drive the shell
@@ -577,12 +581,12 @@ never exported. The full token and component contract is in
 - Home, Inbox, Flights, Market, and Settings all read daemon data. Every screen
   has explicit loading, empty, offline, and error states. Demo rows are shown
   only when `/api/health` reports `demoMode`, and they carry a `Demo` chip.
-- First run redirects to `/welcome` until `cockpit.onboarded` is set. The tour
+- First run redirects to `/welcome` until `pandu.onboarded` is set. The tour
   has three steps, can be skipped, and can be replayed from Settings. The
   redirect uses the router (`navigate('/welcome', { replace: true })`) because
   the router module initializes from the URL during import.
 - Add agent lists the real adapters from `/api/adapters`, shows installed and
-  missing state, and copies `cockpit run -- <agent>` with a toast. The quick
+  missing state, and copies `pandu run -- <agent>` with a toast. The quick
   prompt cannot send prompts through the daemon yet, so it copies the command
   or prompt and says so instead of pretending to send.
 - Flights supports status filters, search, `?session=<id>` deep links, recorded
@@ -634,7 +638,7 @@ Commands run at each phase gate:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo build -p cockpit-cli
+cargo build -p pandu-cli
 ```
 
 CI runs the same commands on Windows, macOS, and Linux. `Cargo.lock` is
@@ -642,7 +646,7 @@ committed and updated by the workspace build.
 
 ## 10. Definition of done for the rewrite
 
-- One `cockpit` binary starts the daemon and UI with no Node runtime.
+- One `pandu` binary starts the daemon and UI with no Node runtime.
 - Five tabs — Home, Inbox, Flights, Market, Settings — work on desktop and phone
   widths in Dark, Light, and Frost, with all three surface styles.
 - The appearance sheet, theme JSON import/export/share, bento widgets, and quick

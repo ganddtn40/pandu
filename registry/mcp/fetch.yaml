@@ -26,7 +26,7 @@ source:
 license: "MIT"
 trust: "official"
 reviewer:
-  name: "Cockpit maintainers"
+  name: "Pandu maintainers"
   date: "2026-11-10"
   ci_passed: true
 reviewed_on: "2026-11-10"
@@ -56,16 +56,16 @@ readme: |
 
   An MCP server that fetches a URL and converts the page to markdown. The fetch tool accepts a URL, a maximum length, a start index for chunked reads, a raw-content flag, and a per-call timeout.
 
-  The server refuses private, loopback, link-local, and cloud-metadata addresses by default, and checks every redirect hop the same way. Cockpit does not pass the --allow-private-ips flag, so the guard stays on.
+  The server refuses private, loopback, link-local, and cloud-metadata addresses by default, and checks every redirect hop the same way. Pandu does not pass the --allow-private-ips flag, so the guard stays on.
 
   ## Command
 
   uvx mcp-server-fetch==2026.11.4
 
-  Cockpit writes this command to the agent configuration. The agent runs it when it starts the server.
+  Pandu writes this command to the agent configuration. The agent runs it when it starts the server.
 
   ## Source and license
 
   Source: https://github.com/modelcontextprotocol/servers at commit 36380287ed3b15d115b55f546617d723072b1296. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
 
-  The per-server LICENSE file is MIT. Cockpit records the source tree hash and license evidence in the entry.
+  The per-server LICENSE file is MIT. Pandu records the source tree hash and license evidence in the entry.

@@ -1,4 +1,4 @@
-# Cockpit app
+# Pandu app
 
 Tauri 2 application for desktop and Android, built from one codebase.
 

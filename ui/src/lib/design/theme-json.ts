@@ -147,7 +147,9 @@ export function parseThemeJson(input: unknown): ThemeParseResult {
 
 export function parseThemeText(text: string): ThemeParseResult {
   if (text.length > THEME_TEXT_LIMIT) {
-    return fail('The theme file is too large. Pandu themes must be under 32 KB.');
+    return fail(
+      `The theme file is too large. ${PRODUCT_NAME} themes must be under 32 KB.`,
+    );
   }
   try {
     return parseThemeJson(JSON.parse(text) as unknown);

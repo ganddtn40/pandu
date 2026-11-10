@@ -28,7 +28,7 @@ source:
 license: "MIT"
 trust: "official"
 reviewer:
-  name: "Cockpit maintainers"
+  name: "Pandu maintainers"
   date: "2026-11-10"
   ci_passed: true
 reviewed_on: "2026-11-10"
@@ -56,9 +56,9 @@ mcp:
 readme: |
   # GitHub MCP Server (remote)
 
-  GitHub's hosted MCP server. It exposes repository, issue, pull request, code search, and Actions tools over streamable HTTP. GitHub hosts the server; Cockpit only writes the URL.
+  GitHub's hosted MCP server. It exposes repository, issue, pull request, code search, and Actions tools over streamable HTTP. GitHub hosts the server; Pandu only writes the URL.
 
-  The agent authenticates through GitHub OAuth. A personal access token can be supplied manually if the agent supports custom headers, but the registry HTTP recipe has no header field, so Cockpit does not write one.
+  The agent authenticates through GitHub OAuth. A personal access token can be supplied manually if the agent supports custom headers, but the registry HTTP recipe has no header field, so Pandu does not write one.
 
   ## Configuration
 
@@ -68,4 +68,4 @@ readme: |
 
   Source: https://github.com/github/github-mcp-server at commit 4bcdcdf8d7beee98c9448e73e257308280924cc4. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
 
-  The repository LICENSE is MIT. Cockpit records the source tree hash and license evidence in the entry.
+  The repository LICENSE is MIT. Pandu records the source tree hash and license evidence in the entry.

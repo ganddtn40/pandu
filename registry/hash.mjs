@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Print the normalized content hash Cockpit uses for source.content_sha256.
+// Print the normalized content hash Pandu uses for source.content_sha256.
 //
 // Usage:
 //   node registry/hash.mjs path/to/skill-directory
@@ -11,8 +11,8 @@
 //   - the byte length as an unsigned 64-bit big-endian integer,
 //   - the file bytes.
 // Empty directories are ignored. Symlinks are refused. This mirrors
-// tree_hash() in crates/cockpit-daemon/src/market/archive.rs, so the output
-// must match the hash Cockpit verifies after downloading a pinned tarball.
+// tree_hash() in crates/pandu-daemon/src/market/archive.rs, so the output
+// must match the hash Pandu verifies after downloading a pinned tarball.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';

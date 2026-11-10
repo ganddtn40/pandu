@@ -1,6 +1,6 @@
-# Cockpit roadmap
+# Pandu roadmap
 
-Cockpit records what AI coding agents do, shows it live, replays it, and asks
+Pandu records what AI coding agents do, shows it live, replays it, and asks
 permission before risky actions. Everything stays on the user's machine. Zero
 telemetry.
 
@@ -68,7 +68,7 @@ The full token, surface, theme, and accessibility contract is in
 - [x] TOML adapters for OpenCode, Claude Code, Codex CLI, Cursor CLI, GitHub
       Copilot CLI, Antigravity/Gemini CLI, Cline, Roo/Kilo Code, Aider, Goose,
       Crush, Pi, OpenHands, Qwen Code, Amp
-- [x] Adapter `verified` flag, surfaced by the API and `cockpit doctor`
+- [x] Adapter `verified` flag, surfaced by the API and `pandu doctor`
 - [ ] Adapter drift checks against current vendor docs
 
 ### Trust and safety
@@ -78,7 +78,7 @@ The full token, surface, theme, and accessibility contract is in
 - [x] Approvals API and countdown
 - [x] Redaction before storage; forwarded bytes untouched
 - [x] Git snapshots with a temporary index; graceful no-git fallback
-- [x] Fail-open everywhere: a Cockpit failure never breaks an agent
+- [x] Fail-open everywhere: a Pandu failure never breaks an agent
 - [x] Loopback-only by default; hashed pairing codes and device tokens
 
 ### App and UI
@@ -99,7 +99,7 @@ The full token, surface, theme, and accessibility contract is in
 ### Install and release
 
 - [ ] cargo-dist CLI installers: PowerShell and shell
-- [ ] npm wrapper (`npx cockpit`)
+- [ ] npm wrapper (`npx pandu`)
 - [ ] winget and scoop manifests
 - [ ] Windows Tauri bundle (MSI/NSIS)
 - [ ] Signed Android APK with documented keystore steps

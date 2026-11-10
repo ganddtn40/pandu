@@ -41,14 +41,14 @@ const variant = variantIndex === -1 ? 'production' : args[variantIndex + 1];
 if (variant !== 'production' && variant !== 'test') {
   fail('--variant must be production or test');
 }
+const indexFile = variant === 'test' ? 'index.test.json' : 'index.json';
+const revokedFile = variant === 'test' ? 'revoked.test.json' : 'revoked.json';
 const keyId =
   variant === 'test'
     ? brand.registry.testKeyId
     : fs.existsSync(path.join(dir, indexFile))
       ? JSON.parse(fs.readFileSync(path.join(dir, indexFile), 'utf8')).keyId
       : brand.registry.keyId;
-const indexFile = variant === 'test' ? 'index.test.json' : 'index.json';
-const revokedFile = variant === 'test' ? 'revoked.test.json' : 'revoked.json';
 
 const privateKey = crypto.createPrivateKey(fs.readFileSync(keyPath));
 const publicKeyObject = crypto.createPublicKey(privateKey);

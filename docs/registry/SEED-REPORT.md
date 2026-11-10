@@ -3,7 +3,7 @@
 - **Date:** 2026-11-10
 - **Branch:** `rewrite`
 - **Scope:** seed the Market registry with real, primary-source-verified entries
-- **Signing:** test key only (`cockpit-market-test-2026`)
+- **Signing:** test key only (`pandu-market-test-2026`)
 - **Result:** 22 entries (11 skills, 8 MCP servers, 3 example fixtures) pass the
   staged and signed online checks
 
@@ -48,7 +48,7 @@ the whole-tree hash is reviewer evidence.
 
 ## Published entries
 
-Every published entry is `trust: official`, reviewer `Cockpit maintainers`,
+Every published entry is `trust: official`, reviewer `Pandu maintainers`,
 `reviewed_on: 2026-11-10`, `ci_passed: true`. All sources are vendor-owned
 repositories. The test-signed index is not a production promotion; production
 signing still requires the human checklist in
@@ -81,7 +81,7 @@ at user and project scope.
 
 ### MCP servers (8)
 
-MCP entries write configuration only. Cockpit never runs the package manager,
+MCP entries write configuration only. Pandu never runs the package manager,
 the container, or the server during install. Environment values are recorded as
 names; no secret is stored in the registry.
 
@@ -164,7 +164,7 @@ Checked on 2026-11-10 against the current vendor documentation:
 
 | Agent | Skills | MCP |
 | --- | --- | --- |
-| **Claude Code** | `~/.claude/skills`, `.claude/skills` | Project `.mcp.json` or `claude mcp add`. Cockpit never writes `~/.claude.json` because it also holds Claude Code app state. |
+| **Claude Code** | `~/.claude/skills`, `.claude/skills` | Project `.mcp.json` or `claude mcp add`. Pandu never writes `~/.claude.json` because it also holds Claude Code app state. |
 | **Codex CLI** | `~/.agents/skills`, `.agents/skills`; Codex also reads ancestor `.agents/skills` and admin `/etc/codex/skills` | `~/.codex/config.toml`, `.codex/config.toml` under `[mcp_servers.<name>]` |
 | **OpenCode** | `~/.config/opencode/skills`, `.opencode/skills`; compatibility paths `~/.claude/skills`, `~/.agents/skills`, `.claude/skills`, `.agents/skills` | `mcp.servers` in `opencode.json` / `opencode.jsonc` |
 
@@ -188,13 +188,13 @@ Two scanner fixes were required before the seed could pass:
 ## Checks run
 
 ```text
-cargo run -q -p cockpit-cli -- market check --dir registry --staged
+cargo run -q -p pandu-cli -- market check --dir registry --staged
 # before claude-api was held back
 registry: 23 entries checked, 3 downloaded, OK
 # final staged registry
 registry: 22 entries checked, 3 downloaded, OK
 
-cargo run -q -p cockpit-cli -- market check --dir registry --staged --online
+cargo run -q -p pandu-cli -- market check --dir registry --staged --online
 registry: 22 entries checked, 14 downloaded, OK
 
 node registry/sign.mjs --key <test-key> --variant test --build --dir registry
@@ -202,19 +202,19 @@ public key: 6Zxqlnu7Ci8srz7rzhSxmrnCyyWMZYKNWPMTtXxZloY=
 signed registry\index.test.json
 signed registry\revoked.test.json
 
-cargo run -q -p cockpit-cli -- market check --dir registry --online
+cargo run -q -p pandu-cli -- market check --dir registry --online
 registry: 22 entries checked, 14 downloaded, OK
 ```
 
 The staged check was run once with 23 entries before `claude-api` was held
 back. The signed check uses the debug-build test index (`index.test.json`) and
-the test key id `cockpit-market-test-2026`.
+the test key id `pandu-market-test-2026`.
 
 ## Signing and release status
 
 - The test index and revocation list are signed with the test key. The public
   key matches `TEST_REGISTRY_PUBLIC_KEY_BASE64` in
-  `crates/cockpit-daemon/src/market/mod.rs`.
+  `crates/pandu-daemon/src/market/mod.rs`.
 - No private key is in the repository. The production index and revocation
   list were not signed in this phase.
 - A release build rejects the test key by design
@@ -227,7 +227,7 @@ the test key id `cockpit-market-test-2026`.
   needs a custom `Authorization` header, which the registry HTTP recipe cannot
   express; the entry documents it as a manual step.
 - **Context7 remote:** the remote URL requires an `Authorization: Bearer`
-  header. Use the pinned stdio package instead; Cockpit writes that command.
+  header. Use the pinned stdio package instead; Pandu writes that command.
 - **Playwright:** the package does not install browser binaries. Run the
   Playwright install step once on the machine before enabling the server.
 - **GitHub Docker:** Docker must be installed and running, and the token is

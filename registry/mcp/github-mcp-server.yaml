@@ -29,7 +29,7 @@ source:
 license: "MIT"
 trust: "official"
 reviewer:
-  name: "Cockpit maintainers"
+  name: "Pandu maintainers"
   date: "2026-11-10"
   ci_passed: true
 reviewed_on: "2026-11-10"
@@ -68,7 +68,7 @@ readme: |
 
   Runs GitHub's MCP server locally in a Docker container. The image is pinned by digest to the v2.1.0 release, and the container reads GITHUB_PERSONAL_ACCESS_TOKEN from its environment.
 
-  Docker must be installed and running. Cockpit asks for the token at install time and writes it to the agent configuration; it never stores the token in the registry or the install manifest.
+  Docker must be installed and running. Pandu asks for the token at install time and writes it to the agent configuration; it never stores the token in the registry or the install manifest.
 
   ## Command
 
@@ -78,4 +78,4 @@ readme: |
 
   Source: https://github.com/github/github-mcp-server at commit 4bcdcdf8d7beee98c9448e73e257308280924cc4. License evidence and the pinned tree hash are recorded in the registry entry and the seed report.
 
-  The repository LICENSE is MIT. Cockpit records the source tree hash and license evidence in the entry.
+  The repository LICENSE is MIT. Pandu records the source tree hash and license evidence in the entry.
