@@ -46,8 +46,9 @@ otherwise.
 
 Source: `https://platform.claude.com/docs/en/about-claude/pricing` and
 `https://platform.claude.com/docs/en/about-claude/models/overview`.
-`claude-haiku-5-5` is billed at $0.50 input / $2.50 output once the prompt is
-over 100K tokens; the table keeps the standard rate and the note records the
+`claude-haiku-5-5` prices each request on its own: prompts over 100K tokens are
+billed at $0.50 input, $2.50 output, $0.05 cache read, and $0.625 5-minute
+cache write. The table keeps the standard rate and `longContext` records the
 tier. `claude-sonnet-4` is retained only so historical flights remain priced; it
 has no `verifiedOn` because it was not re-verified this cycle and Anthropic lists
 that generation as retired.
@@ -100,11 +101,30 @@ Anthropic-compatible endpoint, the effort field is `output_config.effort`.
   this state.
 - Cached input is billed at the cache-read rate when the provider reports cache
   reads. It is not silently folded into the input rate.
-- The override preview is a warning signal, not a bill. It compares one million
-  input tokens plus one million output tokens at the current model and at the
-  target model, and reports the ratio and direction. If either side has an
-  unknown price the preview says so and requires the user to acknowledge it by
-  pressing **Apply override** anyway.
+- The override preview is a warning signal, not a bill. It prices this flight's
+  actual input, cached-input, cache-write, and output tokens at the current and
+  target models, applies the provider's long-context tiers, and reports the
+  percentage and ratio. It also prices the first request after a switch, which
+  re-reads the current context with a cold provider cache. If either side has an
+  unknown price the preview says **Price unknown**, shows no dollar estimate,
+  and still requires the user to acknowledge it by pressing **Apply override**
+  anyway.
+- Long-context tiers live in each row as `longContext`. `scope: "session"` means
+  one prompt above the threshold reprices the whole flight (OpenAI).
+  `scope: "request"` means only prompts above the threshold pay the higher rates
+  (Anthropic Haiku 5.5 and Gemini 2.5 Pro). The preview applies request-scoped
+  tiers per recorded model call, so a large prompt does not reprice the small
+  ones.
+
+| Model | Threshold | Input | Cache read | Output | Scope |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `gpt-5.5`, `gpt-5.4` | 272,000 | 2× base | 2× base | 1.5× base | session |
+| `claude-haiku-5-5` | 100,000 | $0.50 | $0.05 | $2.50 | request |
+| `gemini-2.5-pro` | 200,000 | $2.50 | $0.25 | $15.00 | request |
+
+Sources: `https://developers.openai.com/api/docs/pricing`,
+`https://platform.claude.com/docs/en/about-claude/pricing`, and
+`https://ai.google.dev/gemini-api/docs/pricing`, all verified on `2026-11-10`.
 
 ## 3. Model and effort overrides
 

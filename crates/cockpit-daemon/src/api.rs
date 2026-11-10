@@ -7,7 +7,10 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use cockpit_core::cost::{ModelPricing, canonical_provider, find_builtin_model};
+use cockpit_core::cost::{
+    ModelPricing, canonical_provider, estimate_first_request_cost, estimate_flight_cost,
+    find_builtin_model,
+};
 use cockpit_core::guard::{
     GuardAction, GuardEventStatus, GuardEvidence, GuardRuleKind, GuardSeverity,
 };
@@ -300,7 +303,7 @@ pub async fn preview_session_model(
         .get_session(&id)
         .map_err(store_error)?
         .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
-    let relative_cost = relative_cost_payload(&session, &override_);
+    let relative_cost = relative_cost_payload(&state, &session, &override_);
     Ok(Json(json!({
         "override": override_,
         "relativeCost": relative_cost,
@@ -332,7 +335,7 @@ pub async fn put_session_model(
         .get_session(&id)
         .map_err(store_error)?
         .ok_or_else(|| ApiError::not_found("That flight does not exist."))?;
-    let relative_cost = relative_cost_payload(&session, &override_);
+    let relative_cost = relative_cost_payload(&state, &session, &override_);
     Ok(Json(json!({
         "override": override_,
         "relativeCost": relative_cost,
@@ -435,6 +438,7 @@ fn model_payload(row: &ModelPricing) -> Value {
         "outputPerMtok": row.output_per_mtok,
         "cacheReadPerMtok": row.cache_read_per_mtok,
         "cacheWritePerMtok": row.cache_write_per_mtok,
+        "longContext": row.long_context,
         "currency": row.currency,
         "source": row.source,
         "verifiedOn": row.verified_on,
@@ -457,9 +461,13 @@ fn session_provider(session: &Session) -> String {
     canonical_provider(&provider)
 }
 
-/// Compare one million input tokens plus one million output tokens. This is a
-/// warning signal, not a bill: the UI labels it "estimated relative cost".
-fn relative_cost_payload(session: &Session, override_: &ModelOverride) -> Value {
+/// Estimate what this flight's recorded usage would cost on another model.
+///
+/// The estimate uses the flight's actual input, cached-input, cache-write, and
+/// output tokens plus the provider's long-context tiers. It also prices the
+/// first request after a switch, which re-reads the current context with a cold
+/// provider cache. Unknown prices stay unknown: no dollar figure is invented.
+fn relative_cost_payload(state: &AppState, session: &Session, override_: &ModelOverride) -> Value {
     let provider = session_provider(session);
     let current_model = session
         .model
@@ -470,16 +478,39 @@ fn relative_cost_payload(session: &Session, override_: &ModelOverride) -> Value 
         .and_then(|model| find_builtin_model(model, Some(provider.as_str())));
     let to = find_builtin_model(&override_.model, Some(provider.as_str()));
 
-    let pair_cost = |row: Option<&ModelPricing>| {
-        row.and_then(|row| match (row.input_per_mtok, row.output_per_mtok) {
-            (Some(input), Some(output)) => Some(input + output),
-            _ => None,
-        })
+    let usage = TokenUsage {
+        input_tokens: session.totals.input_tokens,
+        output_tokens: session.totals.output_tokens,
+        cache_read_tokens: session.totals.cache_read_tokens,
+        cache_write_tokens: session.totals.cache_write_tokens,
+        reasoning_tokens: session.totals.reasoning_tokens,
     };
-    let from_usd = pair_cost(from);
-    let to_usd = pair_cost(to);
+    let steps = state
+        .store
+        .model_step_usage(&session.id)
+        .unwrap_or_default();
+    let context_tokens = state
+        .store
+        .latest_context(&session.id)
+        .ok()
+        .flatten()
+        .and_then(|value| value.get("tokens").and_then(Value::as_u64))
+        .filter(|tokens| *tokens > 0);
+
+    let from_estimate =
+        from.map(|pricing| estimate_flight_cost(&steps, usage, context_tokens, pricing));
+    let to_estimate =
+        to.map(|pricing| estimate_flight_cost(&steps, usage, context_tokens, pricing));
+    let from_usd = from_estimate.as_ref().and_then(|estimate| estimate.usd);
+    let to_usd = to_estimate.as_ref().and_then(|estimate| estimate.usd);
+    let known = from_usd.is_some() && to_usd.is_some();
+
     let ratio = match (from_usd, to_usd) {
         (Some(from), Some(to)) if from > 0.0 => Some(to / from),
+        _ => None,
+    };
+    let savings_percent = match (from_usd, to_usd) {
+        (Some(from), Some(to)) if from > 0.0 => Some((from - to) / from * 100.0),
         _ => None,
     };
     let direction = match (from_usd, to_usd) {
@@ -488,16 +519,38 @@ fn relative_cost_payload(session: &Session, override_: &ModelOverride) -> Value 
         (Some(_), Some(_)) => "same",
         _ => "unknown",
     };
+    let first_request = if known {
+        context_tokens.map(|tokens| {
+            json!({
+                "contextTokens": tokens,
+                "uncachedUsd": to.and_then(|pricing| estimate_first_request_cost(pricing, tokens)),
+                "longContext": to.is_some_and(|pricing| pricing.tier_applies(tokens)),
+            })
+        })
+    } else {
+        None
+    };
 
     json!({
-        "known": from_usd.is_some() && to_usd.is_some(),
+        "known": known,
         "fromModel": current_model,
         "toModel": override_.model,
         "fromUsd": from_usd,
         "toUsd": to_usd,
-        "ratio": ratio,
+        "ratio": ratio.map(|value| (value * 1_000.0).round() / 1_000.0),
+        "savingsPercent": savings_percent.map(|value| (value * 10.0).round() / 10.0),
         "direction": direction,
-        "referenceTokens": 1_000_000,
+        "longContext": to_estimate
+            .as_ref()
+            .is_some_and(|estimate| estimate.long_context),
+        "usage": {
+            "inputTokens": usage.input_tokens,
+            "cachedInputTokens": usage.cache_read_tokens,
+            "cacheWriteTokens": usage.cache_write_tokens,
+            "outputTokens": usage.output_tokens,
+            "calls": session.totals.model_call_count,
+        },
+        "firstRequest": first_request,
     })
 }
 

@@ -88,6 +88,45 @@ impl BudgetControl {
     }
 }
 
+/// Long-context pricing that starts above a prompt-size threshold.
+///
+/// Providers publish two different scopes. OpenAI reprices the whole session
+/// once one prompt crosses the threshold; Gemini prices each prompt on its own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LongContextTier {
+    /// Prompt input tokens above which the higher rates apply.
+    pub threshold_input_tokens: u64,
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_per_mtok: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_per_mtok: Option<f64>,
+    pub scope: LongContextScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LongContextScope {
+    /// Once one prompt crosses the threshold, the provider bills the whole
+    /// session at the higher rates (OpenAI).
+    Session,
+    /// Only prompts above the threshold are billed at the higher rates
+    /// (Gemini 2.5 Pro and Claude Haiku 5.5).
+    Request,
+}
+
+/// Effective per-million-token rates for one prompt size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PricingRates {
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
+    pub cache_read_per_mtok: f64,
+    pub cache_write_per_mtok: f64,
+    pub long_context: bool,
+}
+
 impl EffortControl {
     /// The exact body path for the request protocol and endpoint.
     pub fn parameter_for(&self, protocol: ProviderProtocol, path: &str) -> &str {
@@ -152,6 +191,9 @@ pub struct ModelPricing {
     pub cache_read_per_mtok: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_per_mtok: Option<f64>,
+    /// Higher rates for prompts above the provider's long-context threshold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_context: Option<LongContextTier>,
     #[serde(default = "usd")]
     pub currency: String,
     pub source: String,
@@ -168,6 +210,51 @@ pub struct ModelPricing {
 
 fn usd() -> String {
     "USD".to_string()
+}
+
+impl ModelPricing {
+    /// Whether a prompt of this size is billed at the long-context tier.
+    pub fn tier_applies(&self, prompt_tokens: u64) -> bool {
+        self.long_context
+            .as_ref()
+            .is_some_and(|tier| prompt_tokens > tier.threshold_input_tokens)
+    }
+
+    /// Effective rates for one prompt size, or `None` when the price is unknown.
+    ///
+    /// A tier that omits a cache rate keeps the base cache rate when one is
+    /// published, and otherwise falls back to the tier's input rate.
+    pub fn rates_for_prompt(&self, prompt_tokens: Option<u64>) -> Option<PricingRates> {
+        let input = self.input_per_mtok?;
+        let output = self.output_per_mtok?;
+        let tier = prompt_tokens.and_then(|tokens| {
+            self.long_context
+                .as_ref()
+                .filter(|tier| tokens > tier.threshold_input_tokens)
+        });
+        match tier {
+            Some(tier) => Some(PricingRates {
+                input_per_mtok: tier.input_per_mtok,
+                output_per_mtok: tier.output_per_mtok,
+                cache_read_per_mtok: tier
+                    .cache_read_per_mtok
+                    .or(self.cache_read_per_mtok)
+                    .unwrap_or(tier.input_per_mtok),
+                cache_write_per_mtok: tier
+                    .cache_write_per_mtok
+                    .or(self.cache_write_per_mtok)
+                    .unwrap_or(tier.input_per_mtok),
+                long_context: true,
+            }),
+            None => Some(PricingRates {
+                input_per_mtok: input,
+                output_per_mtok: output,
+                cache_read_per_mtok: self.cache_read_per_mtok.unwrap_or(input),
+                cache_write_per_mtok: self.cache_write_per_mtok.unwrap_or(input),
+                long_context: false,
+            }),
+        }
+    }
 }
 
 /// Bundled rates are estimates, not a billing authority.
@@ -386,30 +473,126 @@ pub struct CostEstimate {
     pub pricing: Option<ModelPricing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<PricingMissReason>,
+    /// True when any part of this estimate used long-context rates.
+    #[serde(default)]
+    pub long_context: bool,
 }
 
+fn price_unknown(pricing: &ModelPricing) -> CostEstimate {
+    CostEstimate {
+        known: false,
+        normalized_model: normalize_model_id(&pricing.model),
+        usd: None,
+        breakdown: None,
+        pricing: Some(pricing.clone()),
+        reason: Some(PricingMissReason::PriceUnknown),
+        long_context: false,
+    }
+}
+
+/// Cost at the base rates. Per-step accounting stays on base rates because the
+/// step does not know whether an earlier request already crossed a
+/// session-scoped threshold; use [`estimate_flight_cost`] for a flight total.
 pub fn compute_cost_from_price(usage: TokenUsage, pricing: &ModelPricing) -> CostEstimate {
-    let (Some(input_rate), Some(output_rate)) = (pricing.input_per_mtok, pricing.output_per_mtok)
-    else {
-        return CostEstimate {
-            known: false,
-            normalized_model: normalize_model_id(&pricing.model),
-            usd: None,
-            breakdown: None,
-            pricing: Some(pricing.clone()),
-            reason: Some(PricingMissReason::PriceUnknown),
-        };
+    let Some(rates) = pricing.rates_for_prompt(None) else {
+        return price_unknown(pricing);
     };
+    build_estimate(usage, pricing, rates)
+}
 
-    let cache_read_rate = pricing.cache_read_per_mtok.unwrap_or(input_rate);
-    let cache_write_rate = pricing.cache_write_per_mtok.unwrap_or(input_rate);
+/// Cost for one prompt, using the long-context tier when `prompt_tokens`
+/// crosses its threshold.
+pub fn compute_cost_at_prompt(
+    usage: TokenUsage,
+    pricing: &ModelPricing,
+    prompt_tokens: Option<u64>,
+) -> CostEstimate {
+    let Some(rates) = pricing.rates_for_prompt(prompt_tokens) else {
+        return price_unknown(pricing);
+    };
+    build_estimate(usage, pricing, rates)
+}
 
+/// Price a flight's actual usage.
+///
+/// `steps` are the per-model-call usages in order, `totals` the flight totals,
+/// and `context_tokens` the latest prompt size. When the step list is complete,
+/// request-scoped tiers are applied per prompt and session-scoped tiers apply
+/// to the whole flight once one prompt crosses the threshold. When it is not,
+/// the totals are priced at the tier implied by the latest context.
+pub fn estimate_flight_cost(
+    steps: &[TokenUsage],
+    totals: TokenUsage,
+    context_tokens: Option<u64>,
+    pricing: &ModelPricing,
+) -> CostEstimate {
+    if pricing.rates_for_prompt(None).is_none() {
+        return price_unknown(pricing);
+    }
+
+    let mut steps_total = TokenUsage::ZERO;
+    for step in steps {
+        steps_total = steps_total.combined(*step);
+    }
+    let steps_complete = !steps.is_empty() && steps_total == totals;
+    if !steps_complete {
+        return compute_cost_at_prompt(totals, pricing, context_tokens);
+    }
+
+    match pricing.long_context.as_ref().map(|tier| tier.scope) {
+        Some(LongContextScope::Request) => {
+            let mut breakdown = CostBreakdown::default();
+            let mut long_context = false;
+            for step in steps {
+                let estimate = compute_cost_at_prompt(*step, pricing, Some(step.total_input()));
+                let Some(part) = estimate.breakdown else {
+                    return price_unknown(pricing);
+                };
+                breakdown.input_usd += part.input_usd;
+                breakdown.output_usd += part.output_usd;
+                breakdown.cache_read_usd += part.cache_read_usd;
+                breakdown.cache_write_usd += part.cache_write_usd;
+                long_context |= estimate.long_context;
+            }
+            finish_estimate(pricing, breakdown, long_context)
+        }
+        Some(LongContextScope::Session) => {
+            let threshold = pricing
+                .long_context
+                .as_ref()
+                .map(|tier| tier.threshold_input_tokens)
+                .unwrap_or(u64::MAX);
+            let long_context = steps.iter().any(|step| step.total_input() > threshold)
+                || context_tokens.is_some_and(|tokens| tokens > threshold);
+            let prompt = long_context.then(|| threshold.saturating_add(1));
+            compute_cost_at_prompt(totals, pricing, prompt)
+        }
+        None => compute_cost_from_price(totals, pricing),
+    }
+}
+
+/// Cost of the first request after a switch, which re-reads the context with a
+/// cold provider cache. Only input tokens are priced; output is unknown.
+pub fn estimate_first_request_cost(pricing: &ModelPricing, context_tokens: u64) -> Option<f64> {
+    let rates = pricing.rates_for_prompt(Some(context_tokens))?;
+    Some(round_usd(per_million(context_tokens, rates.input_per_mtok)))
+}
+
+fn build_estimate(usage: TokenUsage, pricing: &ModelPricing, rates: PricingRates) -> CostEstimate {
     let breakdown = CostBreakdown {
-        input_usd: per_million(usage.input_tokens, input_rate),
-        output_usd: per_million(usage.output_tokens, output_rate),
-        cache_read_usd: per_million(usage.cache_read_tokens, cache_read_rate),
-        cache_write_usd: per_million(usage.cache_write_tokens, cache_write_rate),
+        input_usd: per_million(usage.input_tokens, rates.input_per_mtok),
+        output_usd: per_million(usage.output_tokens, rates.output_per_mtok),
+        cache_read_usd: per_million(usage.cache_read_tokens, rates.cache_read_per_mtok),
+        cache_write_usd: per_million(usage.cache_write_tokens, rates.cache_write_per_mtok),
     };
+    finish_estimate(pricing, breakdown, rates.long_context)
+}
+
+fn finish_estimate(
+    pricing: &ModelPricing,
+    breakdown: CostBreakdown,
+    long_context: bool,
+) -> CostEstimate {
     let usd = breakdown.input_usd
         + breakdown.output_usd
         + breakdown.cache_read_usd
@@ -422,6 +605,7 @@ pub fn compute_cost_from_price(usage: TokenUsage, pricing: &ModelPricing) -> Cos
         breakdown: Some(breakdown),
         pricing: Some(pricing.clone()),
         reason: None,
+        long_context,
     }
 }
 
@@ -441,6 +625,7 @@ pub fn estimate_usage_cost(
             breakdown: None,
             pricing: None,
             reason: resolution.reason,
+            long_context: false,
         },
     }
 }
@@ -496,6 +681,7 @@ mod tests {
             output_per_mtok: output,
             cache_read_per_mtok: None,
             cache_write_per_mtok: None,
+            long_context: None,
             currency: usd(),
             source: "test".into(),
             verified_on: None,
@@ -632,6 +818,114 @@ mod tests {
                 assert!(effort.parameter.ends_with("thinkingLevel"));
             }
         }
+    }
+
+    #[test]
+    fn long_context_rates_start_above_the_threshold() {
+        let pricing = find_builtin_model("gpt-5.5", Some("openai")).expect("gpt-5.5 row");
+        let short = compute_cost_at_prompt(usage(), pricing, Some(272_000));
+        assert_eq!(short.usd, Some(35.0));
+        assert!(!short.long_context);
+
+        let long = compute_cost_at_prompt(usage(), pricing, Some(272_001));
+        assert_eq!(long.usd, Some(55.0));
+        assert!(long.long_context);
+        assert_eq!(long.breakdown.unwrap().input_usd, 10.0);
+    }
+
+    #[test]
+    fn session_scoped_tiers_reprice_the_whole_flight() {
+        let pricing = find_builtin_model("gpt-5.5", Some("openai")).expect("gpt-5.5 row");
+        let steps = [
+            TokenUsage {
+                input_tokens: 100_000,
+                output_tokens: 1_000,
+                ..TokenUsage::ZERO
+            },
+            TokenUsage {
+                input_tokens: 300_000,
+                output_tokens: 1_000,
+                ..TokenUsage::ZERO
+            },
+        ];
+        let totals = steps
+            .iter()
+            .fold(TokenUsage::ZERO, |sum, step| sum.combined(*step));
+
+        let short_steps = [
+            TokenUsage {
+                input_tokens: 100_000,
+                output_tokens: 1_000,
+                ..TokenUsage::ZERO
+            },
+            TokenUsage {
+                input_tokens: 150_000,
+                output_tokens: 1_000,
+                ..TokenUsage::ZERO
+            },
+        ];
+        let short_totals = short_steps
+            .iter()
+            .fold(TokenUsage::ZERO, |sum, step| sum.combined(*step));
+
+        let short = estimate_flight_cost(&short_steps, short_totals, Some(200_000), pricing);
+        assert_eq!(short.usd, Some(1.31));
+
+        let long = estimate_flight_cost(&steps, totals, Some(300_000), pricing);
+        assert_eq!(long.usd, Some(4.09));
+        assert!(long.long_context);
+    }
+
+    #[test]
+    fn request_scoped_tiers_price_only_large_prompts() {
+        let pricing = find_builtin_model("gemini-2.5-pro", Some("google")).expect("gemini row");
+        let steps = [
+            TokenUsage {
+                input_tokens: 100_000,
+                output_tokens: 1_000,
+                ..TokenUsage::ZERO
+            },
+            TokenUsage {
+                input_tokens: 300_000,
+                output_tokens: 1_000,
+                ..TokenUsage::ZERO
+            },
+        ];
+        let totals = steps
+            .iter()
+            .fold(TokenUsage::ZERO, |sum, step| sum.combined(*step));
+
+        let cost = estimate_flight_cost(&steps, totals, Some(300_000), pricing);
+        assert_eq!(cost.usd, Some(0.9));
+        assert!(cost.long_context);
+    }
+
+    #[test]
+    fn first_request_prices_the_uncached_context() {
+        let gpt = find_builtin_model("gpt-5.5", Some("openai")).expect("gpt-5.5 row");
+        assert_eq!(estimate_first_request_cost(gpt, 100_000), Some(0.5));
+        assert_eq!(estimate_first_request_cost(gpt, 864_000), Some(8.64));
+
+        let gemini = find_builtin_model("gemini-2.5-pro", Some("google")).expect("gemini row");
+        assert_eq!(estimate_first_request_cost(gemini, 250_000), Some(0.625));
+    }
+
+    #[test]
+    fn unknown_prices_stay_unknown_with_a_tier() {
+        let mut pricing = override_row(None, None);
+        pricing.long_context = Some(LongContextTier {
+            threshold_input_tokens: 200_000,
+            input_per_mtok: 2.5,
+            output_per_mtok: 15.0,
+            cache_read_per_mtok: None,
+            cache_write_per_mtok: None,
+            scope: LongContextScope::Request,
+        });
+        let cost = estimate_flight_cost(&[], usage(), Some(300_000), &pricing);
+        assert!(!cost.known);
+        assert_eq!(cost.usd, None);
+        assert_eq!(cost.reason, Some(PricingMissReason::PriceUnknown));
+        assert_eq!(estimate_first_request_cost(&pricing, 300_000), None);
     }
 
     #[test]

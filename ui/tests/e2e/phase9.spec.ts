@@ -71,19 +71,20 @@ test.describe('model, effort, and context', () => {
     const panel = card.locator('[data-model-override]');
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('Cockpit rewrites only the model and effort fields');
-    await expect(panel).toContainText('Estimated relative cost');
+    await expect(panel).toContainText('Estimated cost on this flight');
     await expect(panel.locator('[data-model-override-confirm]')).toBeEnabled();
 
     // Gemini 2.5 exposes a numeric thinking budget, not thinking levels.
     const budget = panel.locator('[data-model-budget]');
     await expect(budget).toBeVisible();
     await expect(budget).toContainText('Dynamic');
-    await expect(budget).toContainText('Range 128–32k tokens');
+    await expect(budget).toContainText('Range 128–33k tokens');
 
     await panel.locator('select').first().selectOption('gemini-3.8-flash');
     await expect(panel.locator('[data-model-budget]')).toHaveCount(0);
     await expect(panel.locator('select').nth(1)).toBeVisible();
-    await expect(panel).toContainText('less than the current model');
+    await expect(panel).toContainText('cheaper');
+    await expect(panel).toContainText('The first request after switching re-reads');
     await shotOf(page, '.model-card', 'override-confirmation.png');
 
     await panel.locator('[data-model-override-confirm]').click();

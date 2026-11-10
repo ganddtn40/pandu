@@ -80,8 +80,10 @@ A model override is:
   audit entry does not contain the request body, the prompt, or credentials.
 
 The relative-cost preview is computed locally from the verified prices. It
-compares one million input plus one million output tokens and is labeled as an
-estimate, not a quote.
+prices this flight's recorded input, cached-input, cache-write, and output
+tokens at the current and target models, applies long-context tiers, and prices
+the first request after a switch against the current context. It is labeled as
+an estimate, not a quote.
 
 ## 5. What can leave the machine
 

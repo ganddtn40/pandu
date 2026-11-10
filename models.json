@@ -15,6 +15,13 @@
     "inputPerMtok": 5.0,
     "outputPerMtok": 30.0,
     "cacheReadPerMtok": 0.5,
+    "longContext": {
+      "thresholdInputTokens": 272000,
+      "inputPerMtok": 10.0,
+      "outputPerMtok": 45.0,
+      "cacheReadPerMtok": 1.0,
+      "scope": "session"
+    },
     "currency": "USD",
     "source": "https://developers.openai.com/api/docs/models/gpt-5.5",
     "verifiedOn": "2026-11-10"
@@ -35,6 +42,13 @@
     "inputPerMtok": 2.5,
     "outputPerMtok": 15.0,
     "cacheReadPerMtok": 0.25,
+    "longContext": {
+      "thresholdInputTokens": 272000,
+      "inputPerMtok": 5.0,
+      "outputPerMtok": 22.5,
+      "cacheReadPerMtok": 0.5,
+      "scope": "session"
+    },
     "currency": "USD",
     "source": "https://developers.openai.com/api/docs/models/gpt-5.4",
     "verifiedOn": "2026-11-10"
@@ -154,10 +168,18 @@
     "outputPerMtok": 0.5,
     "cacheReadPerMtok": 0.01,
     "cacheWritePerMtok": 0.125,
+    "longContext": {
+      "thresholdInputTokens": 100000,
+      "inputPerMtok": 0.5,
+      "outputPerMtok": 2.5,
+      "cacheReadPerMtok": 0.05,
+      "cacheWritePerMtok": 0.625,
+      "scope": "request"
+    },
     "currency": "USD",
     "source": "https://platform.claude.com/docs/en/about-claude/pricing",
     "verifiedOn": "2026-11-10",
-    "note": "Prompts over 100K tokens are billed at $0.50/MTok input and $2.50/MTok output. Cache write price is the 5-minute TTL rate."
+    "note": "Prompts over 100K tokens are billed per request at $0.50/MTok input, $2.50/MTok output, $0.05/MTok cache read, and $0.625/MTok 5-minute cache write."
   },
   {
     "provider": "anthropic",
@@ -255,6 +277,13 @@
     "inputPerMtok": 1.25,
     "outputPerMtok": 10.0,
     "cacheReadPerMtok": 0.125,
+    "longContext": {
+      "thresholdInputTokens": 200000,
+      "inputPerMtok": 2.5,
+      "outputPerMtok": 15.0,
+      "cacheReadPerMtok": 0.25,
+      "scope": "request"
+    },
     "currency": "USD",
     "source": "https://ai.google.dev/gemini-api/docs/pricing",
     "verifiedOn": "2026-11-10",

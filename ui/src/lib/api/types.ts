@@ -441,6 +441,14 @@ export interface ModelPricingRow {
   outputPerMtok?: number;
   cacheReadPerMtok?: number;
   cacheWritePerMtok?: number;
+  longContext?: {
+    thresholdInputTokens: number;
+    inputPerMtok: number;
+    outputPerMtok: number;
+    cacheReadPerMtok?: number;
+    cacheWritePerMtok?: number;
+    scope: 'session' | 'request';
+  };
   currency: string;
   source: string;
   verifiedOn?: string;
@@ -461,6 +469,20 @@ export interface ModelOverride {
 
 export type RelativeCostDirection = 'more' | 'less' | 'same' | 'unknown';
 
+export interface RelativeCostUsage {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  calls: number;
+}
+
+export interface RelativeCostFirstRequest {
+  contextTokens: number;
+  uncachedUsd?: number;
+  longContext: boolean;
+}
+
 export interface RelativeCost {
   known: boolean;
   fromModel?: string;
@@ -468,8 +490,11 @@ export interface RelativeCost {
   fromUsd?: number;
   toUsd?: number;
   ratio?: number;
+  savingsPercent?: number;
   direction: RelativeCostDirection;
-  referenceTokens: number;
+  longContext: boolean;
+  usage: RelativeCostUsage;
+  firstRequest?: RelativeCostFirstRequest;
 }
 
 export interface ModelPreview {

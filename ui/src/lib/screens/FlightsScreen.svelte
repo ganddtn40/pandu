@@ -469,11 +469,34 @@
   function relativeCostText(preview: ModelPreview | null): string {
     if (!preview) return '';
     const cost = preview.relativeCost;
-    if (!cost.known || cost.ratio === undefined) return t('model.previewUnknown');
-    const ratio = cost.ratio >= 10 ? cost.ratio.toFixed(0) : cost.ratio.toFixed(1);
-    if (cost.direction === 'more') return t('model.previewMore', { ratio });
-    if (cost.direction === 'less') return t('model.previewLess', { ratio });
-    return t('model.previewSame');
+    if (!cost.known) return t('model.previewUnknown');
+    const parts: string[] = [];
+    if (cost.usage.calls === 0 || cost.ratio === undefined) {
+      parts.push(t('model.previewNoUsage'));
+    } else {
+      const ratio = cost.ratio >= 10 ? cost.ratio.toFixed(0) : cost.ratio.toFixed(1);
+      const percent = Math.abs(Math.round(cost.savingsPercent ?? 0));
+      if (cost.direction === 'more') {
+        parts.push(t('model.previewMore', { percent, ratio }));
+      } else if (cost.direction === 'less') {
+        parts.push(t('model.previewLess', { percent, ratio }));
+      } else {
+        parts.push(t('model.previewSame'));
+      }
+    }
+    const first = cost.firstRequest;
+    if (first && first.uncachedUsd !== undefined) {
+      const key = first.longContext
+        ? 'model.previewFirstRequestLong'
+        : 'model.previewFirstRequest';
+      parts.push(
+        t(key, {
+          tokens: formatTokens(first.contextTokens),
+          cost: formatUsd(first.uncachedUsd),
+        }),
+      );
+    }
+    return parts.join(' ');
   }
 
   function effortLabel(row: ModelPricingRow | null, effort: string): string {

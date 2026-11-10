@@ -535,7 +535,17 @@ async fn host_override_rewrites_only_the_forwarded_request() {
     assert_eq!(preview["relativeCost"]["known"], true);
     assert_eq!(preview["relativeCost"]["direction"], "more");
     assert_eq!(preview["relativeCost"]["fromModel"], "gpt-4.1");
-    assert_eq!(preview["relativeCost"]["referenceTokens"], 1_000_000);
+    assert_eq!(preview["relativeCost"]["usage"]["inputTokens"], 12);
+    assert_eq!(preview["relativeCost"]["usage"]["outputTokens"], 5);
+    assert_eq!(preview["relativeCost"]["usage"]["calls"], 1);
+    assert!(preview["relativeCost"].get("referenceTokens").is_none());
+    assert_eq!(preview["relativeCost"]["firstRequest"]["contextTokens"], 12);
+    assert!(
+        preview["relativeCost"]["firstRequest"]["uncachedUsd"]
+            .as_f64()
+            .unwrap()
+            > 0.0
+    );
 
     let applied = client
         .put(format!(

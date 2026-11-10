@@ -211,12 +211,17 @@ const en = {
   'model.clear': 'Clear override',
   'model.chooseModel': 'Model',
   'model.chooseEffort': 'Effort',
-  'model.preview': 'Estimated relative cost',
+  'model.preview': 'Estimated cost on this flight',
   'model.previewMore':
-    '{ratio}× more than the current model for 1M input + 1M output tokens.',
+    'About {percent}% more ({ratio}× the cost) on this flight’s usage.',
   'model.previewLess':
-    '{ratio}× less than the current model for 1M input + 1M output tokens.',
-  'model.previewSame': 'About the same as the current model for 1M input + 1M output tokens.',
+    'About {percent}% cheaper ({ratio}× the cost) on this flight’s usage.',
+  'model.previewSame': 'About the same cost on this flight’s usage.',
+  'model.previewNoUsage': 'No recorded usage on this flight yet.',
+  'model.previewFirstRequest':
+    'The first request after switching re-reads ~{tokens} tokens uncached: about {cost}.',
+  'model.previewFirstRequestLong':
+    'The first request after switching re-reads ~{tokens} tokens uncached at long-context rates: about {cost}.',
   'model.previewUnknown': 'Price unknown. Cockpit will not estimate this cost.',
   'model.confirm': 'Apply override',
   'model.confirming': 'Applying…',

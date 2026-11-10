@@ -1533,6 +1533,32 @@ impl Store {
         Ok(None)
     }
 
+    /// Token usage for every model call in a flight, oldest first.
+    ///
+    /// The override preview prices each request separately so a request-scoped
+    /// long-context tier (Gemini) applies only to prompts above its threshold.
+    pub fn model_step_usage(&self, session_id: &str) -> Result<Vec<TokenUsage>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                    reasoning_tokens
+             FROM steps
+             WHERE session_id = ?1 AND kind = 'model'
+             ORDER BY seq ASC",
+        )?;
+        let rows = statement.query_map(params![session_id], |row| {
+            Ok(TokenUsage {
+                input_tokens: row.get::<_, i64>(0)? as u64,
+                output_tokens: row.get::<_, i64>(1)? as u64,
+                cache_read_tokens: row.get::<_, i64>(2)? as u64,
+                cache_write_tokens: row.get::<_, i64>(3)? as u64,
+                reasoning_tokens: row.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        let usages = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(usages)
+    }
+
     pub fn insert_redactions(&self, step_id: &str, rows: &[RedactionRow]) -> Result<()> {
         if rows.is_empty() {
             return Ok(());
