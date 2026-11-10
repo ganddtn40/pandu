@@ -191,6 +191,7 @@ const en = {
   'context.history': 'History',
   'context.files': 'Files',
   'context.other': 'Other',
+  'context.breakdownEstimated': 'Estimated breakdown',
   'context.latest': 'Latest request',
   'context.perFlight': 'Latest per flight',
   'context.thisFlight': 'This flight',

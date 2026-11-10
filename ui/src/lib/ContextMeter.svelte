@@ -62,7 +62,8 @@
     </div>
   {/if}
   {#if !compact}
-    <dl class="context-meter__breakdown">
+    <p class="context-meter__breakdown-label">{t('context.breakdownEstimated')}</p>
+    <dl class="context-meter__breakdown" aria-label={t('context.breakdownEstimated')}>
       <div><dt>{t('context.system')}</dt><dd>{formatTokens(meter.breakdown.system)}</dd></div>
       <div><dt>{t('context.tools')}</dt><dd>{formatTokens(meter.breakdown.tools)}</dd></div>
       <div><dt>{t('context.history')}</dt><dd>{formatTokens(meter.breakdown.history)}</dd></div>

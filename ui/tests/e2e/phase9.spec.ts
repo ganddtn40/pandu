@@ -73,6 +73,12 @@ test.describe('model, effort, and context', () => {
     await expect(card).toContainText('gemini-2.5-pro');
     await expect(card).toContainText('82.4%');
     await expect(card.locator('[data-context-meter]')).toBeVisible();
+    // The provider reports a total, not a split, so the System/Tools/History/
+    // Files/Other rows are an estimate from the recorded request body.
+    await expect(card.locator('.context-meter__breakdown-label')).toHaveText(
+      'Estimated breakdown',
+    );
+    await expect(card.locator('.context-meter__breakdown')).toContainText('System');
     await shotOf(page, '.model-card', 'flight-model-effort.png');
 
     // The override is opt-in and the confirmation step explains exactly what
