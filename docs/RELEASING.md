@@ -3,6 +3,82 @@
 This checklist covers a tagged CLI release. Nothing here is published until a
 maintainer makes an explicit release decision.
 
+## 0. Rename the GitHub repository first
+
+`brand.json` names `https://github.com/ganddtn40/pandu` as the canonical
+repository and uses `https://raw.githubusercontent.com/ganddtn40/pandu/main/registry`
+as the registry URL. While that repository does not exist, or while it is
+private, the daemon cannot refresh the market and no release can publish.
+
+Exact steps:
+
+1. Confirm the current state. A missing repository, or a private one the token
+   cannot see, returns 404:
+
+   ```powershell
+   gh repo view ganddtn40/pandu
+   gh api repos/ganddtn40/pandu --jq .full_name
+   ```
+
+2. If the old repository exists under another name, rename it. On GitHub this
+   is **Settings → General → Repository name**, enter `pandu`, and choose
+   **Rename**. With the CLI:
+
+   ```powershell
+   gh repo rename pandu --repo <owner>/<old-repository-name>
+   ```
+
+   GitHub keeps redirects for the old URL, but the daemon and the signed
+   registry must use the new URL directly.
+
+3. Point the local checkout at the renamed repository:
+
+   ```powershell
+   git remote set-url origin https://github.com/ganddtn40/pandu.git
+   git remote -v
+   git push -u origin main
+   ```
+
+4. Make the repository public before the first published registry. A private
+   repository returns 404 to unauthenticated clients, and the daemon
+   deliberately sends no GitHub credentials:
+
+   ```powershell
+   gh repo edit ganddtn40/pandu --visibility public --accept-visibility-change-consequences
+   ```
+
+5. Verify the canonical paths:
+
+   ```powershell
+   gh api repos/ganddtn40/pandu --jq .full_name
+   gh api repos/ganddtn40/pandu/contents/registry/index.json --jq .name
+   Invoke-WebRequest https://raw.githubusercontent.com/ganddtn40/pandu/main/registry/index.json -UseBasicParsing |
+     Select-Object StatusCode
+   ```
+
+   The first command must print `ganddtn40/pandu`. The last must return `200`
+   once the signed index is on `main`.
+
+6. If the owner or name differs from `brand.json`, update `repository` and
+   `registry.url` there, then update `packaging/manifest.json`, CODEOWNERS, and
+   the release workflow. Re-run:
+
+   ```powershell
+   cargo test -p pandu-core --test product_name
+   cargo test -p pandu-core brand::
+   ```
+
+While the repository is absent or private:
+
+- a market refresh returns HTTP 502 with a message saying the registry is not
+  available, may not exist yet or may be private, and that the last verified
+  registry stays in use;
+- a release build with no production key shows **Registry is being prepared.**
+  and exposes no entries;
+- update checks are not implemented in this build, and the Settings screen says
+  so. Do not add a background ping or an unauthenticated GitHub API call to work
+  around the missing repository.
+
 ## 1. Confirm the name is available
 
 Run these before the first release and whenever the repository or package name
@@ -42,15 +118,7 @@ publisher segment in `packaging/manifest.json` before submitting the manifest.
 
 ### GitHub
 
-```powershell
-gh repo view ganddtn40/pandu
-gh api repos/ganddtn40/pandu --jq .full_name
-```
-
-Both commands must fail with a 404 before the repository is created. After the
-repository exists, confirm the owner and name match `brand.json`.
-
-The repository-wide test also enforces the rename:
+Follow section 0. The repository-wide name test also enforces the rename:
 
 ```powershell
 cargo test -p pandu-core --test product_name
@@ -85,10 +153,22 @@ Build the CLI before Playwright:
 cargo build -p pandu-cli
 ```
 
-## 3. Registry
+The tag workflow adds a release gate that is not part of the local loop. It
+runs the ignored production-key test and `pandu market check --dir registry`
+with a release binary. The publish job has `needs: registry-gate`, so a failed
+gate stops the release before any artifact is published.
 
-Production and test trust roots are separate. The production private key is kept
-offline and is never a CI secret.
+## 3. Registry and trust root
+
+Read [`registry/KEYS.md`](registry/KEYS.md) before touching a signed file. It
+covers the offline key-generation ceremony, the signing steps, CI verification,
+rotation, and the compromise response.
+
+The production trust root is currently empty. A release build embeds no
+production key and fails closed with **Registry is being prepared.**; it never
+falls back to the test key. `registry/index.json` and `registry/revoked.json`
+carry the production key id from `brand.json` and empty signatures until the
+maintainer completes the ceremony. Do not hand-edit either document.
 
 - Test fixtures: re-sign `registry/index.test.json` and
   `registry/revoked.test.json` with the test key after any YAML or fixture
@@ -98,22 +178,26 @@ offline and is never a CI secret.
   node registry/sign.mjs --key C:\secure\pandu-market-test-2026.pem --variant test --build
   ```
 
-- Production: sign `registry/index.json` and `registry/revoked.json` offline
-  with the production key.
+- Production: generate the key offline, embed the public half, and sign
+  `registry/index.json` and `registry/revoked.json` on the offline machine.
 
   ```powershell
-  node registry/sign.mjs --key C:\secure\pandu-market-2026.pem --build
+  node registry/sign.mjs --key E:\secure\pandu-market-2026.pem --build --dir registry
   ```
 
   Then verify with a release build:
 
   ```powershell
-  cargo run --release -p pandu-cli -- market check --dir registry --online --links
+  cargo test --release -p pandu-daemon --lib `
+    market::service::tests::bundled_production_registry_verifies_with_the_production_key -- --ignored
+  cargo run --release --locked -p pandu-cli -- market check --dir registry --online --links
   ```
 
-The production key id and signatures currently predate the rename and are
-frozen; see [`registry/KEYS.md`](registry/KEYS.md). Do not hand-edit either
-signed document. A release build refuses a test trust root.
+  Both commands must pass. If either fails, do not publish.
+
+The test key only signs the `.test.json` fixtures. Never use it for a published
+registry, never copy it into a release configuration, and never let a release
+build fall back to it.
 
 ## 4. Version and artifacts
 
