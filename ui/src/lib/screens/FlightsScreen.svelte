@@ -921,6 +921,20 @@
                   <ContextMeter meter={modelState.context} label={t('context.latest')} />
                 {/if}
 
+                {#if currentPricing}
+                  <p class="model-card__evidence" data-model-evidence>
+                    {#if currentPricing.verifiedOn}
+                      {t('model.verified', { date: currentPricing.verifiedOn })}
+                    {:else}
+                      {t('model.notVerified')}
+                    {/if}
+                    <span aria-hidden="true">·</span>
+                    <a href={currentPricing.source} target="_blank" rel="noreferrer">
+                      {t('model.source')}
+                    </a>
+                  </p>
+                {/if}
+
                 <div class="model-card__actions">
                   {#if canOverride}
                     <button

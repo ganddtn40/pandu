@@ -79,6 +79,12 @@ test.describe('model, effort, and context', () => {
       'Estimated breakdown',
     );
     await expect(card.locator('.context-meter__breakdown')).toContainText('System');
+    const evidence = card.locator('[data-model-evidence]');
+    await expect(evidence).toContainText('Price verified 2026-11-10');
+    await expect(evidence.locator('a')).toHaveAttribute(
+      'href',
+      'https://ai.google.dev/gemini-api/docs/pricing',
+    );
     await shotOf(page, '.model-card', 'flight-model-effort.png');
 
     // The override is opt-in and the confirmation step explains exactly what

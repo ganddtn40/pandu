@@ -691,6 +691,36 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_row_carries_price_evidence() {
+        for row in BUILT_IN_PRICING.iter() {
+            assert!(
+                row.source.starts_with("https://"),
+                "{} has no source URL",
+                row.model
+            );
+            if row.model == "claude-sonnet-4" {
+                assert!(
+                    row.verified_on.is_none(),
+                    "the retired row must not claim a fresh verification"
+                );
+                continue;
+            }
+            let verified = row.verified_on.as_deref().unwrap_or("");
+            assert_eq!(verified.len(), 10, "{} has no verifiedOn date", row.model);
+            assert!(
+                verified.as_bytes()[4] == b'-' && verified.as_bytes()[7] == b'-',
+                "{} has a malformed verifiedOn date",
+                row.model
+            );
+            assert!(
+                row.input_per_mtok.is_some() && row.output_per_mtok.is_some(),
+                "{} has no price evidence",
+                row.model
+            );
+        }
+    }
+
+    #[test]
     fn normalizes_dated_and_prefixed_models() {
         assert_eq!(normalize_model_id("openai/gpt-4.1-2025-04-14"), "gpt-4.1");
         assert_eq!(

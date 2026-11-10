@@ -3414,6 +3414,26 @@ pre {
   border-color: color-mix(in srgb, var(--warn) 45%, var(--hairline));
 }
 
+.model-card__evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: -4px 0 0;
+  color: var(--text-faint);
+  font-size: max(var(--text-min), calc(10.5px * var(--font-scale)));
+  line-height: 1.4;
+}
+
+.model-card__evidence a {
+  color: var(--text-soft);
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 2px;
+}
+
+.model-card__evidence a:hover {
+  color: var(--text);
+}
+
 .model-card__arrow {
   padding: 0 4px;
   color: var(--warn);

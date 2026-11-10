@@ -9,10 +9,12 @@ root and is compiled into the binary with `include_str!`; it is not fetched at
 runtime.
 
 Every value in the table was read from the provider's own documentation on
-`2026-11-10`. The `source` URL and `verifiedOn` date are part of each row and are
-shown in the UI. When a value could not be verified it is stored as `"unknown"`
-(JSON `null`), never as a plausible number. A model with an unknown input or
-output price is shown as **Price unknown** and is never counted as `$0.00`.
+`2026-11-10`. Each row carries its own `source` URL and `verifiedOn` date, and
+section 1.1 lists both for every model. The **Model & effort** card shows
+**Price verified <date>** and links to that source. When a value could not be
+verified it is stored as `"unknown"` (JSON `null`), never as a plausible number.
+A model with an unknown input or output price is shown as **Price unknown** and
+is never counted as `$0.00`.
 
 ## 1. The verified table
 
@@ -90,6 +92,31 @@ rates; off-peak usage is billed at half. `deepseek-flash` accepts the legacy ids
 `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, and
 `deepseek-v4.1-flash` as aliases. When DeepSeek is reached through its
 Anthropic-compatible endpoint, the effort field is `output_config.effort`.
+
+### 1.1 Evidence for every row
+
+Every row in `models.json` appears below with the URL it was read from, the
+`verifiedOn` date, and the rates that date supports. The UI shows the date as
+**Price verified <date>**; a row with no date is shown as **Price not
+re-verified**. Amounts are USD per million tokens.
+
+| Model | Source | Verified on | Price evidence |
+| --- | --- | --- | --- |
+| `gpt-5.5` | https://developers.openai.com/api/docs/models/gpt-5.5 | 2026-11-10 | $5.00 input, $0.50 cache read, $30.00 output. Over 272K tokens: $10.00 / $1.00 / $45.00 for the whole session. |
+| `gpt-5.4` | https://developers.openai.com/api/docs/models/gpt-5.4 | 2026-11-10 | $2.50 input, $0.25 cache read, $15.00 output. Over 272K tokens: $5.00 / $0.50 / $22.50 for the whole session. |
+| `gpt-5.4-mini` | https://developers.openai.com/api/docs/models/gpt-5.4-mini | 2026-11-10 | $0.75 input, $0.075 cache read, $4.50 output. No long-context tier. |
+| `gpt-4.1` | https://developers.openai.com/api/docs/models/gpt-4.1 | 2026-11-10 | $2.00 input, $0.50 cache read, $8.00 output. Deprecated; no effort control. |
+| `claude-fable-5-2` | https://platform.claude.com/docs/en/about-claude/pricing | 2026-11-10 | $8.00 input, $0.20 cache read, $10.00 5-minute cache write, $40.00 output. |
+| `claude-opus-5-5` | https://platform.claude.com/docs/en/about-claude/pricing | 2026-11-10 | $4.00 input, $0.20 cache read, $5.00 5-minute cache write, $20.00 output. |
+| `claude-sonnet-5-5` | https://platform.claude.com/docs/en/about-claude/pricing | 2026-11-10 | $2.00 input, $0.10 cache read, $2.50 5-minute cache write, $10.00 output. |
+| `claude-haiku-5-5` | https://platform.claude.com/docs/en/about-claude/pricing | 2026-11-10 | $0.10 input, $0.01 cache read, $0.125 5-minute cache write, $0.50 output. Over 100K tokens per request: $0.50 / $0.05 / $0.625 / $2.50. |
+| `claude-sonnet-4` | https://platform.claude.com/docs/en/about-claude/pricing | — (retired) | $3.00 input, $0.30 cache read, $3.75 cache write, $15.00 output. Retained from an older snapshot and not re-verified; Anthropic lists this generation as retired. |
+| `gemini-4-argon` | https://ai.google.dev/gemini-api/docs/pricing | 2026-11-10 | $2.00 input, $0.10 cache read, $10.00 output. Standard rate through 2026-11-30; $4.00 / $20.00 from 2026-12-01. |
+| `gemini-3.8-flash` | https://ai.google.dev/gemini-api/docs/pricing | 2026-11-10 | $0.75 input, $0.075 cache read, $3.75 output. Promotional through 2026-12-31; $1.50 / $7.50 from 2027-01-01. |
+| `gemini-3.6-flash` | https://ai.google.dev/gemini-api/docs/pricing | 2026-11-10 | $0.75 input, $0.075 cache read, $3.75 output. Promotional through 2026-12-31; $1.50 / $7.50 from 2027-01-01. |
+| `gemini-2.5-pro` | https://ai.google.dev/gemini-api/docs/pricing | 2026-11-10 | $1.25 input, $0.125 cache read, $10.00 output. Over 200K tokens per request: $2.50 / $0.25 / $15.00. Deprecated; routes to Gemini 3.8 Flash from 2026-12-01. |
+| `deepseek-flash` | https://api-docs.deepseek.com/quick_start/pricing | 2026-11-10 | Peak $0.30 input, $0.006 cache read, $1.20 output. Off-peak is half these rates. |
+| `deepseek-v4-pro` | https://api-docs.deepseek.com/quick_start/pricing | 2026-11-10 | Peak $1.32 input, $0.044 cache read, $3.96 output. Off-peak is half these rates. |
 
 ## 2. Pricing and relative cost
 
