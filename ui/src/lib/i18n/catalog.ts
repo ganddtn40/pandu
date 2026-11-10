@@ -192,6 +192,8 @@ const en = {
   'context.files': 'Files',
   'context.other': 'Other',
   'context.latest': 'Latest request',
+  'context.perFlight': 'Latest per flight',
+  'context.thisFlight': 'This flight',
   'model.title': 'Model & effort',
   'model.current': 'Current',
   'model.effort': 'Effort',

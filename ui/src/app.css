@@ -1600,6 +1600,27 @@ pre {
   font-weight: 560;
 }
 
+.live-context__hint {
+  text-align: right;
+}
+
+.live-context__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.live-context__entry:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.live-context__entry .live-context__head {
+  justify-content: flex-start;
+}
+
 .live-context .context-meter {
   max-width: 520px;
 }

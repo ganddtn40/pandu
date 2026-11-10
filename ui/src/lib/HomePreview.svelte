@@ -49,12 +49,19 @@
   const active = $derived(activeSessions());
   const live = $derived(active[0] ?? null);
   const contexts = $derived(daemonState.overview?.contexts ?? {});
-  // Prefer the live flight's own meter. A PTY flight records no proxy context,
-  // so fall back to the newest active flight that does.
-  const contextSession = $derived(
-    live && contexts[live.id] ? live : (active.find((session) => contexts[session.id]) ?? null),
-  );
-  const liveContext = $derived(contextSession ? (contexts[contextSession.id] ?? null) : null);
+  // One meter per flight, each labeled with its own flight title. The live
+  // flight comes first when it has a meter; a PTY flight records no proxy
+  // context, so other active flights keep their own labeled meters instead of
+  // being presented as the live flight's meter.
+  const contextFlights = $derived.by(() => {
+    const entries = active.flatMap((session) => {
+      const meter = contexts[session.id];
+      return meter ? [{ session, meter }] : [];
+    });
+    const liveEntry = live ? entries.find((entry) => entry.session.id === live.id) : undefined;
+    if (!liveEntry) return entries;
+    return [liveEntry, ...entries.filter((entry) => entry.session.id !== live.id)];
+  });
   const pending = $derived(pendingGuards());
   const rules = $derived(daemonState.rules);
   const adapters = $derived(daemonState.adapters);
@@ -409,20 +416,30 @@
                 </div>
               </div>
             </div>
-            {#if liveContext && contextSession}
+            {#if contextFlights.length > 0}
               <div class="live-context" data-live-context>
                 <div class="live-context__head">
                   <span>{t('context.title')}</span>
-                  <button
-                    class="text-link"
-                    type="button"
-                    onclick={() => openSession(contextSession)}
-                  >
-                    {contextSession.id === live.id ? t('context.latest') : contextSession.title}
-                    <Icon name="arrow-right" size={13} />
-                  </button>
+                  <span class="live-context__hint">{t('context.perFlight')}</span>
                 </div>
-                <ContextMeter meter={liveContext} label={t('context.latest')} compact />
+                {#each contextFlights as entry (entry.session.id)}
+                  <div class="live-context__entry" data-context-flight={entry.session.id}>
+                    <div class="live-context__head">
+                      <button
+                        class="text-link"
+                        type="button"
+                        onclick={() => openSession(entry.session)}
+                      >
+                        {entry.session.title}
+                        <Icon name="arrow-right" size={13} />
+                      </button>
+                      {#if entry.session.id === live.id}
+                        <span class="status-pill status-pill--live">{t('context.thisFlight')}</span>
+                      {/if}
+                    </div>
+                    <ContextMeter meter={entry.meter} compact />
+                  </div>
+                {/each}
               </div>
             {/if}
           {:else}

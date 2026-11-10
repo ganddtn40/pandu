@@ -38,7 +38,17 @@ test.describe('model, effort, and context', () => {
     await open(page, '/');
     await expect(page.locator('.preview-note')).toContainText('Synced', { timeout: 15_000 });
 
-    const meter = page.locator('.live-context [data-context-meter]');
+    // Each meter carries its own flight title. The live PTY flight has no
+    // proxy context, so the proxy flight keeps a separate labeled meter rather
+    // than being presented as the live flight's meter.
+    const contextSection = page.locator('[data-live-context]');
+    await expect(contextSection).toContainText('Latest per flight');
+    const reviewEntry = contextSection
+      .locator('[data-context-flight]')
+      .filter({ hasText: 'Review landing page copy' });
+    await expect(reviewEntry).toBeVisible();
+
+    const meter = reviewEntry.locator('[data-context-meter]');
     await expect(meter).toBeVisible();
     await expect(meter).toHaveAttribute('data-context-percent', '82.4');
     await expect(meter).toHaveAttribute('data-context-high', 'true');
