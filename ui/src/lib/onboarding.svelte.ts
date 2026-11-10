@@ -1,4 +1,6 @@
-export const ONBOARDED_KEY = 'cockpit.onboarded';
+import { storageKey } from './brand';
+
+export const ONBOARDED_KEY = storageKey('onboarded');
 
 export const onboardingState = $state<{ open: boolean; step: number }>({
   open: false,

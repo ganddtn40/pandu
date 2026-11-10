@@ -14,7 +14,7 @@
 
   const agents = $derived(daemonState.adapters);
   const selected = $derived(agents.find((adapter) => adapter.id === agentId) ?? agents[0]);
-  const command = $derived(selected ? `cockpit run -- ${selected.command}` : '');
+  const command = $derived(selected ? `pandu run -- ${selected.command}` : '');
 
   $effect(() => {
     if (!quickPromptState.open) return;

@@ -423,85 +423,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cockpit-cli"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "clap",
- "cockpit-core",
- "cockpit-daemon",
- "crossterm",
- "portable-pty",
- "rand 0.8.8",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "cockpit-core"
-version = "0.2.0"
-dependencies = [
- "chrono",
- "http",
- "percent-encoding",
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "cockpit-daemon"
-version = "0.2.0"
-dependencies = [
- "argon2",
- "axum",
- "axum-server",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "cockpit-core",
- "directories",
- "ed25519-dalek",
- "flate2",
- "futures-util",
- "glob",
- "http",
- "qrcode",
- "rand 0.8.8",
- "rcgen",
- "regex",
- "reqwest",
- "rusqlite",
- "rust-embed",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
- "tar",
- "tauri-winrt-notification",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite 0.26.2",
- "toml",
- "toml_edit",
- "tower",
- "tower-http",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1547,6 +1468,85 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "pandu-cli"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "pandu-core",
+ "pandu-daemon",
+ "portable-pty",
+ "rand 0.8.8",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "pandu-core"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "http",
+ "percent-encoding",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "pandu-daemon"
+version = "0.2.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "axum-server",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "directories",
+ "ed25519-dalek",
+ "flate2",
+ "futures-util",
+ "glob",
+ "http",
+ "pandu-core",
+ "qrcode",
+ "rand 0.8.8",
+ "rcgen",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tar",
+ "tauri-winrt-notification",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite 0.26.2",
+ "toml",
+ "toml_edit",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "parking_lot"

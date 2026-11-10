@@ -3,8 +3,10 @@ import { agentEventKey } from './agent-events';
 import { t } from './i18n/i18n.svelte';
 import { toast } from './toast-store.svelte';
 
-const IN_APP_KEY = 'cockpit.notify.inApp';
-const WEB_KEY = 'cockpit.notify.web';
+import { storageKey } from './brand';
+
+const IN_APP_KEY = storageKey('notify.inApp');
+const WEB_KEY = storageKey('notify.web');
 
 export type WebPermission = NotificationPermission | 'unsupported';
 
@@ -107,7 +109,7 @@ export function notifyAgentEvent(event: {
     try {
       new window.Notification(label, {
         body: `${event.agentName} · ${event.projectName}`,
-        tag: `cockpit:${event.agentName}:${event.projectName}:${event.type}`,
+        tag: `pandu:${event.agentName}:${event.projectName}:${event.type}`,
       });
     } catch {
       // A browser that rejects the notification must not break the app.

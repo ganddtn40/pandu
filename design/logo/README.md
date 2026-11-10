@@ -1,4 +1,4 @@
-# Cockpit logo
+# Pandu logo
 
 The mark is a graphite squircle with a compass ring and a single warm-orange
 position light. It reads as a control instrument, not a radar: one ring, one
@@ -8,13 +8,13 @@ needle, one live point.
 
 | File | Use |
 | --- | --- |
-| `cockpit-mark.svg` | Primary mark on dark or photographic backgrounds. |
-| `cockpit-mark-light.svg` | Paper/silver shell for light backgrounds. |
-| `cockpit-mark-mono.svg` | Single-color mark; inherits `currentColor`. |
-| `cockpit-wordmark.svg` | Mark plus the Cockpit wordmark. Text inherits `currentColor`. |
+| `pandu-mark.svg` | Primary mark on dark or photographic backgrounds. |
+| `pandu-mark-light.svg` | Paper/silver shell for light backgrounds. |
+| `pandu-mark-mono.svg` | Single-color mark; inherits `currentColor`. |
+| `pandu-wordmark.svg` | Mark plus the Pandu wordmark. Text inherits `currentColor`. |
 
 `ui/public/logo.svg` is the favicon and must stay in sync with
-`cockpit-mark.svg`.
+`pandu-mark.svg`.
 
 ## Palette
 
@@ -25,7 +25,7 @@ needle, one live point.
 | Ring | white/silver, or graphite on light |
 | Accent | `#ff7a2f` (`#ffb27a → #ff6a1a` gradient) |
 
-The accent is the default Cockpit orange. Do not recolor the mark to another
+The accent is the default Pandu orange. Do not recolor the mark to another
 accent preset; the in-app accent engine themes the interface, not the logo.
 
 ## Usage
@@ -34,7 +34,7 @@ accent preset; the in-app accent engine themes the interface, not the logo.
 - Clear space: at least 25% of the mark width on every side.
 - Keep the squircle intact. Do not crop it, add a second ring, or place the
   mark on a busy area without the dark or light shell variant.
-- On light surfaces use `cockpit-mark-light.svg` or the mono mark.
+- On light surfaces use `pandu-mark-light.svg` or the mono mark.
 - Do not stretch, outline, rotate, or add glow beyond the built-in accent.
 
 ## Regenerating PNGs

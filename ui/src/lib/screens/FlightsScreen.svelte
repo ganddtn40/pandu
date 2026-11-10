@@ -272,7 +272,7 @@
   });
 
   // A provider can reject a rewritten request (for example when it no longer
-  // accepts a parameter for the target model). Cockpit reverts once and keeps
+  // accepts a parameter for the target model). Pandu reverts once and keeps
   // the rejection on the step; surface it instead of leaving the card stale.
   $effect(() => {
     const id = selectedId;

@@ -47,17 +47,25 @@ import type {
   UninstallOutcome,
   UninstallPreview,
 } from './types';
+import {
+  CLI_COMMAND,
+  CSRF_HEADER,
+  PRODUCT_NAME,
+  REMOTE_HEADER,
+  TOKEN_HEADER,
+  storageKey,
+} from '../brand';
 
 declare global {
   interface Window {
     /** Test and development hook: point the UI at another daemon. */
-    __cockpitDaemonUrl?: string;
+    __panduDaemonUrl?: string;
   }
 }
 
 const DEV_PORTS = new Set(['5174', '4174']);
 const DEFAULT_DAEMON = 'http://127.0.0.1:4319';
-const REMOTE_TOKEN_KEY = 'cockpit.remote.token';
+const REMOTE_TOKEN_KEY = storageKey('remote.token');
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
@@ -66,7 +74,7 @@ function trimTrailingSlash(value: string): string {
 /** Resolve the daemon origin without hiding where the UI is pointed. */
 export function daemonOrigin(): string {
   if (typeof window === 'undefined') return DEFAULT_DAEMON;
-  const override = window.__cockpitDaemonUrl;
+  const override = window.__panduDaemonUrl;
   if (override && override.trim()) return trimTrailingSlash(override.trim());
   const { protocol, hostname, port, origin } = window.location;
   if (DEV_PORTS.has(port) && (hostname === '127.0.0.1' || hostname === 'localhost')) {
@@ -125,7 +133,7 @@ async function requestAt<T>(origin: string, path: string, init: RequestInit = {}
     });
   } catch {
     throw new DaemonError(
-      'The Cockpit daemon is not reachable. Start it with `cockpit serve`.',
+      `The ${PRODUCT_NAME} daemon is not reachable. Start it with \`${CLI_COMMAND} serve\`.`,
       0,
       'daemon_unreachable',
     );
@@ -146,7 +154,7 @@ async function requestAt<T>(origin: string, path: string, init: RequestInit = {}
 
   // The remote listener rotates a device token on use. The new token rides in
   // a response header and must be stored before the overlap window closes.
-  const rotated = response.headers.get('x-cockpit-token');
+  const rotated = response.headers.get(TOKEN_HEADER);
   if (rotated) setRemoteToken(rotated);
 
   return (await response.json()) as T;
@@ -170,7 +178,7 @@ async function hostCsrf(): Promise<string> {
       });
       if (!response.ok) {
         throw new DaemonError(
-          'Cockpit could not issue a CSRF token. Reload the page and try again.',
+          `${PRODUCT_NAME} could not issue a CSRF token. Reload the page and try again.`,
           response.status,
           'csrf_unavailable',
         );
@@ -178,7 +186,7 @@ async function hostCsrf(): Promise<string> {
       const body = (await response.json()) as { token?: string };
       if (!body.token) {
         throw new DaemonError(
-          'Cockpit did not return a CSRF token. Reload the page and try again.',
+          `${PRODUCT_NAME} did not return a CSRF token. Reload the page and try again.`,
           response.status,
           'csrf_unavailable',
         );
@@ -205,7 +213,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...init,
       headers: {
         'content-type': 'application/json',
-        'x-cockpit-csrf': token,
+        [CSRF_HEADER]: token,
         ...init.headers,
       },
     });
@@ -255,7 +263,7 @@ async function remoteRequest<T>(path: string, init: RequestInit = {}): Promise<T
 
 /**
  * Probe the origin before the app boots. Only the remote listener sets the
- * `X-Cockpit-Remote` marker on its own UI; `/api/remote/health` is
+ * `X-Pandu-Remote` marker on its own UI; `/api/remote/health` is
  * authenticated and no longer an unauthenticated fingerprint.
  */
 export async function detectRemoteListener(): Promise<boolean> {
@@ -267,7 +275,7 @@ export async function detectRemoteListener(): Promise<boolean> {
       cache: 'no-store',
       signal: AbortSignal.timeout(2_500),
     });
-    return response.headers.get('x-cockpit-remote') === '1';
+    return response.headers.get(REMOTE_HEADER) === '1';
   } catch {
     return false;
   }

@@ -1,6 +1,8 @@
 import { nextTheme, resolveTheme, type Theme } from './theme';
 
-const STORAGE_KEY = 'cockpit.theme';
+import { storageKey } from './brand';
+
+const STORAGE_KEY = storageKey('theme');
 
 function currentTheme(): Theme {
   if (typeof document === 'undefined') return 'dark';
@@ -25,7 +27,7 @@ export function setTheme(theme: Theme): void {
   } catch {
     // Storage can be unavailable in private windows. The theme still applies.
   }
-  window.dispatchEvent(new CustomEvent<Theme>('cockpit:theme', { detail: theme }));
+  window.dispatchEvent(new CustomEvent<Theme>('pandu:theme', { detail: theme }));
 }
 
 export function toggleTheme(): void {

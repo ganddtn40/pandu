@@ -67,7 +67,7 @@ let refreshAgain = false;
 function errorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'The Cockpit daemon is not reachable.';
+  return 'The Pandu daemon is not reachable.';
 }
 
 /**

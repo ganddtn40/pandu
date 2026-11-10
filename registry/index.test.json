@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "generatedAt": "2026-11-09T12:45:17.927Z",
-  "keyId": "cockpit-market-test-2026",
+  "keyId": "pandu-market-test-2026",
   "entries": [
     {
       "kind": "skill",
@@ -158,5 +158,5 @@
       "version": "2026.11.4"
     }
   ],
-  "signature": "/GsVbOHoS9mKZNhzLkFpINVzkaAPU/qMz2rh4Ue7byMzBkgfeb6ak9Cq++2Pg+XxxA9ddFzCEE3kX23c0ehoAA=="
+  "signature": "81pvMzAig3+FCfEGCdcI6BFLGD24cEQ8Dp1Hsjr6ucyO8rBFGDKAvMgSnGoZi5je8ojCWzTEGELkNatXgIffCg=="
 }

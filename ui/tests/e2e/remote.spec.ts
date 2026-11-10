@@ -10,9 +10,9 @@ const REMOTE_URL = 'http://127.0.0.1:4320';
 
 async function openHostSettings(page: Page): Promise<void> {
   await page.addInitScript((daemonUrl) => {
-    window.__cockpitDaemonUrl = daemonUrl;
+    window.__panduDaemonUrl = daemonUrl;
     try {
-      localStorage.setItem('cockpit.onboarded', '1');
+      localStorage.setItem('pandu.onboarded', '1');
     } catch {
       // Storage is optional.
     }
@@ -37,7 +37,7 @@ async function hostPost(page: Page, pathname: string): Promise<void> {
   await page.request.post(`${DEMO_DAEMON}${pathname}`, {
     headers: {
       origin: 'http://127.0.0.1:4174',
-      'x-cockpit-csrf': token,
+      'x-pandu-csrf': token,
       'content-type': 'application/json',
     },
     data: {},
@@ -88,7 +88,7 @@ test.describe('remote access', () => {
       .poll(async () => {
         try {
           const response = await fetch(`${REMOTE_URL}/`);
-          return response.headers.get('x-cockpit-remote');
+          return response.headers.get('x-pandu-remote');
         } catch {
           return null;
         }
@@ -104,7 +104,7 @@ test.describe('remote access', () => {
     const remote = await remoteContext.newPage();
     // The pairing poll returns the one-time token. The first authenticated
     // request after pairing rotates it, and the UI must persist the replacement
-    // from the X-Cockpit-Token response header before the overlap closes.
+    // from the X-Pandu-Token response header before the overlap closes.
     let pairingToken: string | null = null;
     remote.on('response', (response) => {
       if (
@@ -124,7 +124,7 @@ test.describe('remote access', () => {
     });
     await remote.goto(REMOTE_URL);
     await expect(remote.getByRole('heading', { name: 'Pair this device' })).toBeVisible();
-    await expect(remote.getByText('Cockpit Remote')).toBeVisible();
+    await expect(remote.getByText('Pandu Remote')).toBeVisible();
 
     await remote.getByLabel('Pairing code').fill(code);
     await remote.getByLabel('Device name').fill('Pixel 8');
@@ -165,7 +165,7 @@ test.describe('remote access', () => {
     await expect(remote.locator('.remote-app__paired-list')).toContainText('No content');
     await expect.poll(() => pairingToken).not.toBeNull();
     const storedToken = await remote.evaluate(() =>
-      localStorage.getItem('cockpit.remote.token'),
+      localStorage.getItem('pandu.remote.token'),
     );
     expect(storedToken).toMatch(/^[a-f0-9]{64}$/);
     expect(storedToken).not.toBe(pairingToken);
@@ -231,7 +231,7 @@ test.describe('remote access', () => {
       failOnStatusCode: false,
     });
     expect(health.status()).toBe(404);
-    const token = await remote.evaluate(() => localStorage.getItem('cockpit.remote.token'));
+    const token = await remote.evaluate(() => localStorage.getItem('pandu.remote.token'));
     const authenticated = await remote.request.get(`${REMOTE_URL}/api/remote/health`, {
       headers: { authorization: `Bearer ${token}` },
     });

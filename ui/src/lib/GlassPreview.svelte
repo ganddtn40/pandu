@@ -25,7 +25,7 @@
   onMount(() => {
     applyGlassPattern(pattern, false);
     const timer = window.setInterval(() => {
-      const next = window.__cockpitGlassStats;
+      const next = window.__panduGlassStats;
       if (next) stats = { ...next };
     }, 500);
     return () => window.clearInterval(timer);

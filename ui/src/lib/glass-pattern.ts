@@ -1,6 +1,8 @@
 export type GlassPattern = 'smoky' | 'checker';
 
-const STORAGE_KEY = 'cockpit.glassPattern';
+import { storageKey } from './brand';
+
+const STORAGE_KEY = storageKey('glassPattern');
 
 export function isGlassPattern(value: unknown): value is GlassPattern {
   return value === 'smoky' || value === 'checker';
@@ -28,5 +30,5 @@ export function applyGlassPattern(pattern: GlassPattern, persist = true): void {
       // Storage is optional.
     }
   }
-  window.dispatchEvent(new CustomEvent<GlassPattern>('cockpit:pattern', { detail: pattern }));
+  window.dispatchEvent(new CustomEvent<GlassPattern>('pandu:pattern', { detail: pattern }));
 }

@@ -44,7 +44,7 @@ let tickCount = 0;
 export function remoteHostErrorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'Cockpit could not update remote access.';
+  return 'Pandu could not update remote access.';
 }
 
 export async function refreshRemoteStatus(): Promise<void> {

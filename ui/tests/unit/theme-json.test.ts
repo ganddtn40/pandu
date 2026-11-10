@@ -277,8 +277,8 @@ describe('theme sharing', () => {
 
   it('builds a share URL and reads it back', () => {
     const theme = themeToJson({ ...DEFAULT_DESIGN, theme: 'frost' });
-    const url = themeShareUrl(theme, 'https://cockpit.example');
-    expect(url.startsWith('https://cockpit.example/?share=')).toBe(true);
+    const url = themeShareUrl(theme, 'https://pandu.example');
+    expect(url.startsWith('https://pandu.example/?share=')).toBe(true);
     const shared = readShareFromSearch(new URL(url).search);
     expect(shared?.theme).toBe('frost');
     expect(readShareFromSearch('?theme=light')).toBeNull();

@@ -9,15 +9,15 @@ const DEMO_DAEMON = 'http://127.0.0.1:4321';
 
 async function open(page: Page, url: string): Promise<void> {
   await page.addInitScript((daemonUrl) => {
-    window.__cockpitDaemonUrl = daemonUrl;
+    window.__panduDaemonUrl = daemonUrl;
     try {
-      localStorage.setItem('cockpit.onboarded', '1');
+      localStorage.setItem('pandu.onboarded', '1');
     } catch {
       // Storage is optional.
     }
   }, DEMO_DAEMON);
   await page.goto(url);
-  await page.waitForFunction(() => window.__cockpitGlassReady === true);
+  await page.waitForFunction(() => window.__panduGlassReady === true);
   await page.waitForTimeout(250);
 }
 
@@ -88,11 +88,11 @@ test.describe('model, effort, and context', () => {
     await shotOf(page, '.model-card', 'flight-model-effort.png');
 
     // The override is opt-in and the confirmation step explains exactly what
-    // Cockpit rewrites before the Apply button becomes the only way forward.
+    // Pandu rewrites before the Apply button becomes the only way forward.
     await card.locator('[data-model-override-open]').click();
     const panel = card.locator('[data-model-override]');
     await expect(panel).toBeVisible();
-    await expect(panel).toContainText('Cockpit rewrites only the model and effort fields');
+    await expect(panel).toContainText('Pandu rewrites only the model and effort fields');
     await expect(panel).toContainText('Estimated cost on this flight');
     await expect(panel.locator('[data-model-override-confirm]')).toBeEnabled();
 
@@ -112,7 +112,7 @@ test.describe('model, effort, and context', () => {
     await panel.locator('[data-model-override-confirm]').click();
     await expect(page.locator('.toast')).toContainText('Model override applied.');
     await expect(card.locator('[data-model-modified]')).toBeVisible();
-    await expect(card.locator('[data-model-modified]')).toContainText('Modified by Cockpit');
+    await expect(card.locator('[data-model-modified]')).toContainText('Modified by Pandu');
     await expect(card.locator('[data-model-original]')).toContainText('gemini-2.5-pro');
     await expect(card.locator('[data-model-original]')).toContainText('gemini-3.8-flash');
     await shotOf(page, '.model-card', 'override-modified-badge.png');

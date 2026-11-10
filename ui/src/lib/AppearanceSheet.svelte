@@ -61,7 +61,7 @@
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'cockpit-theme.json';
+    anchor.download = 'pandu-theme.json';
     anchor.click();
     URL.revokeObjectURL(url);
     toast('Theme exported as JSON.');
@@ -112,7 +112,7 @@
 
   function reset(): void {
     resetDesign();
-    toast('Appearance reset to the Cockpit default.');
+    toast('Appearance reset to the Pandu default.');
   }
 </script>
 

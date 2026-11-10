@@ -105,7 +105,7 @@ export function initGlass(canvas: HTMLCanvasElement, forceFallback = false): Gla
   try {
     return createEngine(canvas, gl);
   } catch (error) {
-    console.warn('[cockpit] glass renderer could not start', error);
+    console.warn('[pandu] glass renderer could not start', error);
     return fallback(canvas, 'init-failed');
   }
 }
@@ -116,16 +116,16 @@ function fallback(canvas: HTMLCanvasElement, reason: string): GlassController {
   html.dataset.glassMode = 'fallback';
   html.dataset.glassReason = reason;
   clearRendered();
-  window.__cockpitGlassMode = 'fallback';
-  window.__cockpitGlassReady = true;
-  window.__cockpitGlassStats = {
+  window.__panduGlassMode = 'fallback';
+  window.__panduGlassReady = true;
+  window.__panduGlassStats = {
     mode: 'fallback',
     shapes: 0,
     fps: 0,
     redrawsPerSecond: 0,
     redrawsTotal: 0,
   };
-  console.info(`[cockpit] glass fallback: ${reason}`);
+  console.info(`[pandu] glass fallback: ${reason}`);
   return {
     destroy: () => undefined,
     refresh: () => undefined,
@@ -292,7 +292,7 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
     redrawsPerSecond: 0,
     redrawsTotal: 0,
   };
-  window.__cockpitGlassStats = stats;
+  window.__panduGlassStats = stats;
 
   const textures: WebGLTexture[] = [];
   const framebuffers: WebGLFramebuffer[] = [];
@@ -443,14 +443,14 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
       stats.redrawsPerSecond = 0;
       html.dataset.glassMode = 'fallback';
       html.dataset.glassReason = reason;
-      window.__cockpitGlassMode = 'fallback';
-      window.__cockpitGlassReady = true;
+      window.__panduGlassMode = 'fallback';
+      window.__panduGlassReady = true;
       return;
     }
     canvas.hidden = false;
     delete html.dataset.glassReason;
     html.dataset.glassMode = 'pending';
-    window.__cockpitGlassMode = 'webgl';
+    window.__panduGlassMode = 'webgl';
     // Render once more to publish the webgl mode, even after a dynamic pause.
     ready = false;
     blurDirty = true;
@@ -751,8 +751,8 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
       html.dataset.glassMode = 'webgl';
       html.dataset.glassRenderer = 'webgl2';
       delete html.dataset.glassReason;
-      window.__cockpitGlassMode = 'webgl';
-      window.__cockpitGlassReady = true;
+      window.__panduGlassMode = 'webgl';
+      window.__panduGlassReady = true;
     }
   }
 
@@ -773,9 +773,9 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
   window.addEventListener('pointermove', onPointerMove, { passive: true });
   window.addEventListener('scroll', onScroll, { capture: true, passive: true });
   window.addEventListener('resize', onResize, { passive: true });
-  window.addEventListener('cockpit:design', onDesignEvent);
-  window.addEventListener('cockpit:theme', onDesignEvent);
-  window.addEventListener('cockpit:pattern', onPatternEvent);
+  window.addEventListener('pandu:design', onDesignEvent);
+  window.addEventListener('pandu:theme', onDesignEvent);
+  window.addEventListener('pandu:pattern', onPatternEvent);
   document.addEventListener('visibilitychange', onVisibility);
 
   syncWallpaperImage();
@@ -796,9 +796,9 @@ function createEngine(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext): Gl
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('scroll', onScroll, { capture: true });
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('cockpit:design', onDesignEvent);
-      window.removeEventListener('cockpit:theme', onDesignEvent);
-      window.removeEventListener('cockpit:pattern', onPatternEvent);
+      window.removeEventListener('pandu:design', onDesignEvent);
+      window.removeEventListener('pandu:theme', onDesignEvent);
+      window.removeEventListener('pandu:pattern', onPatternEvent);
       document.removeEventListener('visibilitychange', onVisibility);
       for (const texture of textures) gl.deleteTexture(texture);
       for (const framebuffer of framebuffers) gl.deleteFramebuffer(framebuffer);

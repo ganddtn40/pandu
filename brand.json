@@ -1,0 +1,33 @@
+{
+  "name": "Pandu",
+  "slug": "pandu",
+  "wordmark": "pandu",
+  "tagline": "A local flight recorder and control tower for AI coding agents.",
+  "disambiguation": "Pandu is not an AI agent; it guides, records and protects the agents you already use",
+  "cli": {
+    "command": "pandu"
+  },
+  "crates": {
+    "core": "pandu-core",
+    "daemon": "pandu-daemon",
+    "cli": "pandu-cli"
+  },
+  "envPrefix": "PANDU_",
+  "dataDir": ".pandu",
+  "databaseFile": "pandu.db",
+  "appId": "io.github.ganddtn40.pandu",
+  "androidPackage": "io.github.ganddtn40.pandu",
+  "urlScheme": "pandu",
+  "repository": "https://github.com/ganddtn40/pandu",
+  "registry": {
+    "url": "https://raw.githubusercontent.com/ganddtn40/pandu/main/registry",
+    "keyId": "pandu-market-2026",
+    "testKeyId": "pandu-market-test-2026"
+  },
+  "themeSchema": "pandu.theme",
+  "storagePrefix": "pandu.",
+  "windowTitle": "Pandu",
+  "trayTooltip": "Pandu - local flight recorder and control tower",
+  "notificationTitle": "Pandu",
+  "logoAriaLabel": "Pandu"
+}

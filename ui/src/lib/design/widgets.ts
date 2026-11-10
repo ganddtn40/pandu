@@ -21,7 +21,9 @@ export const DEFAULT_WIDGETS: WidgetLayout = {
   hidden: [],
 };
 
-export const WIDGET_STORAGE_KEY = 'cockpit.widgets';
+import { storageKey } from '../brand';
+
+export const WIDGET_STORAGE_KEY = storageKey('widgets');
 
 function isWidgetId(value: unknown): value is WidgetId {
   return typeof value === 'string' && (WIDGET_IDS as readonly string[]).includes(value);

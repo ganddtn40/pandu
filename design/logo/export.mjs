@@ -25,13 +25,13 @@ const fontUrl = pathToFileURL(
 ).href;
 
 const jobs = [
-  { source: 'cockpit-mark.svg', name: 'cockpit-mark-512.png', width: 512, height: 512 },
-  { source: 'cockpit-mark.svg', name: 'cockpit-mark-1024.png', width: 1024, height: 1024 },
-  { source: 'cockpit-mark.svg', name: 'icon-192.png', width: 192, height: 192 },
-  { source: 'cockpit-mark.svg', name: 'icon-512.png', width: 512, height: 512 },
-  { source: 'cockpit-mark-light.svg', name: 'cockpit-mark-light-512.png', width: 512, height: 512 },
-  { source: 'cockpit-mark-mono.svg', name: 'cockpit-mark-mono-512.png', width: 512, height: 512 },
-  { source: 'cockpit-wordmark.svg', name: 'cockpit-wordmark-1600.png', width: 1600, height: 427 },
+  { source: 'pandu-mark.svg', name: 'pandu-mark-512.png', width: 512, height: 512 },
+  { source: 'pandu-mark.svg', name: 'pandu-mark-1024.png', width: 1024, height: 1024 },
+  { source: 'pandu-mark.svg', name: 'icon-192.png', width: 192, height: 192 },
+  { source: 'pandu-mark.svg', name: 'icon-512.png', width: 512, height: 512 },
+  { source: 'pandu-mark-light.svg', name: 'pandu-mark-light-512.png', width: 512, height: 512 },
+  { source: 'pandu-mark-mono.svg', name: 'pandu-mark-mono-512.png', width: 512, height: 512 },
+  { source: 'pandu-wordmark.svg', name: 'pandu-wordmark-1600.png', width: 1600, height: 427 },
 ];
 
 const browser = await chromium.launch();

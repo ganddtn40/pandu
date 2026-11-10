@@ -1,5 +1,7 @@
+import { THEME_SCHEMA } from '../brand';
+
+export { THEME_SCHEMA };
 export const DESIGN_SCHEMA_VERSION = 1;
-export const THEME_SCHEMA = 'cockpit.theme';
 export const THEME_VERSION = 1;
 export const THEME_TEXT_LIMIT = 32 * 1024;
 export const FONT_SCALE_MIN = 0.85;
@@ -38,7 +40,7 @@ export interface DesignPreferences {
 }
 
 export interface ThemeJson {
-  schema: 'cockpit.theme';
+  schema: string;
   version: number;
   theme: ThemeMode;
   surface: SurfaceStyle;

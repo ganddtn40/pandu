@@ -21,12 +21,13 @@ import {
   type DesignPreferences,
   type ThemeJson,
 } from './types';
+import { PRODUCT_NAME, storageKey } from '../brand';
 
-export const DESIGN_STORAGE_KEY = 'cockpit.design';
-export const WALLPAPER_STORAGE_KEY = 'cockpit.wallpaperImage';
-export const LEGACY_THEME_KEY = 'cockpit.theme';
-export const LEGACY_PERFORMANCE_KEY = 'cockpit.performance';
-export const LEGACY_PATTERN_KEY = 'cockpit.glassPattern';
+export const DESIGN_STORAGE_KEY = storageKey('design');
+export const WALLPAPER_STORAGE_KEY = storageKey('wallpaperImage');
+export const LEGACY_THEME_KEY = storageKey('theme');
+export const LEGACY_PERFORMANCE_KEY = storageKey('performance');
+export const LEGACY_PATTERN_KEY = storageKey('glassPattern');
 
 export interface StorageLike {
   getItem: (key: string) => string | null;
@@ -74,9 +75,9 @@ export function themeToJson(design: DesignPreferences): ThemeJson {
  * can add fields without breaking this one, but every known field is checked.
  */
 export function parseThemeJson(input: unknown): ThemeParseResult {
-  if (!isRecord(input)) return fail('This is not a Cockpit theme object.');
+  if (!isRecord(input)) return fail(`This is not a ${PRODUCT_NAME} theme object.`);
   if (input.schema !== THEME_SCHEMA) {
-    return fail('This file is not a Cockpit theme (missing cockpit.theme schema).');
+    return fail(`This file is not a ${PRODUCT_NAME} theme (missing ${THEME_SCHEMA} schema).`);
   }
   if (typeof input.version !== 'number' || !Number.isInteger(input.version) || input.version < 1) {
     return fail('The theme version is missing or invalid.');
@@ -146,7 +147,7 @@ export function parseThemeJson(input: unknown): ThemeParseResult {
 
 export function parseThemeText(text: string): ThemeParseResult {
   if (text.length > THEME_TEXT_LIMIT) {
-    return fail('The theme file is too large. Cockpit themes must be under 32 KB.');
+    return fail('The theme file is too large. Pandu themes must be under 32 KB.');
   }
   try {
     return parseThemeJson(JSON.parse(text) as unknown);

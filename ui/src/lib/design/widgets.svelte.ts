@@ -31,7 +31,7 @@ function persist(next: WidgetLayout): void {
   } catch {
     // The layout still applies for this session.
   }
-  window.dispatchEvent(new CustomEvent<WidgetLayout>('cockpit:widgets', { detail: next }));
+  window.dispatchEvent(new CustomEvent<WidgetLayout>('pandu:widgets', { detail: next }));
 }
 
 function apply(next: WidgetLayout): void {

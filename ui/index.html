@@ -19,7 +19,7 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#0b0d10" />
     <link rel="icon" href="/logo-small.svg" type="image/svg+xml" sizes="any" />
-    <title>Cockpit</title>
+    <title>__BRAND_TITLE__</title>
     <script>
       // Apply the saved design before the first paint so there is no flash.
       (function () {
@@ -38,7 +38,7 @@
         try {
           var saved = null;
           try {
-            saved = JSON.parse(localStorage.getItem('cockpit.design') || 'null');
+            saved = JSON.parse(localStorage.getItem('__BRAND_STORAGE_PREFIX__design') || 'null');
           } catch (error) {
             saved = null;
           }
@@ -54,7 +54,7 @@
             root.dataset.borders = saved.borders === false ? 'off' : 'on';
             root.dataset.performance = saved.performance === true ? 'on' : 'off';
           } else {
-            var legacy = localStorage.getItem('cockpit.theme');
+            var legacy = localStorage.getItem('__BRAND_STORAGE_PREFIX__theme');
             root.dataset.theme = legacy === 'light' ? 'light' : 'dark';
           }
           var forced = new URLSearchParams(location.search).get('theme');
@@ -62,7 +62,7 @@
           root.style.colorScheme = root.dataset.theme === 'dark' ? 'dark' : 'light';
           var pattern = new URLSearchParams(location.search).get('pattern');
           if (pattern !== 'checker' && pattern !== 'smoky') {
-            pattern = localStorage.getItem('cockpit.glassPattern') === 'checker' ? 'checker' : 'smoky';
+            pattern = localStorage.getItem('__BRAND_STORAGE_PREFIX__glassPattern') === 'checker' ? 'checker' : 'smoky';
           }
           root.dataset.glassPattern = pattern;
         } catch (error) {

@@ -38,8 +38,8 @@ blob-report/
 # Generated logo exports (SVGs are the source)
 /design/logo/png/
 
-# Cockpit local data
-.cockpit/
+# Pandu local data
+.pandu/
 data/
 tmp/
 /*.db

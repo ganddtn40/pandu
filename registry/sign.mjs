@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Sign the Cockpit registry index and revocation list with the maintainer key.
+// Sign the Pandu registry index and revocation list with the maintainer key.
 //
 // Usage:
 //   node registry/sign.mjs --key /secure/path/private.pem
@@ -8,15 +8,19 @@
 //
 // `--build` rebuilds the index from skills/*.yaml and mcp/*.yaml first.
 // `--variant production` (the default) writes and signs `index.json` and
-// `revoked.json` with keyId `cockpit-market-2026`. `--variant test` writes and
-// signs `index.test.json` and `revoked.test.json` with keyId
-// `cockpit-market-test-2026` for debug builds and tests. The private key is
-// never written to the repository. The public key printed at the end must
-// match the corresponding constant in crates/cockpit-daemon/src/market/mod.rs.
+// `revoked.json`. `--variant test` writes and signs `index.test.json` and
+// `revoked.test.json` with the test key id from `brand.json` for debug builds
+// and tests. The private key is never written to the repository. The public
+// key printed at the end must match the corresponding constant in
+// crates/pandu-daemon/src/market/mod.rs.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const brand = JSON.parse(fs.readFileSync(path.join(repoRoot, 'brand.json'), 'utf8'));
 
 function fail(message) {
   console.error(`sign: ${message}`);
@@ -37,7 +41,12 @@ const variant = variantIndex === -1 ? 'production' : args[variantIndex + 1];
 if (variant !== 'production' && variant !== 'test') {
   fail('--variant must be production or test');
 }
-const keyId = variant === 'test' ? 'cockpit-market-test-2026' : 'cockpit-market-2026';
+const keyId =
+  variant === 'test'
+    ? brand.registry.testKeyId
+    : fs.existsSync(path.join(dir, indexFile))
+      ? JSON.parse(fs.readFileSync(path.join(dir, indexFile), 'utf8')).keyId
+      : brand.registry.keyId;
 const indexFile = variant === 'test' ? 'index.test.json' : 'index.json';
 const revokedFile = variant === 'test' ? 'revoked.test.json' : 'revoked.json';
 

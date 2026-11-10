@@ -1,5 +1,5 @@
 {
-  "name": "@cockpit/ui",
+  "name": "@pandu/ui",
   "version": "0.2.0",
   "private": true,
   "type": "module",

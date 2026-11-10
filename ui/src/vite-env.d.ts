@@ -2,9 +2,9 @@
 /// <reference types="vite/client" />
 
 interface Window {
-  __cockpitGlassReady?: boolean;
-  __cockpitGlassMode?: 'webgl' | 'fallback';
-  __cockpitGlassStats?: {
+  __panduGlassReady?: boolean;
+  __panduGlassMode?: 'webgl' | 'fallback';
+  __panduGlassStats?: {
     mode: 'webgl' | 'fallback';
     shapes: number;
     fps: number;

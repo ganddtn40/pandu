@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { LOGO_ARIA_LABEL } from './brand';
+
   let { size = 36, className = '' }: { size?: number; className?: string } = $props();
 
   // At 16-24px the detailed gradients and hairline rings turn to mush. The
@@ -13,7 +15,7 @@
     height={size}
     viewBox="0 0 32 32"
     role="img"
-    aria-label="Cockpit"
+    aria-label={LOGO_ARIA_LABEL}
   >
     <rect x="2" y="2" width="28" height="28" rx="9" fill="#171b21" />
     <rect
@@ -46,29 +48,29 @@
     height={size}
     viewBox="0 0 64 64"
     role="img"
-    aria-label="Cockpit"
+    aria-label={LOGO_ARIA_LABEL}
   >
     <defs>
-      <linearGradient id="cockpit-mark-shell" x1="10" y1="6" x2="54" y2="60" gradientUnits="userSpaceOnUse">
+      <linearGradient id="pandu-mark-shell" x1="10" y1="6" x2="54" y2="60" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#3a424d" />
         <stop offset="0.52" stop-color="#1a1f26" />
         <stop offset="1" stop-color="#0b0e12" />
       </linearGradient>
-      <linearGradient id="cockpit-mark-ring" x1="18" y1="16" x2="46" y2="50" gradientUnits="userSpaceOnUse">
+      <linearGradient id="pandu-mark-ring" x1="18" y1="16" x2="46" y2="50" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#ffffff" stop-opacity="0.96" />
         <stop offset="0.55" stop-color="#c9d4df" stop-opacity="0.86" />
         <stop offset="1" stop-color="#7f8d9c" stop-opacity="0.72" />
       </linearGradient>
-      <linearGradient id="cockpit-mark-gloss" x1="14" y1="6" x2="46" y2="38" gradientUnits="userSpaceOnUse">
+      <linearGradient id="pandu-mark-gloss" x1="14" y1="6" x2="46" y2="38" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#ffffff" stop-opacity="0.28" />
         <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.04" />
         <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
       </linearGradient>
-      <radialGradient id="cockpit-mark-glow" cx="0.72" cy="0.18" r="0.8">
+      <radialGradient id="pandu-mark-glow" cx="0.72" cy="0.18" r="0.8">
         <stop offset="0" stop-color="#ffb27a" stop-opacity="0.28" />
         <stop offset="1" stop-color="#ff7a2f" stop-opacity="0" />
       </radialGradient>
-      <linearGradient id="cockpit-mark-accent" x1="38" y1="16" x2="50" y2="28" gradientUnits="userSpaceOnUse">
+      <linearGradient id="pandu-mark-accent" x1="38" y1="16" x2="50" y2="28" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#ffb27a" />
         <stop offset="1" stop-color="#ff6a1a" />
       </linearGradient>
@@ -76,15 +78,15 @@
 
     <path
       d="M32 4C49.8 4 60 14.2 60 32S49.8 60 32 60 4 49.8 4 32 14.2 4 32 4Z"
-      fill="url(#cockpit-mark-shell)"
+      fill="url(#pandu-mark-shell)"
     />
     <path
       d="M32 4C49.8 4 60 14.2 60 32S49.8 60 32 60 4 49.8 4 32 14.2 4 32 4Z"
-      fill="url(#cockpit-mark-glow)"
+      fill="url(#pandu-mark-glow)"
     />
     <path
       d="M32 4C49.8 4 60 14.2 60 32S49.8 60 32 60 4 49.8 4 32 14.2 4 32 4Z"
-      fill="url(#cockpit-mark-gloss)"
+      fill="url(#pandu-mark-gloss)"
     />
 
     <circle
@@ -92,7 +94,7 @@
       cy="32"
       r="18.5"
       fill="none"
-      stroke="url(#cockpit-mark-ring)"
+      stroke="url(#pandu-mark-ring)"
       stroke-width="2.6"
     />
     <circle cx="32" cy="32" r="12.6" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1" />
@@ -112,7 +114,7 @@
       stroke-width="1.6"
       stroke-linecap="round"
     />
-    <circle cx="32" cy="19.8" r="3.3" fill="url(#cockpit-mark-accent)" />
+    <circle cx="32" cy="19.8" r="3.3" fill="url(#pandu-mark-accent)" />
     <circle cx="32" cy="19.8" r="1.2" fill="#fff6ee" fill-opacity="0.9" />
     <path
       d="M17.4 17.4C21.2 13.6 26.2 11.4 31.6 11.2"

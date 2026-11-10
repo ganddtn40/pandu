@@ -31,9 +31,9 @@ async function openMarket(
   { devOverride = true }: { devOverride?: boolean } = {},
 ): Promise<void> {
   await page.addInitScript((daemonUrl) => {
-    window.__cockpitDaemonUrl = daemonUrl;
+    window.__panduDaemonUrl = daemonUrl;
     try {
-      localStorage.setItem('cockpit.onboarded', '1');
+      localStorage.setItem('pandu.onboarded', '1');
     } catch {
       // Storage is optional.
     }
@@ -120,10 +120,10 @@ test('catalogue, instant search, filters and detail', async ({ page }) => {
   await expect(sheet.getByText(CONTENT_SHA)).toBeVisible();
   await expect(sheet.getByText('MIT', { exact: true })).toBeVisible();
   const repo = sheet.getByRole('link', {
-    name: /https:\/\/example\.invalid\/cockpit-examples\/commit-messages/,
+    name: /https:\/\/example\.invalid\/pandu-examples\/commit-messages/,
   });
   await expect(repo).toHaveAttribute('rel', 'noopener');
-  await expect(repo).toHaveText('https://example.invalid/cockpit-examples/commit-messages');
+  await expect(repo).toHaveText('https://example.invalid/pandu-examples/commit-messages');
   await sheet.getByText('Pinned commit').scrollIntoViewIfNeeded();
   await shot(page, 'market-detail.png');
 });
@@ -169,7 +169,7 @@ test('skill install preview, installed tab, uninstall and undo', async ({ page }
   await expect(
     sheet.getByRole('heading', { level: 3, name: `Installed ${SKILL_NAME}` }),
   ).toBeVisible();
-  await expect(page.getByText('Cockpit wrote')).toBeVisible();
+  await expect(page.getByText('Pandu wrote')).toBeVisible();
 
   await page.getByRole('button', { name: 'Done' }).click();
   await page.getByTestId('market-tab-installed').click();
@@ -223,7 +223,7 @@ test('mcp secret, config diff, install and undo', async ({ page }) => {
   await secret.fill('e2e-secret-value');
   await expect(page.getByTestId('market-confirm-install')).toBeEnabled();
   await expect(sheet.getByText('npx -y example-weather-mcp@1.0.0')).toBeVisible();
-  await sheet.getByText('Cockpit will change configuration').scrollIntoViewIfNeeded();
+  await sheet.getByText('Pandu will change configuration').scrollIntoViewIfNeeded();
   await shot(page, 'market-preview-diff.png');
 
   await page.getByTestId('market-confirm-install').click();

@@ -76,9 +76,9 @@
 
 <div class="onboarding">
   <header class="onboarding__top">
-    <a class="brand" href="/" data-route aria-label="Cockpit home">
+    <a class="brand" href="/" data-route aria-label="Pandu home">
       <Logo size={32} />
-      <span class="brand__name">Cockpit</span>
+      <span class="brand__name">Pandu</span>
     </a>
     <button class="btn btn--small btn--ghost" type="button" onclick={finish}>
       {t('onboarding.skip')}

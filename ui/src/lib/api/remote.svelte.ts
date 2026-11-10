@@ -5,6 +5,7 @@ import {
   remoteToken,
   setRemoteToken,
 } from './client';
+import { WS_SUBPROTOCOL_PREFIX } from '../brand';
 import type {
   AgentEvent,
   AgentSession,
@@ -60,7 +61,7 @@ let refreshing = false;
 export function remoteErrorMessage(error: unknown): string {
   if (error instanceof DaemonError) return error.message;
   if (error instanceof Error) return error.message;
-  return 'Cockpit could not reach the host.';
+  return 'Pandu could not reach the host.';
 }
 
 function clearSession(error: string | null): void {
@@ -154,7 +155,7 @@ async function openSocket(): Promise<void> {
   let next: WebSocket;
   try {
     // The single-use ticket rides in the subprotocol, never in the URL.
-    next = new WebSocket(remoteSocketUrl(), [`cockpit.${ticket}`]);
+    next = new WebSocket(remoteSocketUrl(), [`${WS_SUBPROTOCOL_PREFIX}${ticket}`]);
   } catch {
     scheduleReconnect();
     return;

@@ -7,9 +7,9 @@ mkdirSync(SHOTS, { recursive: true });
 
 const DEMO_DAEMON = 'http://127.0.0.1:4321';
 const LIVE_DAEMON = 'http://127.0.0.1:4322';
-const DESIGN_KEY = 'cockpit.design';
-const WALLPAPER_KEY = 'cockpit.wallpaperImage';
-const ONBOARDED_KEY = 'cockpit.onboarded';
+const DESIGN_KEY = 'pandu.design';
+const WALLPAPER_KEY = 'pandu.wallpaperImage';
+const ONBOARDED_KEY = 'pandu.onboarded';
 
 /** Host mutations need the loopback Origin, JSON, and the per-process token. */
 async function hostHeaders(page: Page, daemon: string): Promise<Record<string, string>> {
@@ -18,7 +18,7 @@ async function hostHeaders(page: Page, daemon: string): Promise<Record<string, s
   const { token } = (await response.json()) as { token: string };
   return {
     origin: 'http://127.0.0.1:4174',
-    'x-cockpit-csrf': token,
+    'x-pandu-csrf': token,
     'content-type': 'application/json',
   };
 }
@@ -55,14 +55,14 @@ async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> 
 
   await page.addInitScript(
     ({ daemonUrl, isOnboarded, webgl, constrained }) => {
-      window.__cockpitDaemonUrl = daemonUrl;
+      window.__panduDaemonUrl = daemonUrl;
       try {
         // Seed first-run state once per context. Re-running this on every
         // navigation would wipe the flag that "Skip" just wrote.
-        if (!sessionStorage.getItem('cockpit.e2ePrepared')) {
-          sessionStorage.setItem('cockpit.e2ePrepared', '1');
-          if (isOnboarded) localStorage.setItem('cockpit.onboarded', '1');
-          else localStorage.removeItem('cockpit.onboarded');
+        if (!sessionStorage.getItem('pandu.e2ePrepared')) {
+          sessionStorage.setItem('pandu.e2ePrepared', '1');
+          if (isOnboarded) localStorage.setItem('pandu.onboarded', '1');
+          else localStorage.removeItem('pandu.onboarded');
         }
       } catch {
         // Storage is optional.
@@ -95,7 +95,7 @@ async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> 
 }
 
 async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => window.__cockpitGlassReady === true);
+  await page.waitForFunction(() => window.__panduGlassReady === true);
   await page.waitForTimeout(250);
 }
 
@@ -219,7 +219,7 @@ async function findSmallTargets(page: Page): Promise<string[]> {
 }
 
 async function shapeStats(page: Page) {
-  return page.evaluate(() => window.__cockpitGlassStats ?? null);
+  return page.evaluate(() => window.__panduGlassStats ?? null);
 }
 
 async function waitForHomeData(page: Page): Promise<void> {
@@ -253,7 +253,7 @@ test.describe('first run', () => {
     ).toBeVisible();
     await screenshot(page, 'desktop-onboarding-control.png');
 
-    await page.getByRole('button', { name: 'Open Cockpit' }).click();
+    await page.getByRole('button', { name: 'Open Pandu' }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
     await waitForHomeData(page);
@@ -366,13 +366,13 @@ test.describe('desktop shell', () => {
     const dialog = page.getByRole('dialog', { name: 'Add an agent' });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('OpenCode', { exact: true })).toBeVisible();
-    await expect(dialog.getByText('cockpit run -- opencode')).toBeVisible();
+    await expect(dialog.getByText('pandu run -- opencode')).toBeVisible();
     await screenshot(page, 'desktop-add-agent.png');
 
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await dialog.getByRole('button', { name: 'Copy' }).first().click();
     await expect(page.locator('.toast')).toContainText('Command copied');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('cockpit run --');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('pandu run --');
 
     await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(dialog).toBeHidden();
@@ -469,7 +469,7 @@ test.describe('desktop shell', () => {
     if (!downloadPath) throw new Error('missing exported theme');
     const exported = JSON.parse(readFileSync(downloadPath, 'utf8')) as Record<string, unknown>;
 
-    expect(exported.schema).toBe('cockpit.theme');
+    expect(exported.schema).toBe('pandu.theme');
     expect(exported.version).toBe(1);
     expect(exported).not.toHaveProperty('wallpaperImage');
     expect(exported).not.toHaveProperty('performance');
@@ -477,7 +477,7 @@ test.describe('desktop shell', () => {
     const imported = { ...exported, theme: 'light', accent: 'violet', wallpaper: 'none' };
     const themeInput = dialog.locator('input[aria-label="Import a theme file"]');
     await themeInput.setInputFiles({
-      name: 'cockpit-theme.json',
+      name: 'pandu-theme.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(imported)),
     });
@@ -490,9 +490,9 @@ test.describe('desktop shell', () => {
     await themeInput.setInputFiles({
       name: 'broken.json',
       mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify({ schema: 'not-cockpit' })),
+      buffer: Buffer.from(JSON.stringify({ schema: 'not-pandu' })),
     });
-    await expect(page.locator('.toast')).toContainText('not a Cockpit theme');
+    await expect(page.locator('.toast')).toContainText('not a Pandu theme');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -505,7 +505,7 @@ test.describe('desktop shell', () => {
     const shared = JSON.parse(
       Buffer.from(encoded!.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
     ) as Record<string, unknown>;
-    expect(shared.schema).toBe('cockpit.theme');
+    expect(shared.schema).toBe('pandu.theme');
     expect(shared.theme).toBe('light');
     expect(shared.accent).toBe('violet');
     expect(shared).not.toHaveProperty('wallpaperImage');
@@ -543,7 +543,7 @@ test.describe('desktop shell', () => {
     await waitForHomeData(page);
 
     await page.keyboard.press('Control+K');
-    const dialog = page.getByRole('dialog', { name: 'Run an agent through Cockpit' });
+    const dialog = page.getByRole('dialog', { name: 'Run an agent through Pandu' });
     await expect(dialog).toBeVisible();
     expect(await backgroundAlpha(page, '.quick-prompt')).toBeGreaterThanOrEqual(0.9);
     const field = dialog.getByPlaceholder(/Write the prompt/);
@@ -557,7 +557,7 @@ test.describe('desktop shell', () => {
 
     await dialog.getByRole('button', { name: 'Copy command' }).click();
     await expect(page.locator('.toast')).toContainText('Command copied. Paste it in your terminal.');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('cockpit run --');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('pandu run --');
 
     await screenshot(page, 'desktop-quick-prompt.png');
     await page.keyboard.press('Escape');
@@ -606,9 +606,9 @@ test.describe('desktop shell', () => {
     await open(page, '/?theme=dark&surface=hybrid');
     await page.waitForTimeout(1200);
 
-    const before = await page.evaluate(() => window.__cockpitGlassStats?.redrawsTotal ?? -1);
+    const before = await page.evaluate(() => window.__panduGlassStats?.redrawsTotal ?? -1);
     await page.waitForTimeout(3000);
-    const after = await page.evaluate(() => window.__cockpitGlassStats?.redrawsTotal ?? -1);
+    const after = await page.evaluate(() => window.__panduGlassStats?.redrawsTotal ?? -1);
 
     expect(before).toBeGreaterThan(0);
     expect(after - before).toBe(0);
@@ -930,7 +930,7 @@ test.describe('desktop shell', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'billing-service' })).toBeVisible();
     const auth = page.locator('.session-auth');
     await expect(auth.getByRole('heading', { level: 2, name: 'Needs you at the computer' })).toBeVisible();
-    await expect(auth).toContainText('Cockpit never asks for or relays passwords');
+    await expect(auth).toContainText('Pandu never asks for or relays passwords');
     await expect(auth).not.toContainText('Sign in with your browser to continue.');
     await expect(page.locator('.session-answer input')).toHaveCount(0);
     await expect(auth.getByRole('button', { name: 'I signed in at the computer' })).toBeVisible();

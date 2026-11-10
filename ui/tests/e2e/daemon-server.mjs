@@ -15,11 +15,11 @@ const binary = path.join(
   root,
   'target',
   'debug',
-  process.platform === 'win32' ? 'cockpit.exe' : 'cockpit',
+  process.platform === 'win32' ? 'pandu.exe' : 'pandu',
 );
 
 if (!existsSync(binary)) {
-  console.error(`Missing daemon binary at ${binary}. Run cargo build -p cockpit-cli first.`);
+  console.error(`Missing daemon binary at ${binary}. Run cargo build -p pandu-cli first.`);
   process.exit(1);
 }
 
@@ -55,25 +55,25 @@ const child = spawn(binary, ['serve'], {
   cwd: root,
   env: {
     ...process.env,
-    COCKPIT_HOME: home,
-    COCKPIT_HOST: '127.0.0.1',
-    COCKPIT_PORT: port,
-    COCKPIT_LOG_WATCH: '0',
-    COCKPIT_NOTIFICATIONS: '0',
-    COCKPIT_DEMO: mode === 'demo' ? '1' : '0',
+    PANDU_HOME: home,
+    PANDU_HOST: '127.0.0.1',
+    PANDU_PORT: port,
+    PANDU_LOG_WATCH: '0',
+    PANDU_NOTIFICATIONS: '0',
+    PANDU_DEMO: mode === 'demo' ? '1' : '0',
     ...(isMarket
       ? {
           // Debug-only overrides: the market daemon reads its registry from the
           // repository and installs into a disposable home, never the real one.
           // Offline mode loads the pre-populated cache instead, so cache age is
           // part of the fixture rather than an environment-registry shortcut.
-          COCKPIT_USER_HOME: userHome,
-          COCKPIT_WORKSPACE: workspace,
+          PANDU_USER_HOME: userHome,
+          PANDU_WORKSPACE: workspace,
           ...(mode === 'market-offline'
             ? {}
-            : { COCKPIT_MARKET_REGISTRY: path.join(root, 'registry') }),
-          COCKPIT_MARKET_LOCAL_SOURCE: path.join(root, 'registry', 'fixtures'),
-          COCKPIT_MARKET_OFFLINE: mode === 'market-offline' ? '1' : '0',
+            : { PANDU_MARKET_REGISTRY: path.join(root, 'registry') }),
+          PANDU_MARKET_LOCAL_SOURCE: path.join(root, 'registry', 'fixtures'),
+          PANDU_MARKET_OFFLINE: mode === 'market-offline' ? '1' : '0',
         }
       : {}),
   },

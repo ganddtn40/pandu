@@ -1,0 +1,24 @@
+[package]
+name = "pandu-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Core domain types, pricing, adapters, and redaction for Pandu"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+http = { workspace = true }
+regex = { workspace = true }
+percent-encoding = { workspace = true }
+toml = { workspace = true }
+
+[build-dependencies]
+serde_json = { workspace = true }

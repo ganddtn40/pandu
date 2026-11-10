@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
-  "crates/cockpit-core",
-  "crates/cockpit-daemon",
-  "crates/cockpit-cli",
+  "crates/pandu-core",
+  "crates/pandu-daemon",
+  "crates/pandu-cli",
 ]
-default-members = ["crates/cockpit-cli"]
+default-members = ["crates/pandu-cli"]
 exclude = ["legacy"]
 
 [workspace.package]
@@ -13,9 +13,9 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/ganddtn40/cockpit"
-homepage = "https://github.com/ganddtn40/cockpit"
-authors = ["Cockpit contributors"]
+repository = "https://github.com/ganddtn40/pandu"
+homepage = "https://github.com/ganddtn40/pandu"
+authors = ["Pandu contributors"]
 
 [workspace.dependencies]
 # Async runtime and HTTP
@@ -89,7 +89,7 @@ tokio-tungstenite = "0.26"
 # The Windows PTY needs two changes upstream does not make: the child must be
 # its own process group so a console control event aimed at the host cannot
 # reach it, and the pseudoconsole must accept plain VT input so a single 0x03
-# byte interrupts the child. See `vendor/portable-pty/README.cockpit.md`.
+# byte interrupts the child. See `vendor/portable-pty/README.pandu.md`.
 [patch.crates-io]
 portable-pty = { path = "vendor/portable-pty" }
 

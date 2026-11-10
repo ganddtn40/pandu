@@ -56,7 +56,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <svelte:head>
-  <title>{routeLabel(routeState.path)} · Cockpit</title>
+  <title>{routeLabel(routeState.path)} · Pandu</title>
 </svelte:head>
 
 <canvas bind:this={canvas} class="glass-canvas" aria-hidden="true"></canvas>
@@ -70,7 +70,7 @@
 
     <div class="workspace">
       <SideRail />
-      <main class="panel" aria-label="Cockpit">
+      <main class="panel" aria-label="Pandu">
         {#if dev && routeState.path === '/glass-preview'}
           <GlassPreview />
         {:else if routeState.path === '/inbox'}

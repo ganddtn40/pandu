@@ -78,7 +78,7 @@
   }
 
   function commandFor(adapter: AdapterStatus): string {
-    return `cockpit run -- ${adapter.command}`;
+    return `pandu run -- ${adapter.command}`;
   }
 
   async function copy(adapter: AdapterStatus): Promise<void> {

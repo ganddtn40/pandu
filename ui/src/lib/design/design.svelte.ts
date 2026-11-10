@@ -59,7 +59,7 @@ export function applyDesign(design: DesignPreferences): void {
   }
   updateThemeColor(design.theme);
   window.dispatchEvent(
-    new CustomEvent<DesignPreferences>('cockpit:design', { detail: { ...design } }),
+    new CustomEvent<DesignPreferences>('pandu:design', { detail: { ...design } }),
   );
 }
 

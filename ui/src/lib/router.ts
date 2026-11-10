@@ -1,3 +1,5 @@
+import { SLUG } from './brand';
+
 export const ROUTES = [
   '/',
   '/inbox',
@@ -43,7 +45,7 @@ export function resolveRoute(
   let pathname = input;
   let search = '';
   try {
-    const url = new URL(input, 'http://cockpit.local');
+    const url = new URL(input, `http://${SLUG}.local`);
     pathname = url.pathname;
     search = url.search;
   } catch {
