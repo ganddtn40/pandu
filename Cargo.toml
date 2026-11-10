@@ -86,6 +86,13 @@ rcgen = "0.13"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tokio-tungstenite = "0.26"
 
+# The Windows PTY needs two changes upstream does not make: the child must be
+# its own process group so a console control event aimed at the host cannot
+# reach it, and the pseudoconsole must accept plain VT input so a single 0x03
+# byte interrupts the child. See `vendor/portable-pty/README.cockpit.md`.
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }
+
 [profile.release]
 opt-level = "z"
 lto = "fat"

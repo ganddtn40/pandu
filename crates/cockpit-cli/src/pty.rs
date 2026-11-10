@@ -498,6 +498,17 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    /// ConPTY tests each own a pseudoconsole but share the host console. Run
+    /// them one at a time so a keystroke or control event from one test cannot
+    /// reach another.
+    static PTY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn serialize() -> std::sync::MutexGuard<'static, ()> {
+        PTY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[cfg(windows)]
     fn echo_command() -> (String, Vec<String>) {
         (
@@ -530,6 +541,38 @@ mod tests {
         )
     }
 
+    /// A child that announces it is ready, then blocks on one key and exits
+    /// with 42 only when that key is Ctrl+C. This is the contract the session
+    /// API relies on: an interrupt is an input byte, not a console event.
+    #[cfg(windows)]
+    fn interrupt_command() -> (String, Vec<String>) {
+        (
+            "powershell.exe".to_string(),
+            vec![
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "[Console]::TreatControlCAsInput = $true; Write-Host READY; \
+                 $key = [Console]::ReadKey($true); \
+                 if ($key.KeyChar -eq [char]3) { exit 42 } else { exit 1 }"
+                    .to_string(),
+            ],
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn interrupt_command() -> (String, Vec<String>) {
+        (
+            "sh".to_string(),
+            vec![
+                "-c".to_string(),
+                "stty raw -echo; printf 'READY\\n'; \
+                 byte=$(dd bs=1 count=1 2>/dev/null); \
+                 if [ \"$byte\" = \"$(printf '\\003')\" ]; then exit 42; fi; exit 1"
+                    .to_string(),
+            ],
+        )
+    }
+
     /// Answer the ConPTY cursor-position query the way a terminal would.
     fn answer_cursor_query(output: &str, writer: &mut Box<dyn Write + Send>) {
         if output.contains("\x1b[6n") {
@@ -554,6 +597,7 @@ mod tests {
 
     #[test]
     fn the_pty_runs_a_command_and_returns_its_output() {
+        let _serial = serialize();
         let (program, args) = echo_command();
         let mut spawned = spawn_pty(&program, &args, &[]).unwrap();
         let mut writer = spawned.writer;
@@ -594,7 +638,65 @@ mod tests {
     }
 
     #[test]
+    fn an_interrupt_reaches_the_child_as_a_zero_three_byte() {
+        let _serial = serialize();
+        let (program, args) = interrupt_command();
+        let mut spawned = spawn_pty(&program, &args, &[]).unwrap();
+        let mut writer = spawned.writer;
+        let mut reader = spawned.reader;
+
+        // Wait for the child to say it is ready, answering the ConPTY cursor
+        // query on the way, so the byte is not written before it reads stdin.
+        // The reader runs on its own thread so a silent child cannot block the
+        // deadline below.
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 4_096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => {
+                        if chunk_tx.send(buffer[..count].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        let mut output = String::new();
+        let mut answered = false;
+        let started = Instant::now();
+        loop {
+            let remaining = Duration::from_secs(30).saturating_sub(started.elapsed());
+            let chunk = chunk_rx
+                .recv_timeout(remaining)
+                .unwrap_or_else(|_| panic!("the child never became ready: {output:?}"));
+            output.push_str(&String::from_utf8_lossy(&chunk));
+            if !answered && output.contains("\x1b[6n") {
+                writer.write_all(b"\x1b[1;1R").unwrap();
+                writer.flush().unwrap();
+                answered = true;
+            }
+            if output.contains("READY") {
+                break;
+            }
+        }
+
+        writer.write_all(&[3]).unwrap();
+        writer.flush().unwrap();
+
+        let status = wait_with_deadline(&mut spawned.child);
+        assert_eq!(
+            status.exit_code(),
+            42,
+            "the child did not receive 0x03 as an interrupt: {output:?}"
+        );
+    }
+
+    #[test]
     fn killing_the_child_closes_the_pty_without_waiting_for_it() {
+        let _serial = serialize();
         let (program, args) = long_command();
         let mut spawned = spawn_pty(&program, &args, &[]).unwrap();
         let mut killer = spawned.killer;
