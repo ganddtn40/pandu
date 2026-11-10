@@ -40,10 +40,11 @@ never change or block the bytes travelling to the provider.
   the pre-rename name appears outside its allowlist. Do not widen the allowlist
   to make a change pass.
 - `legacy/` is frozen. Do not rename files or strings inside it.
-- The production registry key id is frozen in
-  `crates/pandu-daemon/src/market/legacy_key.rs`. Never edit
-  `registry/index.json` or `registry/revoked.json` by hand, and never sign a
-  production registry with the test key.
+- The production registry key id comes from `brand.json` (`registry.keyId`) and
+  is resolved in `crates/pandu-daemon/src/market/mod.rs`. No production key is
+  embedded yet; follow `docs/registry/KEYS.md` for the offline ceremony. Never
+  edit `registry/index.json` or `registry/revoked.json` by hand, and never sign
+  a production registry with the test key.
 
 ## Before committing
 

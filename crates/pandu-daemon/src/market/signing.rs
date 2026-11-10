@@ -124,6 +124,13 @@ pub fn verify_with_public_key(
 /// rewritten with the signature included, using the same camelCase shape the
 /// daemon deserializes.
 pub fn sign_registry_dir(dir: &Path, key: &SigningKey) -> Result<(), MarketError> {
+    if super::REGISTRY_PUBLIC_KEY_BASE64.is_none() {
+        return Err(MarketError::Signature(
+            "This build embeds no production registry key, so it cannot verify a signed \
+             registry. Provision the key first."
+                .into(),
+        ));
+    }
     let index_path = dir.join(ACTIVE_INDEX_FILE);
     let index_bytes = std::fs::read(&index_path).map_err(|error| {
         MarketError::Registry(format!("Could not read {}: {error}", index_path.display()))

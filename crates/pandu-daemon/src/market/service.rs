@@ -23,10 +23,10 @@ use super::registry_check::fetch_tree;
 use super::targets::{self, TargetContext};
 use super::{
     ACTIVE_INDEX_FILE, ACTIVE_REVOKED_FILE, InstallScope, LoadedRegistry, MAX_ENTRY_BYTES,
-    MarketEntry, MarketError, MarketKind, MarketPermission, REGISTRY_KEY_ID,
-    REGISTRY_PUBLIC_KEY_BASE64, Reviewer, SignedIndex, SignedRevocation, TrustTier,
-    load_registry_dir, parse_registry, sanitize_markdown, trust_root_error, verify_index,
-    verify_revocation,
+    MarketEntry, MarketError, MarketKind, MarketPermission, PREPARING_MESSAGE,
+    PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64, Reviewer, SignedIndex, SignedRevocation, TrustRoot,
+    TrustTier, load_registry_dir, parse_registry, resolve_trust_root, sanitize_markdown,
+    verify_index, verify_revocation,
 };
 use pandu_core::ids::create_id;
 
@@ -211,6 +211,9 @@ pub struct CatalogResponse {
     pub offline: bool,
     pub warnings: Vec<String>,
     pub last_error: Option<String>,
+    /// True when a release build has no production trust root yet. The
+    /// catalogue is empty and no entry is exposed.
+    pub preparing: bool,
     pub settings: MarketSettings,
     pub counts: CatalogCounts,
     pub cache_verified_at: Option<String>,
@@ -218,7 +221,7 @@ pub struct CatalogResponse {
     pub cache_stale: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogCounts {
     pub skills: usize,
@@ -257,7 +260,7 @@ pub struct MarketService {
     forced_offline: bool,
     local_source: Option<PathBuf>,
     registry_url: String,
-    trust_error: Option<String>,
+    trust_root: TrustRoot,
     state: Mutex<State>,
 }
 
@@ -284,10 +287,9 @@ impl MarketService {
         )
         .filter(|value| validate_registry_url(value).is_ok())
         .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
-        let trust_error = trust_root_error(
-            REGISTRY_PUBLIC_KEY_BASE64,
-            REGISTRY_KEY_ID,
+        let trust_root = resolve_trust_root(
             cfg!(debug_assertions),
+            PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64,
         );
         let settings = load_settings(&home);
         let mut warnings = Vec::new();
@@ -306,7 +308,7 @@ impl MarketService {
             forced_offline,
             local_source,
             registry_url,
-            trust_error,
+            trust_root,
             state: Mutex::new(State {
                 registry: None,
                 source: RegistrySource::Bundled,
@@ -351,7 +353,7 @@ impl MarketService {
             forced_offline: true,
             local_source,
             registry_url: DEFAULT_REGISTRY_URL.to_string(),
-            trust_error: None,
+            trust_root: TrustRoot::Ready,
             state: Mutex::new(State {
                 registry: registry.map(Arc::new),
                 source: RegistrySource::Cache,
@@ -369,6 +371,22 @@ impl MarketService {
         self.state.lock().expect("market state").settings.clone()
     }
 
+    pub fn trust_root(&self) -> TrustRoot {
+        self.trust_root
+    }
+
+    fn require_trust_root(&self) -> Result<(), MarketError> {
+        match self.trust_root {
+            TrustRoot::Ready => Ok(()),
+            TrustRoot::Preparing => Err(MarketError::Preparing),
+            TrustRoot::Refused => Err(MarketError::Signature(
+                "This release build embedded the test registry key. Pandu refuses to open the \
+                 market with a test trust root."
+                    .into(),
+            )),
+        }
+    }
+
     pub fn set_auto_refresh(&self, enabled: bool) -> Result<MarketSettings, MarketError> {
         let mut state = self.state.lock().expect("market state");
         state.settings.auto_refresh = enabled;
@@ -380,9 +398,7 @@ impl MarketService {
         &self,
         allow_network: bool,
     ) -> Result<Arc<LoadedRegistry>, MarketError> {
-        if let Some(error) = &self.trust_error {
-            return Err(MarketError::Signature(error.clone()));
-        }
+        self.require_trust_root()?;
         {
             let state = self.state.lock().expect("market state");
             if let Some(registry) = &state.registry {
@@ -482,9 +498,7 @@ impl MarketService {
     }
 
     async fn refresh_inner(&self) -> Result<(), MarketError> {
-        if let Some(error) = &self.trust_error {
-            return Err(MarketError::Signature(error.clone()));
-        }
+        self.require_trust_root()?;
         if self.forced_offline {
             return Err(MarketError::Network(
                 "Pandu is in offline mode. Disable PANDU_MARKET_OFFLINE to refresh.".into(),
@@ -560,7 +574,31 @@ impl MarketService {
         self.catalog(false).await
     }
 
+    /// A fail-closed catalogue for a release build with no production key.
+    /// It exposes no entries, no categories, and no agents.
+    fn preparing_catalog(&self) -> CatalogResponse {
+        CatalogResponse {
+            entries: Vec::new(),
+            categories: Vec::new(),
+            agents: Vec::new(),
+            generated_at: None,
+            source: RegistrySource::Bundled,
+            offline: false,
+            warnings: vec![PREPARING_MESSAGE.into()],
+            last_error: Some(PREPARING_MESSAGE.into()),
+            preparing: true,
+            settings: self.settings(),
+            counts: CatalogCounts::default(),
+            cache_verified_at: None,
+            cache_age_seconds: None,
+            cache_stale: false,
+        }
+    }
+
     pub async fn catalog(&self, allow_network: bool) -> Result<CatalogResponse, MarketError> {
+        if self.trust_root == TrustRoot::Preparing {
+            return Ok(self.preparing_catalog());
+        }
         let registry = self.ensure_registry(allow_network).await?;
         let manifests =
             install::load_manifests(&self.home, &self.user_home, self.workspace.as_deref())?;
@@ -622,6 +660,7 @@ impl MarketService {
             offline,
             warnings,
             last_error,
+            preparing: false,
             settings,
             counts: CatalogCounts {
                 skills: registry
@@ -768,6 +807,13 @@ impl MarketService {
         let state = self.state.lock().expect("market state");
         let registry = state.registry.clone();
         let mut warnings = state.warnings.clone();
+        if registry.is_none() {
+            warnings.push(if self.trust_root == TrustRoot::Preparing {
+                "The registry is being prepared; updates cannot be checked.".into()
+            } else {
+                "The registry is not loaded; updates cannot be checked.".into()
+            });
+        }
         let mut installs = Vec::new();
         for manifest in &manifests {
             let catalog = registry
@@ -776,9 +822,6 @@ impl MarketService {
             let revoked = registry
                 .as_ref()
                 .is_some_and(|registry| registry.is_revoked(manifest.kind, &manifest.entry_id));
-            if registry.is_none() {
-                warnings.push("The registry is not loaded; updates cannot be checked.".into());
-            }
             installs.push(install::summarize(manifest, catalog, revoked));
         }
         Ok(InstalledResponse {
@@ -791,6 +834,11 @@ impl MarketService {
     }
 
     pub async fn installed_checked(&self) -> Result<InstalledResponse, MarketError> {
+        // A preparing release build still shows the local install list; it
+        // simply cannot check for updates.
+        if self.trust_root == TrustRoot::Preparing {
+            return self.installed();
+        }
         self.ensure_registry(false).await?;
         self.installed()
     }
@@ -995,6 +1043,21 @@ fn validate_registry_url(value: &str) -> Result<(), MarketError> {
     Ok(())
 }
 
+/// Turn a failed registry response into a message that makes sense while the
+/// repository is still unpublished. GitHub answers 404 for a missing
+/// repository and for a private one it will not reveal, so the message names
+/// both possibilities and reassures the user that the verified cache survives.
+fn registry_http_error(status: reqwest::StatusCode, url: &str) -> MarketError {
+    if matches!(status.as_u16(), 401 | 403 | 404) {
+        MarketError::Network(format!(
+            "The registry is not available: {url} returned HTTP {status}. The repository may \
+             not exist yet or may be private. Pandu keeps using the last verified registry."
+        ))
+    } else {
+        MarketError::Network(format!("The registry returned HTTP {status} for {url}."))
+    }
+}
+
 async fn fetch_limited(
     client: &reqwest::Client,
     url: &str,
@@ -1009,10 +1072,7 @@ async fn fetch_limited(
             MarketError::Network(format!("Pandu could not reach the registry: {error}"))
         })?;
     if !response.status().is_success() {
-        return Err(MarketError::Network(format!(
-            "The registry returned HTTP {} for {url}.",
-            response.status()
-        )));
+        return Err(registry_http_error(response.status(), url));
     }
     if let Some(length) = response.content_length() {
         if length as usize > limit {
@@ -1192,9 +1252,11 @@ pub const HOST_ONLY_PREFIX: &str = "/api/market";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::market::{PRODUCTION_REGISTRY_KEY_ID, verify_index_with, verify_revocation_with};
 
     #[test]
-    fn bundled_registry_is_verifiable_and_complete() {
+    #[cfg(debug_assertions)]
+    fn bundled_test_registry_is_verifiable_and_complete() {
         let registry = parse_registry(
             BUNDLED_INDEX.as_bytes(),
             BUNDLED_REVOKED.as_bytes(),
@@ -1208,10 +1270,7 @@ mod tests {
             },
         )
         .unwrap();
-        // Debug builds bundle the seeded test index; release builds still carry
-        // the production index, which has not been reseeded yet.
-        let expected = if cfg!(debug_assertions) { 22 } else { 3 };
-        assert_eq!(registry.entries.len(), expected);
+        assert_eq!(registry.entries.len(), 22);
         assert_eq!(
             registry
                 .entries
@@ -1220,7 +1279,113 @@ mod tests {
                 .count(),
             3
         );
-        assert_eq!(registry.index.key_id, REGISTRY_KEY_ID);
+        assert_eq!(registry.index.key_id, crate::market::REGISTRY_KEY_ID);
+    }
+
+    #[test]
+    fn release_without_a_production_key_refuses_the_bundled_registry() {
+        // The production index is unsigned until the maintainer provisions the
+        // offline key. A release build must refuse it, never fall back to the
+        // test registry.
+        let index: SignedIndex =
+            serde_json::from_str(include_str!("../../../../registry/index.json")).unwrap();
+        assert!(matches!(
+            verify_index_with(
+                &index,
+                PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64,
+                PRODUCTION_REGISTRY_KEY_ID
+            ),
+            Err(MarketError::Signature(_))
+        ));
+        assert!(PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64.is_none());
+        assert_eq!(
+            resolve_trust_root(false, PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64),
+            TrustRoot::Preparing
+        );
+    }
+
+    /// Ignored by default: it requires the production key that signed the
+    /// bundled registry. The release workflow runs it with `--ignored`. A
+    /// missing key, an unsigned index, a stale key id, or a bad signature
+    /// fails the job and blocks publishing.
+    #[test]
+    #[ignore = "requires the production registry key; run in the release workflow"]
+    fn bundled_production_registry_verifies_with_the_production_key() {
+        let Some(public_key) = PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64 else {
+            panic!(
+                "No production registry key is embedded. Follow docs/registry/KEYS.md, then \
+                 re-sign registry/index.json and registry/revoked.json. Refusing to publish."
+            );
+        };
+        let index: SignedIndex =
+            serde_json::from_str(include_str!("../../../../registry/index.json")).unwrap();
+        let revoked: SignedRevocation =
+            serde_json::from_str(include_str!("../../../../registry/revoked.json")).unwrap();
+        verify_index_with(&index, Some(public_key), PRODUCTION_REGISTRY_KEY_ID)
+            .expect("the bundled production index must verify with the production key");
+        verify_revocation_with(&revoked, Some(public_key), PRODUCTION_REGISTRY_KEY_ID)
+            .expect("the bundled production revocation list must verify with the production key");
+    }
+
+    #[tokio::test]
+    async fn preparing_catalog_is_empty_and_exposes_no_entries() {
+        let home = tempfile::tempdir().unwrap();
+        let user_home = tempfile::tempdir().unwrap();
+        let mut service = MarketService::for_test(
+            home.path().to_path_buf(),
+            user_home.path().to_path_buf(),
+            None,
+            Arc::new(pandu_core::adapter::AdapterRegistry::new(
+                Vec::new(),
+                Vec::new(),
+            )),
+            None,
+            None,
+        );
+        Arc::get_mut(&mut service).unwrap().trust_root = TrustRoot::Preparing;
+
+        let catalog = service.catalog(false).await.unwrap();
+        assert!(catalog.preparing);
+        assert!(catalog.entries.is_empty());
+        assert!(catalog.categories.is_empty());
+        assert!(catalog.agents.is_empty());
+        assert_eq!(catalog.counts.skills, 0);
+        assert_eq!(catalog.counts.mcp, 0);
+        assert_eq!(catalog.last_error.as_deref(), Some(PREPARING_MESSAGE));
+        assert!(matches!(
+            service
+                .detail(MarketKind::Skill, "example-commit-messages")
+                .await,
+            Err(MarketError::Preparing)
+        ));
+        let installed = service.installed_checked().await.unwrap();
+        assert!(installed.installs.is_empty());
+        assert!(
+            installed
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("being prepared"))
+        );
+    }
+
+    #[test]
+    fn a_missing_or_private_registry_gets_a_clear_message() {
+        let url = "https://raw.githubusercontent.com/ganddtn40/pandu/main/registry/index.json";
+        for status in [
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::NOT_FOUND,
+        ] {
+            let message = registry_http_error(status, url).to_string();
+            assert!(message.contains("not available"), "{message}");
+            assert!(message.contains("may not exist"), "{message}");
+            assert!(message.contains("private"), "{message}");
+            assert!(message.contains("last verified registry"), "{message}");
+        }
+        let other =
+            registry_http_error(reqwest::StatusCode::INTERNAL_SERVER_ERROR, url).to_string();
+        assert!(other.contains("HTTP 500"), "{other}");
+        assert!(!other.contains("may be private"), "{other}");
     }
 
     #[test]
@@ -1234,7 +1399,7 @@ mod tests {
 
     #[test]
     #[cfg(debug_assertions)]
-    fn debug_builds_reject_the_production_registry_signature() {
+    fn debug_builds_reject_the_unsigned_production_registry() {
         let index: SignedIndex =
             serde_json::from_str(include_str!("../../../../registry/index.json")).unwrap();
         assert!(matches!(
@@ -1244,6 +1409,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn examples_are_hidden_when_not_requested() {
         let registry = parse_registry(
             BUNDLED_INDEX.as_bytes(),
@@ -1258,8 +1424,7 @@ mod tests {
             },
         )
         .unwrap();
-        let expected = if cfg!(debug_assertions) { 19 } else { 0 };
-        assert_eq!(registry.entries.len(), expected);
+        assert_eq!(registry.entries.len(), 19);
         assert!(registry.entries.iter().all(|entry| !entry.example));
     }
 

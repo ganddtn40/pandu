@@ -1,9 +1,9 @@
 //! Repo-wide guard against the pre-rename product name.
 //!
 //! The rename is only complete when the old name survives in exactly the places
-//! that must keep it: the copy-only data migration, the frozen production trust
-//! root, this guard, the changelog, and the two signed production registry
-//! documents. Everything else, including docs and tests, must use Pandu.
+//! that must keep it: the copy-only data migration, this guard, and the
+//! changelog. Everything else, including docs, tests, and the production
+//! registry identity, must use Pandu.
 
 use std::fs;
 use std::path::Path;
@@ -13,10 +13,7 @@ use std::process::Command;
 const ALLOWED: &[&str] = &[
     "CHANGELOG.md",
     "crates/pandu-core/tests/product_name.rs",
-    "crates/pandu-daemon/src/market/legacy_key.rs",
     "crates/pandu-daemon/src/migrate.rs",
-    "registry/index.json",
-    "registry/revoked.json",
 ];
 
 /// The frozen 0.1.0 tree is a behavior spec, not part of the current product.

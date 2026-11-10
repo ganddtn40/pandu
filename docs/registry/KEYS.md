@@ -2,38 +2,56 @@
 
 Pandu verifies the market registry with an Ed25519 key embedded in the
 binary. The private key never belongs in this repository, a debug build, a
-contributor pull request, or an agent transcript. This document covers the two
-trust roots, offline key generation, the CI signing flow, rotation, and what to
-do if a key is compromised.
+contributor pull request, CI logs, or an agent transcript. This document covers
+the current empty production trust root, offline key generation, the signing
+ceremony, CI verification, rotation, and compromise response.
+
+## Current state: the production trust root is empty
+
+No production signing key has been provisioned. `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64`
+in `crates/pandu-daemon/src/market/mod.rs` is `None`, so a release build embeds
+no production key and the market fails closed:
+
+- the catalogue is empty and exposes no entries;
+- the UI shows **Registry is being prepared.**;
+- detail, preview, install, and refresh return HTTP 503;
+- installed entries remain listed locally, but updates cannot be checked;
+- the test key is **never** used as a fallback. A release configuration that
+  embeds the test key is refused.
+
+`registry/index.json` and `registry/revoked.json` carry the production key id
+from `brand.json` and an empty signature. They are placeholders until the
+maintainer completes the ceremony below. Do not hand-edit the signatures.
+
+## The pre-rename production key is compromised
+
+A production key was generated before the rename. Its private half was not
+available during the rename and its exact generation and storage location can
+no longer be confirmed. It is not embedded in this build and it must never be
+used again.
+
+Because the storage location cannot be proven, treat the key as compromised
+even though it was never released and was not found in this repository, CI, or
+an agent session. Do not sign another index with it, do not restore it from a
+backup, and do not add its public key back to the build. The first production
+release must use a newly generated key.
 
 ## Two trust roots
 
 | | Production | Test |
 | --- | --- | --- |
-| Public key | `iE0AJlU1Nd+iTodC0vgTYx7aMFCETJisOnFEIsP6hMc=` | `BU/+PJwKB5yqebHqAd3lANMGOC3HAAMsfjI0m/U48l8=` |
-| Key id | frozen pre-rename id (see below) | `pandu-market-test-2026` |
+| Public key | none yet (release embeds no key) | `BU/+PJwKB5yqebHqAd3lANMGOC3HAAMsfjI0m/U48l8=` |
+| Key id | `pandu-market-2026` from `brand.json` | `pandu-market-test-2026` |
 | Registry files | `registry/index.json`, `registry/revoked.json` | `registry/index.test.json`, `registry/revoked.test.json` |
-| Embedded by | release builds | debug and test builds |
+| Embedded by | release builds, once provisioned | debug and test builds |
 | Signing tool | `node registry/sign.mjs` (default variant) | `node registry/sign.mjs --variant test` |
 | Rust signer | release `pandu market sign` | debug `pandu market sign` |
 
-The production key id and signatures predate the rename and are frozen: the
-offline production key was not available to re-sign `index.json` and
-`revoked.json`. The id lives in
-`crates/pandu-daemon/src/market/legacy_key.rs` so the rest of the tree can use
-the new name. Rotating it is the release task described under **Rotation**; do
-not edit the signed documents by hand.
-
-A release build embeds only the production public key and loads only the
-production registry files. A debug or test build embeds only the test public
-key and loads only the `.test.json` files. The two key ids and public keys must
-stay distinct; `trust_root_error` in
-`crates/pandu-daemon/src/market/mod.rs` refuses to open the market in a
-release build that embeds the test key or an unrecognised key.
-
-The test key is a test fixture. Its private half may be used locally to
-regenerate the `.test.json` files, but it must never sign a published registry
-and must never be copied into a release configuration.
+The test key only signs the `.test.json` fixtures. It is a test fixture: never
+use it for a published registry, never copy it into a release configuration,
+and never let a release build fall back to it. `resolve_trust_root` in
+`crates/pandu-daemon/src/market/mod.rs` makes a release build with no key
+`Preparing` and a release build with the test key `Refused`.
 
 ## No private key in the repository
 
@@ -53,41 +71,67 @@ listing must not contain a key file. Repeat the search against every remote
 before publishing a release; deleting a key in a later commit does not remove
 it from history.
 
-## Offline key generation
+## Offline key generation ceremony
 
-Generate the production key on an offline machine, not in CI and not on a
-developer workstation that runs agents:
+Perform this on a dedicated offline machine, not in CI and not on a developer
+workstation that runs agents. Use a freshly built binary from the tagged commit.
 
-```powershell
-cargo run --release -p pandu-cli -- market keygen --out C:\secure\pandu-market-2026.pem
-```
+1. Build the CLI on the offline machine and record the source commit:
 
-The command prints the public key and writes a 32-byte Ed25519 seed in a
-PEM-like wrapper. Keep the private file on encrypted offline media with
-permissions for one account only. On Unix:
+   ```powershell
+   git rev-parse HEAD
+   cargo build --release --locked -p pandu-cli
+   ```
 
-```sh
-chmod 600 /secure/pandu-market-2026.pem
-```
+2. Generate the key into encrypted offline media with restrictive permissions:
 
-Record the public key in two places:
+   ```powershell
+   target\release\pandu.exe market keygen --out E:\secure\pandu-market-2026.pem
+   ```
 
-1. `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64` and
-   `PRODUCTION_REGISTRY_KEY_ID` in
-   `crates/pandu-daemon/src/market/mod.rs`.
-2. This document's trust-root table.
+   On Unix:
 
-Then sign the production registry from a release build (or with the Node
-script, which does not depend on the build mode):
+   ```sh
+   chmod 600 /secure/pandu-market-2026.pem
+   ```
 
-```powershell
-node registry/sign.mjs --key C:\secure\pandu-market-2026.pem --build --dir registry
-cargo run --release -p pandu-cli -- market check --dir registry --online --links
-```
+   The command prints the public key and writes a 32-byte Ed25519 seed in a
+   PEM-like wrapper. Record the public key and the source commit in the release
+   issue. Never paste the private key into a chat, issue, log, or agent session.
 
-The signer refuses a key whose public half does not match the key the build
-trusts. The Node script prints the public key so it can be compared with the
-constant.
+3. On the online checkout, embed the public key and key id:
+
+   - Set `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64` in
+     `crates/pandu-daemon/src/market/mod.rs` to
+     `Some("<the printed public key>")`.
+   - Confirm `brand.json` `registry.keyId` is the intended production key id
+     (`pandu-market-2026` for the first key). Change it only as part of a
+     rotation.
+   - Update the trust-root table in this document.
+
+4. Copy the registry directory to the offline machine and sign it there:
+
+   ```powershell
+   node registry/sign.mjs --key E:\secure\pandu-market-2026.pem --build --dir registry
+   ```
+
+   The signer prints the public key. It must match the value embedded in step 3
+   and the key id in `brand.json`. The signer refuses a mismatch.
+
+5. Return only the signed JSON files to the online checkout. Commit the public
+   key, `registry/index.json`, `registry/revoked.json`, and this document. Never
+   commit the private key or a copy of it.
+
+6. Verify the committed result with the production trust root:
+
+   ```powershell
+   cargo test -p pandu-daemon --lib market::tests::bundled_production_registry_verifies_with_the_production_key -- --ignored
+   cargo run --release --locked -p pandu-cli -- market check --dir registry --online --links
+   ```
+
+   The ignored test and the release check must both pass. If either fails, do
+   not publish. A release build with no production key fails closed with
+   "Registry is being prepared."
 
 ### Test key
 
@@ -103,7 +147,7 @@ Commit `registry/index.test.json` and `registry/revoked.test.json` together
 with the YAML files. Do not commit the test private key. A test build that
 loads a production-signed index fails closed; that is the intended separation.
 
-## CI signing flow
+## CI and release verification
 
 Pull requests never receive a signing key:
 
@@ -115,16 +159,16 @@ Pull requests never receive a signing key:
 3. The maintainer signs offline with `registry/sign.mjs` (or a release build's
    `market sign`) and commits the entry plus the signed production index and
    revocation list.
-4. CI on the protected branch builds a release binary and runs the signed check
-   with that binary. The release binary embeds the production key, so a
-   signature made with any other key fails the job.
+4. The release workflow builds a release binary and runs the ignored
+   production-key test plus `pandu market check --dir registry`. A missing
+   production key, an unsigned index, a stale key id, or a bad signature fails
+   the job and blocks publishing.
 5. CI also runs the market unit tests in debug mode, which verify the
    test-signed `.test.json` files. This proves that the debug trust root works
    without exposing the production key.
 
 The signed job must not use a debug binary: debug builds trust the test key and
-would verify the wrong variant. The workflow uses `cargo run --release` for
-that reason.
+would verify the wrong variant. The workflow uses `--release` for that reason.
 
 The production private key is never a pull-request secret. If a protected
 environment is used for a release signing job, require manual approval and keep
@@ -138,8 +182,8 @@ operation:
 
 1. Generate a new keypair offline and choose a new key id, for example
    `pandu-market-2027`.
-2. Update `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64` and
-   `PRODUCTION_REGISTRY_KEY_ID` in the market module, and update this document.
+2. Update `PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64` in the market module,
+   `brand.json` `registry.keyId`, and this document.
 3. Re-sign `index.json` and `revoked.json` with the new key and publish a
    release that embeds the new public key.
 4. Publish an advisory naming the old key id, the new key id, and the first
@@ -181,10 +225,10 @@ required, but do not reuse the leaked test key for a release.
 
 ## Related documents
 
-- [`docs/market.md`](../market.md) — user-facing market model and threat model.
-- [`docs/security.md`](../security.md) — security boundaries and verification
+- [`docs/market.md`](../market.md) - user-facing market model and threat model.
+- [`docs/security.md`](../security.md) - security boundaries and verification
   tests.
-- [`SECURITY.md`](../../SECURITY.md) — vulnerability reporting and compromise
+- [`SECURITY.md`](../../SECURITY.md) - vulnerability reporting and compromise
   response.
-- [`docs/registry/CONTRIBUTING.md`](CONTRIBUTING.md) — entry review and signing
+- [`docs/registry/CONTRIBUTING.md`](CONTRIBUTING.md) - entry review and signing
   workflow.

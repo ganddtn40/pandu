@@ -1,29 +1,29 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-09T10:51:09.412Z",
-  "keyId": "cockpit-market-2026",
+  "generatedAt": "2026-11-10T00:00:00.000Z",
+  "keyId": "pandu-market-2026",
   "entries": [
     {
       "kind": "skill",
       "id": "example-changelog-writer",
       "path": "skills/example-changelog-writer.yaml",
-      "sha256": "6be9ad7343553c5f3fee0a5175c9a42a37d6b01400fc0186e21f0e5da5cb67f8",
+      "sha256": "5de1188cef22ee35982df87c283621c74acd3e33dd1452a95e904d05ab8d9243",
       "version": "1.0.0"
     },
     {
       "kind": "skill",
       "id": "example-commit-messages",
       "path": "skills/example-commit-messages.yaml",
-      "sha256": "553a61fec57da14b45c71b473b7a8f880b039a0664a8c7a77903c2b7a7342195",
+      "sha256": "114929fe9cc663b4d50bac5b292d6a0286221f9b3ec35677dbe27c792537b8f4",
       "version": "1.0.0"
     },
     {
       "kind": "mcp",
       "id": "example-weather",
       "path": "mcp/example-weather.yaml",
-      "sha256": "363f4dded5cc6e876cf1b43642727b9419b7b5dd0aff4e1b1a3ade2eb65ebee5",
+      "sha256": "d5fe4d88fb631a24b8d9897b1a04ff85f6cb8b0f0d341d865cf81b8c4fec6d69",
       "version": "1.0.0"
     }
   ],
-  "signature": "TVQ7RQNyCM9IoWEFoBQ2SLZMslVIJ6Ckqs8iVvogkw0oeQWfYdhSTKTtKt7vn1mtSk39HLs5iSdKNBJ9B+P9DA=="
+  "signature": ""
 }

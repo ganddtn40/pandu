@@ -28,6 +28,7 @@ fn market_error(error: MarketError) -> ApiError {
         MarketError::NotFound(_) => StatusCode::NOT_FOUND,
         MarketError::Signature(_) => StatusCode::CONFLICT,
         MarketError::Network(_) => StatusCode::BAD_GATEWAY,
+        MarketError::Preparing => StatusCode::SERVICE_UNAVAILABLE,
         MarketError::Install(_) => StatusCode::CONFLICT,
         MarketError::Registry(_)
         | MarketError::Entry(_)
@@ -184,9 +185,12 @@ pub async fn update_settings(
 /// use without guessing. It never triggers network access.
 pub async fn status(State(state): State<AppState>) -> Json<Value> {
     let settings = service(&state).settings();
+    let trust_root = service(&state).trust_root();
     Json(json!({
         "hostOnly": true,
         "autoRefresh": settings.auto_refresh,
         "lastRefresh": settings.last_refresh,
+        "trustRoot": trust_root.as_str(),
+        "preparing": trust_root == crate::market::TrustRoot::Preparing,
     }))
 }

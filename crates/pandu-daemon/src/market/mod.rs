@@ -10,7 +10,6 @@ pub mod archive;
 pub mod config_edit;
 pub mod http;
 pub mod install;
-mod legacy_key;
 pub mod registry_check;
 pub mod service;
 pub mod signing;
@@ -51,12 +50,14 @@ pub const MAX_EXTRACTED_BYTES: u64 = 40 * 1024 * 1024;
 pub const MAX_ARCHIVE_FILES: usize = 1_000;
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Ed25519 public key for the production Pandu registry. The matching
-/// private key is kept offline by maintainers and is never part of this
-/// repository or a debug build.
-pub const PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64: &str =
-    "iE0AJlU1Nd+iTodC0vgTYx7aMFCETJisOnFEIsP6hMc=";
-pub const PRODUCTION_REGISTRY_KEY_ID: &str = legacy_key::PRODUCTION_KEY_ID;
+/// Ed25519 public key for the production Pandu registry, when the maintainer
+/// has provisioned one. No production key exists yet, so this is `None`:
+/// release builds embed no production key and the market fails closed with
+/// "Registry is being prepared." Follow `docs/registry/KEYS.md` to generate
+/// the key offline and fill this in. The matching private key never belongs in
+/// this repository, CI, logs, or an agent session.
+pub const PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64: Option<&str> = None;
+pub const PRODUCTION_REGISTRY_KEY_ID: &str = pandu_core::brand::MARKET_KEY_ID;
 
 /// Ed25519 public key for the test registry. It only signs the `.test.json`
 /// registry variants used by debug builds, tests, and the e2e fixtures. The
@@ -65,38 +66,54 @@ pub const TEST_REGISTRY_PUBLIC_KEY_BASE64: &str = "BU/+PJwKB5yqebHqAd3lANMGOC3HA
 pub const TEST_REGISTRY_KEY_ID: &str = pandu_core::brand::MARKET_TEST_KEY_ID;
 
 #[cfg(debug_assertions)]
-pub const REGISTRY_PUBLIC_KEY_BASE64: &str = TEST_REGISTRY_PUBLIC_KEY_BASE64;
+pub const REGISTRY_PUBLIC_KEY_BASE64: Option<&str> = Some(TEST_REGISTRY_PUBLIC_KEY_BASE64);
 #[cfg(not(debug_assertions))]
-pub const REGISTRY_PUBLIC_KEY_BASE64: &str = PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64;
+pub const REGISTRY_PUBLIC_KEY_BASE64: Option<&str> = PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64;
 
 #[cfg(debug_assertions)]
 pub const REGISTRY_KEY_ID: &str = TEST_REGISTRY_KEY_ID;
 #[cfg(not(debug_assertions))]
 pub const REGISTRY_KEY_ID: &str = PRODUCTION_REGISTRY_KEY_ID;
 
-/// Refuse to start a release build whose trust root is the test key. The
-/// function takes the key and the build mode explicitly so tests can prove
-/// that a release configuration rejects a test key without building one.
-pub fn trust_root_error(public_key: &str, key_id: &str, debug: bool) -> Option<String> {
-    let is_test = public_key == TEST_REGISTRY_PUBLIC_KEY_BASE64 || key_id == TEST_REGISTRY_KEY_ID;
-    if is_test && !debug {
-        return Some(
-            "This release build embedded the test registry key. Pandu refuses to open the \
-             market with a test trust root."
-                .into(),
-        );
+/// The message shown when a release build has no production key yet.
+pub const PREPARING_MESSAGE: &str = "Registry is being prepared.";
+
+/// What this build may trust for the market registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustRoot {
+    /// A key is embedded for this build mode and may verify the registry.
+    Ready,
+    /// A release build has no production key. Fail closed, never fall back to
+    /// the test key.
+    Preparing,
+    /// A release build embedded the test key or another unusable key.
+    Refused,
+}
+
+impl TrustRoot {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Preparing => "preparing",
+            Self::Refused => "refused",
+        }
     }
-    if !is_test
-        && (public_key != PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64
-            || key_id != PRODUCTION_REGISTRY_KEY_ID)
-    {
-        return Some(
-            "This build does not embed a recognised Pandu registry key. Pandu refuses to \
-             open the market."
-                .into(),
-        );
+}
+
+/// Resolve the trust root from the build mode and the optional production key.
+///
+/// This is deliberately pure so tests can prove that a release configuration
+/// with no key is `Preparing` and can never become `Ready` by falling back to
+/// the test key. Debug and test builds use the test key.
+pub fn resolve_trust_root(debug: bool, production_key: Option<&str>) -> TrustRoot {
+    if debug {
+        return TrustRoot::Ready;
     }
-    None
+    match production_key.map(str::trim).filter(|key| !key.is_empty()) {
+        None => TrustRoot::Preparing,
+        Some(key) if key == TEST_REGISTRY_PUBLIC_KEY_BASE64 => TrustRoot::Refused,
+        Some(_) => TrustRoot::Ready,
+    }
 }
 
 pub const SPDX_ALLOWLIST: &[&str] = &[
@@ -165,6 +182,8 @@ pub enum MarketError {
     Manifest(String),
     Network(String),
     NotFound(String),
+    /// A release build has no production trust root yet.
+    Preparing,
 }
 
 impl MarketError {
@@ -179,6 +198,7 @@ impl MarketError {
             Self::Manifest(_) => "market_manifest_invalid",
             Self::Network(_) => "market_network_failed",
             Self::NotFound(_) => "market_not_found",
+            Self::Preparing => "market_preparing",
         }
     }
 }
@@ -195,6 +215,7 @@ impl std::fmt::Display for MarketError {
             | Self::Manifest(message)
             | Self::Network(message)
             | Self::NotFound(message) => formatter.write_str(message),
+            Self::Preparing => formatter.write_str(PREPARING_MESSAGE),
         }
     }
 }
@@ -1038,8 +1059,24 @@ pub fn canonical_json(value: &Value) -> Vec<u8> {
 }
 
 pub fn verify_signature(payload: &Value, signature_base64: &str) -> Result<(), MarketError> {
+    verify_signature_with(payload, signature_base64, REGISTRY_PUBLIC_KEY_BASE64)
+}
+
+/// Verify a payload against an explicit optional public key. `None` means the
+/// build has no production key and must fail closed, never try the test key.
+pub fn verify_signature_with(
+    payload: &Value,
+    signature_base64: &str,
+    public_key_base64: Option<&str>,
+) -> Result<(), MarketError> {
+    let Some(public_key_base64) = public_key_base64
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    else {
+        return Err(MarketError::Signature(PREPARING_MESSAGE.into()));
+    };
     let key_bytes = base64::engine::general_purpose::STANDARD
-        .decode(REGISTRY_PUBLIC_KEY_BASE64)
+        .decode(public_key_base64)
         .map_err(|_| MarketError::Signature("The embedded registry key is invalid.".into()))?;
     let key_bytes: [u8; 32] = key_bytes
         .try_into()
@@ -1071,35 +1108,54 @@ pub fn verify_signature(payload: &Value, signature_base64: &str) -> Result<(), M
 }
 
 pub fn verify_index(index: &SignedIndex) -> Result<(), MarketError> {
+    verify_index_with(index, REGISTRY_PUBLIC_KEY_BASE64, REGISTRY_KEY_ID)
+}
+
+/// Verify an index against an explicit key and key id. The explicit form lets
+/// tests prove that a release configuration without a production key refuses
+/// the index instead of falling back to the test key.
+pub fn verify_index_with(
+    index: &SignedIndex,
+    public_key_base64: Option<&str>,
+    key_id: &str,
+) -> Result<(), MarketError> {
     if index.schema_version != MARKET_SCHEMA_VERSION {
         return Err(MarketError::Registry(format!(
             "registry index uses schema_version {}; this build understands {}",
             index.schema_version, MARKET_SCHEMA_VERSION
         )));
     }
-    if index.key_id != REGISTRY_KEY_ID {
+    if index.key_id != key_id {
         return Err(MarketError::Signature(format!(
             "registry index is signed with unknown key `{}`",
             index.key_id
         )));
     }
-    verify_signature(&index.payload(), &index.signature)
+    verify_signature_with(&index.payload(), &index.signature, public_key_base64)
 }
 
 pub fn verify_revocation(revoked: &SignedRevocation) -> Result<(), MarketError> {
+    verify_revocation_with(revoked, REGISTRY_PUBLIC_KEY_BASE64, REGISTRY_KEY_ID)
+}
+
+pub fn verify_revocation_with(
+    revoked: &SignedRevocation,
+    public_key_base64: Option<&str>,
+    key_id: &str,
+) -> Result<(), MarketError> {
     if revoked.schema_version != MARKET_SCHEMA_VERSION {
         return Err(MarketError::Registry(format!(
             "revocation list uses schema_version {}; this build understands {}",
             revoked.schema_version, MARKET_SCHEMA_VERSION
         )));
     }
-    if revoked.key_id != REGISTRY_KEY_ID {
+    if revoked.key_id != key_id {
         return Err(MarketError::Signature(format!(
             "revocation list is signed with unknown key `{}`",
             revoked.key_id
         )));
     }
-    verify_signature(&revoked.payload(), &revoked.signature)
+    verify_signature_with(&revoked.payload(), &revoked.signature, public_key_base64)
 }
 
 #[derive(Debug, Clone)]
@@ -1352,40 +1408,80 @@ mod tests {
 
     #[test]
     fn production_and_test_trust_roots_are_distinct() {
-        assert_ne!(
-            PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64,
-            TEST_REGISTRY_PUBLIC_KEY_BASE64
-        );
         assert_ne!(PRODUCTION_REGISTRY_KEY_ID, TEST_REGISTRY_KEY_ID);
+        if let Some(production) = PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64 {
+            assert_ne!(production, TEST_REGISTRY_PUBLIC_KEY_BASE64);
+        }
     }
 
     #[test]
-    fn release_builds_refuse_a_test_trust_root() {
-        let error = trust_root_error(TEST_REGISTRY_PUBLIC_KEY_BASE64, TEST_REGISTRY_KEY_ID, false)
-            .expect("a release build must reject the test key");
-        assert!(error.contains("test registry key"), "{error}");
+    fn release_without_a_production_key_is_preparing() {
+        assert_eq!(resolve_trust_root(false, None), TrustRoot::Preparing);
+        assert_eq!(resolve_trust_root(false, Some("")), TrustRoot::Preparing);
+        assert_eq!(resolve_trust_root(false, Some("   ")), TrustRoot::Preparing);
+        assert_eq!(
+            resolve_trust_root(false, Some("a-real-production-key")),
+            TrustRoot::Ready
+        );
+    }
+
+    #[test]
+    fn release_builds_never_fall_back_to_the_test_key() {
+        assert_eq!(
+            resolve_trust_root(false, Some(TEST_REGISTRY_PUBLIC_KEY_BASE64)),
+            TrustRoot::Refused
+        );
+        assert_eq!(resolve_trust_root(true, None), TrustRoot::Ready);
+        assert_eq!(
+            resolve_trust_root(true, Some(TEST_REGISTRY_PUBLIC_KEY_BASE64)),
+            TrustRoot::Ready
+        );
+    }
+
+    #[test]
+    fn an_unsigned_or_stale_index_is_refused_without_a_production_key() {
+        let mut index: SignedIndex =
+            serde_json::from_str(include_str!("../../../../registry/index.test.json")).unwrap();
+        assert!(verify_index_with(&index, None, TEST_REGISTRY_KEY_ID).is_err());
         assert!(
-            trust_root_error(
-                PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64,
-                PRODUCTION_REGISTRY_KEY_ID,
-                false
+            verify_index_with(
+                &index,
+                Some(TEST_REGISTRY_PUBLIC_KEY_BASE64),
+                TEST_REGISTRY_KEY_ID
             )
-            .is_none()
+            .is_ok()
         );
-        assert!(
-            trust_root_error(TEST_REGISTRY_PUBLIC_KEY_BASE64, TEST_REGISTRY_KEY_ID, true).is_none()
-        );
-        assert!(
-            trust_root_error("not-a-real-key", "pandu-market-2026", false)
-                .expect("unknown keys are refused")
-                .contains("recognised")
-        );
+
+        index.signature.clear();
+        assert!(matches!(
+            verify_index_with(
+                &index,
+                Some(TEST_REGISTRY_PUBLIC_KEY_BASE64),
+                TEST_REGISTRY_KEY_ID
+            ),
+            Err(MarketError::Signature(_))
+        ));
+
+        let mut stale: SignedIndex =
+            serde_json::from_str(include_str!("../../../../registry/index.test.json")).unwrap();
+        stale.key_id = PRODUCTION_REGISTRY_KEY_ID.to_string();
+        assert!(matches!(
+            verify_index_with(
+                &stale,
+                Some(TEST_REGISTRY_PUBLIC_KEY_BASE64),
+                TEST_REGISTRY_KEY_ID
+            ),
+            Err(MarketError::Signature(_))
+        ));
     }
 
     #[test]
     #[cfg(debug_assertions)]
     fn debug_builds_verify_with_the_test_key() {
-        assert_eq!(REGISTRY_PUBLIC_KEY_BASE64, TEST_REGISTRY_PUBLIC_KEY_BASE64);
+        assert_eq!(
+            REGISTRY_PUBLIC_KEY_BASE64,
+            Some(TEST_REGISTRY_PUBLIC_KEY_BASE64)
+        );
         assert_eq!(REGISTRY_KEY_ID, TEST_REGISTRY_KEY_ID);
         assert_eq!(ACTIVE_INDEX_FILE, TEST_INDEX_FILE);
         assert_eq!(ACTIVE_REVOKED_FILE, TEST_REVOKED_FILE);

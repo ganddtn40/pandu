@@ -1,0 +1,79 @@
+name: Release
+
+# A release is blocked unless the bundled production registry verifies with the
+# production trust root. The production private key stays offline: CI only uses
+# the public key compiled into the release binary. Until the maintainer
+# provisions that key, every release build fails closed with "Registry is being
+# prepared." and this workflow refuses to publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  registry-gate:
+    name: Verify production registry trust root
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check registry tooling syntax
+        run: node --check registry/sign.mjs && node --check registry/hash.mjs
+
+      - name: Verify the bundled index with the production key
+        run: |
+          cargo test --release --locked -p pandu-daemon --lib \
+            market::service::tests::bundled_production_registry_verifies_with_the_production_key \
+            -- --ignored --exact
+
+      - name: Verify signatures, index hashes, and pinned sources
+        run: |
+          cargo run --release --locked -p pandu-cli -- market check \
+            --dir registry --online --links
+
+  publish:
+    name: Publish release
+    needs: registry-gate
+    if: ${{ needs.registry-gate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release CLI
+        run: cargo build --release --locked -p pandu-cli
+
+      # Phase 7 replaces this artifact upload with the cargo-dist publish step.
+      # The `needs: registry-gate` edge is what blocks publishing: an unsigned
+      # index, a stale key id, a missing production key, or a bad signature
+      # fails the gate and this job never runs.
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pandu-${{ github.ref_name }}-linux-x86_64
+          path: target/release/pandu
+          if-no-files-found: error
