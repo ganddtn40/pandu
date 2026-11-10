@@ -380,6 +380,8 @@ const en = {
   'market.lede': 'A catalogue with trust tiers, pinned commits, permissions, and a diff before anything is written.',
   'market.notOpen': 'The market is not available yet',
   'market.notOpenBody': '{product} does not install anything in this build. When it does, every card will show a trust tier and the exact files an install will write.',
+  'market.preparingTitle': 'Registry is being prepared',
+  'market.preparingBody': 'This release does not embed a production registry key yet. No entries are shown and nothing can be installed. {product} never falls back to the test key.',
   'market.trustOfficial': 'Official',
   'market.trustReviewed': 'Community-reviewed',
   'market.trustUnreviewed': 'Unreviewed',

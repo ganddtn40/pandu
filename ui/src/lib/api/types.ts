@@ -752,6 +752,8 @@ export interface CatalogResponse {
   offline: boolean;
   warnings: string[];
   lastError?: string | null;
+  /** A release build has no production trust root yet; entries are empty. */
+  preparing: boolean;
   settings: MarketSettings;
   counts: CatalogCounts;
   cacheVerifiedAt?: string | null;
@@ -891,5 +893,7 @@ export interface MarketStatus {
   hostOnly: boolean;
   autoRefresh: boolean;
   lastRefresh?: string | null;
+  trustRoot: 'ready' | 'preparing' | 'refused';
+  preparing: boolean;
 }
 

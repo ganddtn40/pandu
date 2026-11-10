@@ -614,7 +614,7 @@
       class="btn btn--ghost"
       type="button"
       onclick={refreshRegistry}
-      disabled={refreshing || offline || !catalog}
+      disabled={refreshing || offline || !catalog || catalog.preparing}
     >
       <Icon name="refresh" size={16} />
       {refreshing ? t('market.refreshing') : t('market.refresh')}
@@ -652,7 +652,19 @@
   </section>
 {/if}
 
-{#if catalogLoading && !catalog}
+{#if catalog?.preparing}
+  <section
+    class="empty-state card"
+    data-glass
+    data-glass-layer="card"
+    data-glass-depth="2"
+    data-testid="market-preparing"
+  >
+    <span class="empty-state__icon"><Icon name="market" size={24} /></span>
+    <h2>{t('market.preparingTitle')}</h2>
+    <p>{t('market.preparingBody')}</p>
+  </section>
+{:else if catalogLoading && !catalog}
   <section class="empty-state card" data-glass data-glass-layer="card" data-glass-depth="2">
     <span class="empty-state__icon"><Icon name="market" size={24} /></span>
     <h2>{t('market.loading')}</h2>
