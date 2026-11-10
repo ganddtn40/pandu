@@ -403,12 +403,17 @@ fn market_sign(args: MarketSignArgs) -> anyhow::Result<()> {
     let key = pandu_daemon::market::signing::load_signing_key(&args.key)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let public = pandu_daemon::market::signing::public_key_base64(&key);
-    if public != pandu_daemon::market::REGISTRY_PUBLIC_KEY_BASE64 {
+    let Some(expected) = pandu_daemon::market::REGISTRY_PUBLIC_KEY_BASE64 else {
         bail!(
-            "This key's public half is {public}, but {} embeds {}. \
+            "This build embeds no production registry key. Generate the key offline and set \
+             PRODUCTION_REGISTRY_PUBLIC_KEY_BASE64 before signing a production registry."
+        );
+    };
+    if public != expected {
+        bail!(
+            "This key's public half is {public}, but {} embeds {expected}. \
              Signing with it would produce a registry every {} refuses.",
             brand::PRODUCT_NAME,
-            pandu_daemon::market::REGISTRY_PUBLIC_KEY_BASE64,
             brand::PRODUCT_NAME
         );
     }
