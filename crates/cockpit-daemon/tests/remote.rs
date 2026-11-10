@@ -493,6 +493,7 @@ async fn send_remote(
         "POST" => client.post(url),
         "PATCH" => client.patch(url),
         "PUT" => client.put(url),
+        "DELETE" => client.delete(url),
         other => panic!("unexpected method {other}"),
     };
     if let Some(token) = token {
@@ -579,6 +580,48 @@ async fn remote_listener_never_mounts_proxy_routes_or_host_management() {
     daemon.shutdown().await.unwrap();
 }
 
+/// Model, override, and context-management routes live on the loopback listener
+/// only. A paired device must get the same 404 as an unknown path, even though
+/// the remote listener does mount two explicit `host-only` rejection routes.
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_listener_never_mounts_model_or_context_management() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let (daemon, remote) = start_remote_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+    let device = pair_device(&daemon, &remote, "Phone", None).await;
+
+    let base = format!("/api/sessions/{DUMMY_ID}");
+    let probes = [
+        ("GET", format!("{base}/model")),
+        ("PUT", format!("{base}/model")),
+        ("DELETE", format!("{base}/model")),
+        ("GET", format!("{base}/model/preview")),
+        ("POST", format!("{base}/model/switch")),
+        ("GET", "/api/models".to_string()),
+    ];
+
+    for (method, path) in probes {
+        let response = send_remote(
+            &client,
+            method,
+            &format!("{remote}{path}"),
+            Some(&device.token),
+            Some(&json!({ "model": "gpt-5.5" })),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{method} {path} must not exist on the remote listener"
+        );
+        let payload: Value = response.json().await.unwrap();
+        assert_eq!(payload["error"]["code"], "not_found");
+    }
+
+    daemon.shutdown().await.unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn every_remote_endpoint_enforces_its_scope() {
     let mock = MockUpstream::start().await;
@@ -608,7 +651,7 @@ async fn every_remote_endpoint_enforces_its_scope() {
         }
         let path = endpoint.path.replace("{id}", DUMMY_ID);
         let url = format!("{remote}{path}");
-        let body = request_body(endpoint.path);
+        let body = request_body(&endpoint.path);
         let body_ref = body.as_ref();
 
         let unauthenticated = send_remote(&client, endpoint.method, &url, None, body_ref).await;

@@ -13,7 +13,7 @@ use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, State
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{MethodRouter, get, post};
 use axum::{Json, Router};
 use cockpit_core::guard::{
     ApprovalChoice, ApprovalDecisionInput, GuardEvent, GuardRuleKind, GuardSeverity,
@@ -38,41 +38,217 @@ pub const REMOTE_BODY_LIMIT: usize = 64 * 1024;
 /// Wrong high-risk PINs before Respond locks for this device until a host reset.
 pub const MAX_PIN_FAILURES: u32 = 5;
 
-pub fn build_remote_router(state: AppState) -> Router {
-    let public = Router::new()
-        .route("/remote/health", get(remote_health))
-        .route("/remote/pair/claim", post(pair_claim))
-        .route("/remote/pair/claim/{id}", post(pair_poll));
+/// How a remote route authenticates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemoteAuthClass {
+    /// No bearer token. Pairing and the health probe validate themselves.
+    Public,
+    /// The bearer-token middleware in [`authenticate`] runs first.
+    Bearer,
+    /// A single-use WebSocket ticket carried in the subprotocol.
+    Ticket,
+}
 
-    let authenticated = Router::new()
-        .route("/remote/session", get(session_info))
-        .route("/remote/overview", get(overview))
-        .route("/remote/sessions", get(list_sessions))
-        .route("/remote/sessions/{id}", get(get_session))
-        .route("/remote/sessions/{id}/steps", get(list_steps))
-        .route("/remote/sessions/{id}/model", post(reject_model_override))
-        .route(
-            "/remote/sessions/{id}/model/switch",
-            post(reject_model_switch),
-        )
-        .route("/remote/guards/events", get(list_guard_events))
-        .route("/remote/guards/events/{id}/decision", post(guard_decision))
-        .route("/remote/agents", get(list_agents))
-        .route("/remote/agents/{id}", get(get_agent))
-        .route("/remote/agents/{id}/prompt", post(send_prompt))
-        .route("/remote/agent-events", get(list_agent_events))
-        .route("/remote/ws-ticket", post(ws_ticket))
-        .route("/remote/logout", post(logout))
-        .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
+/// One route the remote listener mounts, with the scope it requires.
+///
+/// This table is the single source of truth: [`build_remote_router`] mounts
+/// exactly these rows, and [`super::RemoteAccess::scope_matrix`] reports exactly
+/// these rows. A route cannot be mounted without an explicit scope, and a scope
+/// cannot be documented without a mounted route.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RemoteRoute {
+    pub method: &'static str,
+    pub path: &'static str,
+    pub scope: &'static str,
+    pub note: &'static str,
+    pub auth: RemoteAuthClass,
+}
+
+pub(crate) const REMOTE_ROUTES: &[RemoteRoute] = &[
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/health",
+        scope: "none",
+        note: "Paired devices and loopback only; 404 otherwise",
+        auth: RemoteAuthClass::Public,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/pair/claim",
+        scope: "none",
+        note: "Pairing code + device name",
+        auth: RemoteAuthClass::Public,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/pair/claim/{id}",
+        scope: "none",
+        note: "One-time claim secret",
+        auth: RemoteAuthClass::Public,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/session",
+        scope: "view:status",
+        note: "This device's scopes",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/overview",
+        scope: "view:status",
+        note: "Flights and totals",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/sessions",
+        scope: "view:status",
+        note: "Flight list",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/sessions/{id}",
+        scope: "view:status",
+        note: "Flight detail",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/sessions/{id}/steps",
+        scope: "view:content",
+        note: "Captured steps, prompts, and responses",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/sessions/{id}/model",
+        scope: "host-only",
+        note: "Always rejected: model and effort overrides are host-only",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/sessions/{id}/model/switch",
+        scope: "host-only",
+        note: "Always rejected: PTY model switches are host-only",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/guards/events",
+        scope: "view:status",
+        note: "Pending and past approvals",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/guards/events/{id}/decision",
+        scope: "respond",
+        note: "Approve or deny; high risk needs the pairing PIN",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/agents",
+        scope: "view:status",
+        note: "Running agent sessions",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/agents/{id}",
+        scope: "view:content",
+        note: "Sanitized terminal output",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/agents/{id}/prompt",
+        scope: "prompt",
+        note: "Keystrokes only; host confirmation by default",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/agent-events",
+        scope: "view:status",
+        note: "Inbox events",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/ws-ticket",
+        scope: "view:status",
+        note: "30-second single-use ticket",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "POST",
+        path: "/remote/logout",
+        scope: "view:status",
+        note: "Revoke this device",
+        auth: RemoteAuthClass::Bearer,
+    },
+    RemoteRoute {
+        method: "GET",
+        path: "/remote/live",
+        scope: "view:status",
+        note: "WebSocket ticket in Sec-WebSocket-Protocol; content events need view:content",
+        auth: RemoteAuthClass::Ticket,
+    },
+];
+
+/// Bind a table row to its handler. The table is exhaustive: an entry without a
+/// handler panics at startup rather than mounting an unscoped route.
+fn mount(route: &RemoteRoute) -> MethodRouter<AppState> {
+    match (route.method, route.path) {
+        ("GET", "/remote/health") => get(remote_health),
+        ("POST", "/remote/pair/claim") => post(pair_claim),
+        ("POST", "/remote/pair/claim/{id}") => post(pair_poll),
+        ("GET", "/remote/session") => get(session_info),
+        ("GET", "/remote/overview") => get(overview),
+        ("GET", "/remote/sessions") => get(list_sessions),
+        ("GET", "/remote/sessions/{id}") => get(get_session),
+        ("GET", "/remote/sessions/{id}/steps") => get(list_steps),
+        ("POST", "/remote/sessions/{id}/model") => post(reject_model_override),
+        ("POST", "/remote/sessions/{id}/model/switch") => post(reject_model_switch),
+        ("GET", "/remote/guards/events") => get(list_guard_events),
+        ("POST", "/remote/guards/events/{id}/decision") => post(guard_decision),
+        ("GET", "/remote/agents") => get(list_agents),
+        ("GET", "/remote/agents/{id}") => get(get_agent),
+        ("POST", "/remote/agents/{id}/prompt") => post(send_prompt),
+        ("GET", "/remote/agent-events") => get(list_agent_events),
+        ("POST", "/remote/ws-ticket") => post(ws_ticket),
+        ("POST", "/remote/logout") => post(logout),
+        ("GET", "/remote/live") => get(live),
+        (method, path) => unreachable!("remote route table has no handler for {method} {path}"),
+    }
+}
+
+pub fn build_remote_router(state: AppState) -> Router {
+    let mut public = Router::new();
+    let mut authenticated = Router::new();
+    let mut ticket = Router::new();
+    for route in REMOTE_ROUTES {
+        let mounted = mount(route);
+        match route.auth {
+            RemoteAuthClass::Public => public = public.route(route.path, mounted),
+            RemoteAuthClass::Bearer => authenticated = authenticated.route(route.path, mounted),
+            RemoteAuthClass::Ticket => ticket = ticket.route(route.path, mounted),
+        }
+    }
 
     // The live socket authenticates with a single-use ticket carried in the
     // WebSocket subprotocol, never with a bearer token in the URL. It therefore
     // lives outside the bearer-auth layer and validates its own ticket.
-    let live_socket = Router::new().route("/remote/live", get(live));
+    let authenticated =
+        authenticated.route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
 
     let api = public
         .merge(authenticated)
-        .merge(live_socket)
+        .merge(ticket)
         .fallback(api_not_found)
         .with_state(state.clone());
 

@@ -336,6 +336,7 @@ token, or read the audit log.
 
 Evidence: `crates/cockpit-daemon/tests/remote.rs`:
 `remote_listener_never_mounts_proxy_routes_or_host_management`,
+`remote_listener_never_mounts_model_or_context_management`,
 `every_remote_endpoint_enforces_its_scope`,
 `revocation_closes_a_live_socket_immediately`,
 `pairing_is_single_use_host_confirmed_and_brute_force_limited`,
@@ -524,7 +525,13 @@ general request editor.
   `POST /api/remote/sessions/{id}/model/switch` solely to reject them with
   `403 host_only`; the rejection is audited. The remote scope matrix lists both
   as `host-only`, and `every_remote_endpoint_enforces_its_scope` asserts the
-  rejection for a paired device.
+  rejection for a paired device. The scope matrix is generated from
+  `remote::api::REMOTE_ROUTES`, the same table `build_remote_router` mounts, so
+  a route cannot exist without a scope. `scope_matrix_never_uses_a_wildcard`
+  checks every table row, and
+  `remote_listener_never_mounts_model_or_context_management` probes every
+  loopback model/override route and `/api/models` with a paired device and
+  requires a `404 not_found`.
 - **Opt-in and ephemeral.** There is no global switch. An override exists only
   while the flight is active and lives in daemon memory. It clears when the
   flight ends and when the daemon restarts. With no override the proxy forwards

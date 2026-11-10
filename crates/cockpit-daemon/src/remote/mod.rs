@@ -159,7 +159,7 @@ pub struct RemoteStatus {
 #[serde(rename_all = "camelCase")]
 pub struct EndpointScope {
     pub method: &'static str,
-    pub path: &'static str,
+    pub path: String,
     pub scope: &'static str,
     pub note: &'static str,
 }
@@ -911,116 +911,15 @@ impl RemoteAccess {
     }
 
     pub fn scope_matrix() -> Vec<EndpointScope> {
-        vec![
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/pair/claim",
-                scope: "none",
-                note: "Pairing code + device name",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/pair/claim/{id}",
-                scope: "none",
-                note: "One-time claim secret",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/session",
-                scope: "view:status",
-                note: "This device's scopes",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/overview",
-                scope: "view:status",
-                note: "Flights and totals",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/sessions",
-                scope: "view:status",
-                note: "Flight list",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/sessions/{id}",
-                scope: "view:status",
-                note: "Flight detail",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/sessions/{id}/steps",
-                scope: "view:content",
-                note: "Captured steps, prompts, and responses",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/sessions/{id}/model",
-                scope: "host-only",
-                note: "Always rejected: model and effort overrides are host-only",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/sessions/{id}/model/switch",
-                scope: "host-only",
-                note: "Always rejected: PTY model switches are host-only",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/guards/events",
-                scope: "view:status",
-                note: "Pending and past approvals",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/agents",
-                scope: "view:status",
-                note: "Running agent sessions",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/agents/{id}",
-                scope: "view:content",
-                note: "Sanitized terminal output",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/agent-events",
-                scope: "view:status",
-                note: "Inbox events",
-            },
-            EndpointScope {
-                method: "GET",
-                path: "/api/remote/live",
-                scope: "view:status",
-                note: "WebSocket ticket in Sec-WebSocket-Protocol; content events need view:content",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/ws-ticket",
-                scope: "view:status",
-                note: "30-second single-use ticket",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/guards/events/{id}/decision",
-                scope: "respond",
-                note: "Approve or deny; high risk needs the pairing PIN",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/agents/{id}/prompt",
-                scope: "prompt",
-                note: "Keystrokes only; host confirmation by default",
-            },
-            EndpointScope {
-                method: "POST",
-                path: "/api/remote/logout",
-                scope: "view:status",
-                note: "Revoke this device",
-            },
-        ]
+        crate::remote::api::REMOTE_ROUTES
+            .iter()
+            .map(|route| EndpointScope {
+                method: route.method,
+                path: format!("/api{}", route.path),
+                scope: route.scope,
+                note: route.note,
+            })
+            .collect()
     }
 
     fn lock_inner(&self) -> std::sync::MutexGuard<'_, RemoteInner> {
@@ -1258,14 +1157,47 @@ mod tests {
     fn scope_matrix_never_uses_a_wildcard() {
         let matrix = RemoteAccess::scope_matrix();
         assert!(!matrix.is_empty());
-        for endpoint in matrix {
+
+        // `build_remote_router` mounts exactly `REMOTE_ROUTES`, so this test
+        // fails for any mounted route that is missing a scope row, carries an
+        // unknown scope, or appears twice.
+        let routes = crate::remote::api::REMOTE_ROUTES;
+        assert_eq!(
+            matrix.len(),
+            routes.len(),
+            "every mounted remote route needs exactly one scope row"
+        );
+
+        let mut seen = std::collections::HashSet::new();
+        for route in routes {
+            assert!(
+                !route.scope.is_empty(),
+                "{} {} has no scope",
+                route.method,
+                route.path
+            );
             assert!(
                 matches!(
-                    endpoint.scope,
+                    route.scope,
                     "view:status" | "view:content" | "respond" | "prompt" | "none" | "host-only"
                 ),
-                "unexpected scope {}",
-                endpoint.scope
+                "unexpected scope {} on {} {}",
+                route.scope,
+                route.method,
+                route.path
+            );
+            assert!(
+                seen.insert((route.method, route.path)),
+                "duplicate remote route {} {}",
+                route.method,
+                route.path
+            );
+            assert!(
+                matrix.iter().any(|endpoint| endpoint.method == route.method
+                    && endpoint.path == format!("/api{}", route.path)),
+                "mounted route {} {} is missing from the scope matrix",
+                route.method,
+                route.path
             );
         }
     }
