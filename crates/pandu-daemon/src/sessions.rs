@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use pandu_core::brand;
 use pandu_core::cost::{canonical_provider, find_builtin_model};
 use pandu_core::model::{CaptureMode, Session, SessionSource, SessionStatus};
 use pandu_core::provider::{AgentInfo, ProviderProtocol};
@@ -460,8 +461,12 @@ impl SessionManager {
         reason: &str,
         provider_status: Option<u16>,
     ) -> Option<ModelOverride> {
-        let removed =
-            self.remove_model_override(session_id, reason, "model.override.reverted", "pandu");
+        let removed = self.remove_model_override(
+            session_id,
+            reason,
+            "model.override.reverted",
+            brand::AUDIT_ACTOR,
+        );
         if let Some(existing) = &removed {
             self.bus.publish(
                 "model.override.reverted",
@@ -472,7 +477,7 @@ impl SessionManager {
                     "effort": existing.effort,
                     "reason": reason,
                     "providerStatus": provider_status,
-                    "actor": "pandu",
+                    "actor": brand::AUDIT_ACTOR,
                 }),
             );
         }

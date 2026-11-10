@@ -15,7 +15,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
 use axum::{Json, Router};
-use pandu_core::brand::{REMOTE_HEADER, TOKEN_HEADER};
+use pandu_core::brand::{REMOTE_HEADER, TOKEN_HEADER, WS_PROTOCOL_PREFIX};
 use pandu_core::guard::{
     ApprovalChoice, ApprovalDecisionInput, GuardEvent, GuardRuleKind, GuardSeverity,
 };
@@ -1096,7 +1096,7 @@ async fn ws_ticket(
     Json(json!({
         "ticket": ticket,
         "expiresInSeconds": super::WS_TICKET_TTL_SECONDS,
-        "protocol": format!("pandu.{ticket}"),
+        "protocol": format!("{WS_PROTOCOL_PREFIX}{ticket}"),
     }))
     .into_response()
 }
@@ -1109,7 +1109,7 @@ async fn live(ws: WebSocketUpgrade, State(state): State<AppState>, headers: Head
             value
                 .split(',')
                 .map(str::trim)
-                .find(|item| item.starts_with("pandu."))
+                .find(|item| item.starts_with(WS_PROTOCOL_PREFIX))
                 .map(str::to_string)
         })
     else {
@@ -1119,7 +1119,7 @@ async fn live(ws: WebSocketUpgrade, State(state): State<AppState>, headers: Head
             "Open the live socket with a short-lived Pandu ticket.",
         );
     };
-    let ticket = protocol.trim_start_matches("pandu.");
+    let ticket = protocol.trim_start_matches(WS_PROTOCOL_PREFIX);
     let Some(ticket) = state.remote.consume_ws_ticket(ticket) else {
         return api_error(
             StatusCode::BAD_REQUEST,

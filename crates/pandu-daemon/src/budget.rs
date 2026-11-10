@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use pandu_core::brand;
 use pandu_core::guard::{
     BudgetEnforcement, BudgetPolicy, BudgetStatus, GuardAction, GuardEvent, GuardEventListQuery,
     GuardEventStatus, GuardRuleKind, GuardSeverity, budget_period_start,
@@ -157,7 +158,7 @@ impl BudgetService {
                         &GuardEventPatch {
                             status: Some(resolved_status),
                             resolved_at: Some(now_iso()),
-                            resolved_by: Some("pandu".to_string()),
+                            resolved_by: Some(brand::AUDIT_ACTOR.to_string()),
                             resolution_note: (outcome == ApprovalOutcome::Expired)
                                 .then(|| "The approval window elapsed.".to_string()),
                         },

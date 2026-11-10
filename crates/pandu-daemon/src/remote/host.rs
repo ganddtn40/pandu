@@ -9,6 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
+use pandu_core::brand;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -511,13 +512,15 @@ pub async fn audit_export(State(state): State<AppState>) -> Result<Response, Api
         .map_err(store_error)?;
     let body = json!({
         "exportedAt": now_iso(),
-        "product": "Pandu",
+        "product": brand::PRODUCT_NAME,
         "entries": entries,
     });
     let mut response = Json(body).into_response();
+    let disposition = format!("attachment; filename=\"{}\"", brand::REMOTE_AUDIT_FILE);
     response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
-        header::HeaderValue::from_static("attachment; filename=\"pandu-remote-audit.json\""),
+        header::HeaderValue::from_str(&disposition)
+            .unwrap_or_else(|_| header::HeaderValue::from_static("attachment")),
     );
     Ok(response)
 }

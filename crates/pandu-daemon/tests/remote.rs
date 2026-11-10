@@ -15,6 +15,9 @@ use axum::Router;
 use futures_util::StreamExt;
 use http::StatusCode;
 use pandu_core::agent::{AgentEventInput, AgentEventType};
+use pandu_core::brand::{
+    CSRF_HEADER, DATABASE_FILE, PRODUCT_NAME, REMOTE_AUDIT_FILE, REMOTE_HEADER, TOKEN_HEADER,
+};
 use pandu_core::guard::{
     GuardAction, GuardEventStatus, GuardEvidence, GuardRuleKind, GuardSeverity,
 };
@@ -142,7 +145,7 @@ fn host_headers(daemon: &ServerHandle) -> reqwest::header::HeaderMap {
         reqwest::header::ORIGIN,
         format!("http://{}", daemon.addr).parse().unwrap(),
     );
-    headers.insert("x-pandu-csrf", daemon.state.csrf.parse().unwrap());
+    headers.insert(CSRF_HEADER, daemon.state.csrf.parse().unwrap());
     headers.insert(
         reqwest::header::CONTENT_TYPE,
         reqwest::header::HeaderValue::from_static("application/json"),
@@ -170,7 +173,7 @@ async fn send_host_mutation(
         builder = builder.header("origin", origin);
     }
     if let Some(csrf) = csrf {
-        builder = builder.header("x-pandu-csrf", csrf);
+        builder = builder.header(CSRF_HEADER, csrf);
     }
     builder = builder.header("content-type", content_type);
     if let Some(body) = body {
@@ -208,7 +211,7 @@ async fn start_remote_daemon(home: &Path, upstream: SocketAddr) -> (ServerHandle
         {
             if response
                 .headers()
-                .get("x-pandu-remote")
+                .get(REMOTE_HEADER)
                 .and_then(|value| value.to_str().ok())
                 == Some("1")
             {
@@ -268,7 +271,7 @@ async fn tunnel_status_waits_for_the_public_host_and_rejects_host_or_origin_mism
 
     let good = client.get(format!("{public_url}/")).send().await.unwrap();
     assert_eq!(good.status(), StatusCode::OK);
-    assert_eq!(good.headers()["x-pandu-remote"], "1");
+    assert_eq!(good.headers()[REMOTE_HEADER], "1");
     let status: Value = client
         .get(format!("{host}/api/remote/status"))
         .send()
@@ -1648,7 +1651,7 @@ async fn tunnel_identity_trusts_only_forwarded_addresses() {
         let issued: Value = client
             .post(format!("{host}/api/remote/pair/code"))
             .header("origin", &host)
-            .header("x-pandu-csrf", csrf)
+            .header(CSRF_HEADER, csrf)
             .header("content-type", "application/json")
             .send()
             .await
@@ -1953,7 +1956,7 @@ async fn host_mutations_reject_cross_origin_forms_and_require_csrf() {
     assert_eq!(csrf_response.status(), StatusCode::OK);
     let header_token = csrf_response
         .headers()
-        .get("x-pandu-csrf")
+        .get(CSRF_HEADER)
         .unwrap()
         .to_str()
         .unwrap()
@@ -3389,7 +3392,7 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
 
     // The chain verifies in append order even though the API lists newest
     // first.
-    let store = Store::open(home.path().join("pandu.db")).unwrap();
+    let store = Store::open(home.path().join(DATABASE_FILE)).unwrap();
     let report = store.verify_remote_audit_chain().unwrap();
     assert!(report.valid, "{report:?}");
     assert_eq!(report.entries, events.len() as u64);
@@ -3408,10 +3411,10 @@ async fn audit_log_records_sensitive_transitions_and_exports() {
             .get("content-disposition")
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
-            .contains("pandu-remote-audit.json")
+            .contains(REMOTE_AUDIT_FILE)
     );
     let exported: Value = export.json().await.unwrap();
-    assert_eq!(exported["product"], "Pandu");
+    assert_eq!(exported["product"], PRODUCT_NAME);
     assert!(exported["exportedAt"].is_string());
     assert_eq!(exported["entries"].as_array().unwrap().len(), events.len());
     let serialized = exported.to_string();
@@ -3517,7 +3520,7 @@ async fn malformed_requests_are_rejected_without_a_crash() {
         .await
         .unwrap();
     assert_eq!(anonymous_health.status(), StatusCode::NOT_FOUND);
-    assert!(anonymous_health.headers().get("x-pandu-remote").is_some());
+    assert!(anonymous_health.headers().get(REMOTE_HEADER).is_some());
 
     // A real loopback caller can still probe it, but gets no version.
     let loopback_health = client
@@ -3718,7 +3721,7 @@ async fn device_expiry_is_chosen_and_tokens_rotate_with_an_overlap() {
     assert!(response.status().is_success());
     let rotated = response
         .headers()
-        .get("x-pandu-token")
+        .get(TOKEN_HEADER)
         .expect("the rotation header is present")
         .to_str()
         .unwrap()
@@ -3735,7 +3738,7 @@ async fn device_expiry_is_chosen_and_tokens_rotate_with_an_overlap() {
         .unwrap();
     assert_eq!(old.status(), StatusCode::OK);
     assert!(
-        old.headers().get("x-pandu-token").is_none(),
+        old.headers().get(TOKEN_HEADER).is_none(),
         "a second rotation must wait for the overlap to end"
     );
 

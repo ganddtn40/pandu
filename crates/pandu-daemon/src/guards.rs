@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use pandu_core::brand;
 use pandu_core::guard::{
     ApprovalChoice, ApprovalDecisionInput, GuardAction, GuardEvent, GuardEventListQuery,
     GuardEventStatus, GuardEvidence, GuardRequestResult, GuardRule, GuardRuleConfig,
@@ -604,7 +605,7 @@ impl GuardService {
             let patch = GuardEventPatch {
                 status: Some(GuardEventStatus::Expired),
                 resolved_at: Some(now_iso()),
-                resolved_by: Some("pandu".to_string()),
+                resolved_by: Some(brand::AUDIT_ACTOR.to_string()),
                 resolution_note: Some("The approval window elapsed.".to_string()),
             };
             if let Some(expired) =
@@ -748,7 +749,7 @@ impl GuardService {
                     &GuardEventPatch {
                         status: Some(status),
                         resolved_at: Some(now_iso()),
-                        resolved_by: Some("pandu".to_string()),
+                        resolved_by: Some(brand::AUDIT_ACTOR.to_string()),
                         resolution_note: (outcome == ApprovalOutcome::Expired)
                             .then(|| "The approval window elapsed.".to_string()),
                     },

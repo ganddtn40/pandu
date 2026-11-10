@@ -4,6 +4,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use pandu_core::brand;
 use pandu_core::model::Session;
 use pandu_core::replay::{FileChangeType, ReplaySnapshot, SnapshotKind};
 use serde_json::json;
@@ -214,7 +215,7 @@ impl GitSnapshotService {
             .create_working_tree_commit(
                 &workspace,
                 head.as_deref(),
-                &format!("pandu: baseline {}", session.id),
+                &format!("{} baseline {}", brand::SNAPSHOT_COMMIT_PREFIX, session.id),
             )
             .await?;
         let branch = self
@@ -278,7 +279,11 @@ impl GitSnapshotService {
             .create_working_tree_commit(
                 &workspace,
                 Some(&previous_commit),
-                &format!("pandu: {label} {step_id} in {}", session.id),
+                &format!(
+                    "{} {label} {step_id} in {}",
+                    brand::SNAPSHOT_COMMIT_PREFIX,
+                    session.id
+                ),
             )
             .await?;
         let diff = self
@@ -410,10 +415,10 @@ impl GitSnapshotService {
         let index_value = index_path.display().to_string();
         let env = [
             ("GIT_INDEX_FILE", index_value.as_str()),
-            ("GIT_AUTHOR_NAME", "Pandu"),
-            ("GIT_AUTHOR_EMAIL", "pandu@localhost"),
-            ("GIT_COMMITTER_NAME", "Pandu"),
-            ("GIT_COMMITTER_EMAIL", "pandu@localhost"),
+            ("GIT_AUTHOR_NAME", brand::GIT_AUTHOR_NAME),
+            ("GIT_AUTHOR_EMAIL", brand::GIT_AUTHOR_EMAIL),
+            ("GIT_COMMITTER_NAME", brand::GIT_AUTHOR_NAME),
+            ("GIT_COMMITTER_EMAIL", brand::GIT_AUTHOR_EMAIL),
         ];
 
         let result = async {
@@ -769,14 +774,16 @@ mod tests {
     use super::*;
 
     fn git(cwd: &Path, args: &[&str]) -> String {
+        let name = format!("{} Test", brand::PRODUCT_NAME);
+        let email = format!("test@{}", brand::SLUG);
         let output = std::process::Command::new("git")
             .args(args)
             .current_dir(cwd)
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_AUTHOR_NAME", "Pandu Test")
-            .env("GIT_AUTHOR_EMAIL", "pandu@example.com")
-            .env("GIT_COMMITTER_NAME", "Pandu Test")
-            .env("GIT_COMMITTER_EMAIL", "pandu@example.com")
+            .env("GIT_AUTHOR_NAME", &name)
+            .env("GIT_AUTHOR_EMAIL", &email)
+            .env("GIT_COMMITTER_NAME", &name)
+            .env("GIT_COMMITTER_EMAIL", &email)
             .output()
             .expect("git is required for the snapshot tests");
         assert!(

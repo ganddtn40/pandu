@@ -7,6 +7,7 @@
 //! request is forwarded unchanged and the step is flagged as a fail-open.
 
 use bytes::Bytes;
+use pandu_core::brand;
 use pandu_core::cost::{EffortControl, find_builtin_model};
 use pandu_core::provider::ProviderProtocol;
 use serde_json::{Map, Value, json};
@@ -67,7 +68,7 @@ pub fn rewrite_request(
             path: path.to_string(),
             info: Some(json!({
                 "applied": false,
-                "modifiedBy": "pandu",
+                "modifiedBy": brand::AUDIT_ACTOR,
                 "failedOpen": true,
                 "reason": reason,
                 "model": { "to": override_.model },
@@ -150,7 +151,7 @@ fn apply(
         new_path,
         json!({
             "applied": true,
-            "modifiedBy": "pandu",
+            "modifiedBy": brand::AUDIT_ACTOR,
             "provider": provider,
             "model": { "from": original_model, "to": override_.model },
             "effort": { "from": original_effort, "to": target_effort },
@@ -310,7 +311,7 @@ mod tests {
         assert_eq!(outcome.path, "/v1/chat/completions");
         let info = outcome.info.unwrap();
         assert_eq!(info["applied"], true);
-        assert_eq!(info["modifiedBy"], "pandu");
+        assert_eq!(info["modifiedBy"], brand::AUDIT_ACTOR);
         assert_eq!(info["model"]["from"], "gpt-4.1");
         assert_eq!(info["model"]["to"], "gpt-5.5");
         assert_eq!(info["effort"]["from"], "low");

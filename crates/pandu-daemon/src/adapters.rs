@@ -287,9 +287,13 @@ fn truncate(text: &str, limit: usize) -> String {
 mod tests {
     use super::*;
 
+    fn temp_home(suffix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("{}-adapter-test-{suffix}", pandu_core::brand::SLUG))
+    }
+
     #[test]
     fn every_builtin_adapter_loads() {
-        let home = std::env::temp_dir().join("pandu-adapter-test-empty-home");
+        let home = temp_home("empty-home");
         let registry = load_registry(&home);
         assert!(
             registry.issues().is_empty(),
@@ -305,7 +309,7 @@ mod tests {
 
     #[test]
     fn every_log_watch_parser_is_in_the_registry() {
-        let home = std::env::temp_dir().join("pandu-adapter-test-empty-home-2");
+        let home = temp_home("empty-home-2");
         let registry = load_registry(&home);
         for adapter in registry.log_watch_adapters() {
             let parser = &adapter.log_watch.as_ref().unwrap().parser;
@@ -319,7 +323,7 @@ mod tests {
 
     #[test]
     fn codex_skills_paths_are_verified() {
-        let home = std::env::temp_dir().join("pandu-adapter-test-codex-skills");
+        let home = temp_home("codex-skills");
         let registry = load_registry(&home);
         let skills = registry
             .get("codex")
@@ -388,7 +392,7 @@ mod tests {
 
     #[test]
     fn adapter_detection_uses_the_real_binary_names() {
-        let home = std::env::temp_dir().join("pandu-adapter-test-detect-home");
+        let home = temp_home("detect-home");
         let registry = load_registry(&home);
 
         let gemini = registry.get("gemini-cli").expect("gemini-cli adapter");
@@ -410,18 +414,20 @@ mod tests {
         let home = home_dir().unwrap();
         assert_eq!(expand_path("~/.claude").unwrap(), home.join(".claude"));
 
+        let variable = pandu_core::brand::env_name("TEST_ROOT");
         unsafe {
-            env::set_var("PANDU_TEST_ROOT", "/tmp/pandu-root");
+            env::set_var(&variable, "/tmp/pandu-root");
         }
-        let expanded = expand_path("${PANDU_TEST_ROOT}/logs").unwrap();
+        let expanded = expand_path(&format!("${{{variable}}}/logs")).unwrap();
         assert!(expanded.ends_with("logs"));
         assert!(!expanded.to_string_lossy().contains("${"));
     }
 
     #[test]
     fn rejects_unknown_variables() {
-        let error = expand_path("${PANDU_MISSING_VARIABLE}/logs").unwrap_err();
-        assert!(error.contains("PANDU_MISSING_VARIABLE"));
+        let variable = pandu_core::brand::env_name("MISSING_VARIABLE");
+        let error = expand_path(&format!("${{{variable}}}/logs")).unwrap_err();
+        assert!(error.contains(&variable));
     }
 
     #[test]

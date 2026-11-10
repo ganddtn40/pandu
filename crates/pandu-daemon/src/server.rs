@@ -16,7 +16,7 @@ use tokio::time::{Duration, Instant, MissedTickBehavior, interval_at};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use pandu_core::brand::CSRF_HEADER;
+use pandu_core::brand::{CSRF_HEADER, LOCAL_HOSTNAME, SLUG};
 
 use crate::api;
 use crate::config::{Config, is_loopback_host};
@@ -855,7 +855,7 @@ pub async fn start_remote(
                 ip.clone(),
                 port,
                 Some(fingerprint),
-                vec![ip, "pandu.local".to_string()],
+                vec![ip, LOCAL_HOSTNAME.to_string()],
             );
             state
                 .remote
@@ -903,9 +903,9 @@ fn normalize_public_url(value: &str) -> Result<String> {
             ));
         }
         if !host_only.contains('.') {
-            return Err(DaemonError::config(
-                "The tunnel URL must use a public hostname such as pandu.example.com.",
-            ));
+            return Err(DaemonError::config(format!(
+                "The tunnel URL must use a public hostname such as {SLUG}.example.com."
+            )));
         }
         return Ok(value.to_string());
     }
@@ -944,7 +944,7 @@ fn ensure_lan_certificate(home: &Path, ip: &str) -> Result<(PathBuf, PathBuf, St
         }
     }
 
-    let names = vec!["pandu.local".to_string(), ip.to_string()];
+    let names = vec![LOCAL_HOSTNAME.to_string(), ip.to_string()];
     let generated = rcgen::generate_simple_self_signed(names).map_err(|error| {
         DaemonError::other(format!("Could not generate a TLS certificate: {error}"))
     })?;

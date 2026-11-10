@@ -303,6 +303,7 @@ pub fn is_recordable_path(method: &http::Method, path: &str) -> bool {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use pandu_core::brand::PROVIDER_HEADER;
 
     fn config() -> Config {
         let mut config = Config::for_home(".");
@@ -324,10 +325,10 @@ mod tests {
     }
 
     #[test]
-    fn forwards_agent_auth_and_strips_pandu_headers() {
+    fn forwards_agent_auth_and_strips_product_headers() {
         let incoming = headers(&[
             ("authorization", "Bearer agent-key"),
-            ("x-pandu-provider", "deepseek"),
+            (PROVIDER_HEADER, "deepseek"),
             ("content-type", "application/json"),
             ("host", "localhost:4319"),
         ]);
@@ -336,13 +337,13 @@ mod tests {
         assert_eq!(upstream["authorization"], "Bearer agent-key");
         assert_eq!(upstream["content-type"], "application/json");
         assert_eq!(upstream["accept-encoding"], "identity");
-        assert!(!upstream.contains_key("x-pandu-provider"));
+        assert!(!upstream.contains_key(PROVIDER_HEADER));
         assert!(!upstream.contains_key("host"));
     }
 
     #[test]
     fn sentinel_uses_configured_key() {
-        let incoming = headers(&[("authorization", "Bearer pandu-proxy")]);
+        let incoming = headers(&[("authorization", &format!("Bearer {PROXY_KEY_SENTINEL}"))]);
         let upstream = build_upstream_headers(&incoming, ProviderProtocol::Openai, &config());
         assert_eq!(upstream["authorization"], "Bearer openai-key");
     }
@@ -350,7 +351,7 @@ mod tests {
     #[test]
     fn anthropic_gets_version_and_key() {
         let upstream = build_upstream_headers(
-            &headers(&[("x-api-key", "pandu-proxy")]),
+            &headers(&[("x-api-key", PROXY_KEY_SENTINEL)]),
             ProviderProtocol::Anthropic,
             &config(),
         );
@@ -377,8 +378,8 @@ mod tests {
         assert!(!headers.contains_key("content-length"));
         assert!(!headers.contains_key("content-encoding"));
         assert_eq!(headers["x-accel-buffering"], "no");
-        assert_eq!(headers["x-pandu-session-id"], "session");
-        assert_eq!(headers["x-pandu-step-id"], "step");
+        assert_eq!(headers[SESSION_ID_HEADER], "session");
+        assert_eq!(headers[STEP_ID_HEADER], "step");
     }
 
     #[test]

@@ -236,8 +236,8 @@ mod tests {
     #[test]
     fn explicit_headers_win() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-pandu-agent-name", "My Agent".parse().unwrap());
-        headers.insert("x-pandu-agent-version", "1.2.3".parse().unwrap());
+        headers.insert(AGENT_NAME_HEADER, "My Agent".parse().unwrap());
+        headers.insert(AGENT_VERSION_HEADER, "1.2.3".parse().unwrap());
         headers.insert("user-agent", "curl/8".parse().unwrap());
 
         let agent = detect_agent(&headers).unwrap();
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn reads_provider_override() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-pandu-provider", "deepseek".parse().unwrap());
+        headers.insert(PROVIDER_HEADER, "deepseek".parse().unwrap());
         assert_eq!(provider_override(&headers).as_deref(), Some("deepseek"));
     }
 }

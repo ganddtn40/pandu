@@ -627,7 +627,7 @@ struct AuditHashFields {
 /// or embedding separators cannot produce the same digest.
 fn audit_entry_hash(prev_hash: Option<&str>, entry: &AuditHashFields) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"pandu-remote-audit-v1");
+    hasher.update(pandu_core::brand::REMOTE_AUDIT_HASH_DOMAIN.as_bytes());
     hash_optional_field(&mut hasher, prev_hash);
     hash_optional_field(&mut hasher, Some(entry.id.as_str()));
     hash_optional_field(&mut hasher, Some(entry.at.as_str()));
@@ -3667,7 +3667,7 @@ mod tests {
     #[test]
     fn refuses_to_open_a_legacy_database() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("pandu.db");
+        let path = directory.path().join(pandu_core::brand::DATABASE_FILE);
         let connection = Connection::open(&path).unwrap();
         connection
             .execute_batch(
@@ -3772,7 +3772,7 @@ mod tests {
     #[test]
     fn legacy_audit_rows_are_sealed_once_on_open() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("pandu.db");
+        let path = directory.path().join(pandu_core::brand::DATABASE_FILE);
         let first_id = {
             let store = Store::open(&path).unwrap();
             let first = audit_entry(&store, "remote.enabled", "{}");

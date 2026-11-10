@@ -66,6 +66,23 @@ pub const LOGO_ARIA_LABEL: &str = env!("PANDU_BRAND_LOGO_ARIA_LABEL");
 /// Internal API key sentinel used for the local proxy.
 pub const PROXY_KEY_SENTINEL: &str = concat!(env!("PANDU_BRAND_SLUG"), "-proxy");
 
+/// Actor recorded on audit rows written by the daemon rather than a person.
+pub const AUDIT_ACTOR: &str = SLUG;
+/// File name used when exporting the remote audit log.
+pub const REMOTE_AUDIT_FILE: &str = concat!(env!("PANDU_BRAND_SLUG"), "-remote-audit.json");
+/// Domain separator for the remote audit hash chain.
+pub const REMOTE_AUDIT_HASH_DOMAIN: &str = concat!(env!("PANDU_BRAND_SLUG"), "-remote-audit-v1");
+/// Prefix for the short-lived WebSocket ticket subprotocol.
+pub const WS_PROTOCOL_PREFIX: &str = concat!(env!("PANDU_BRAND_SLUG"), ".");
+/// Local hostname advertised by LAN remote access.
+pub const LOCAL_HOSTNAME: &str = concat!(env!("PANDU_BRAND_SLUG"), ".local");
+/// Git author and committer name for snapshot commits.
+pub const GIT_AUTHOR_NAME: &str = PRODUCT_NAME;
+/// Git author and committer email for snapshot commits.
+pub const GIT_AUTHOR_EMAIL: &str = concat!(env!("PANDU_BRAND_SLUG"), "@localhost");
+/// Prefix for snapshot commit subjects, including the trailing colon.
+pub const SNAPSHOT_COMMIT_PREFIX: &str = concat!(env!("PANDU_BRAND_SLUG"), ":");
+
 /// Prefix for every header the product owns, including the trailing dash.
 pub const HEADER_PREFIX: &str = concat!("x-", env!("PANDU_BRAND_SLUG"), "-");
 /// CSRF header shared with the UI.
@@ -144,6 +161,14 @@ mod tests {
         assert_eq!(DATABASE_FILE, format!("{SLUG}.db"));
         assert_eq!(THEME_SCHEMA, format!("{SLUG}.theme"));
         assert_eq!(STORAGE_PREFIX, format!("{SLUG}."));
+        assert_eq!(AUDIT_ACTOR, SLUG);
+        assert_eq!(REMOTE_AUDIT_FILE, format!("{SLUG}-remote-audit.json"));
+        assert_eq!(REMOTE_AUDIT_HASH_DOMAIN, format!("{SLUG}-remote-audit-v1"));
+        assert_eq!(WS_PROTOCOL_PREFIX, format!("{SLUG}."));
+        assert_eq!(LOCAL_HOSTNAME, format!("{SLUG}.local"));
+        assert_eq!(GIT_AUTHOR_NAME, PRODUCT_NAME);
+        assert_eq!(GIT_AUTHOR_EMAIL, format!("{SLUG}@localhost"));
+        assert_eq!(SNAPSHOT_COMMIT_PREFIX, format!("{SLUG}:"));
         assert_eq!(WINDOW_TITLE, PRODUCT_NAME);
         assert_eq!(NOTIFICATION_TITLE, PRODUCT_NAME);
         assert_eq!(LOGO_ARIA_LABEL, PRODUCT_NAME);
