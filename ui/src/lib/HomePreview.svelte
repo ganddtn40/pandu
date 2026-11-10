@@ -377,7 +377,7 @@
                 </span>
                 <h2>{live.title}</h2>
                 <p class="tile__body">
-                  {live.workspacePath || t('common.local')} · {live.model || t('common.unknown')}
+                  {live.workspacePath || t('common.local')}{#if live.model} · {live.model}{/if}
                 </p>
                 <div class="live-steps">
                   {#each liveEvents as event}

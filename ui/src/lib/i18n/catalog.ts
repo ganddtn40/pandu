@@ -252,6 +252,7 @@ const en = {
   'model.deprecated': 'Deprecated',
   'model.overrideClears': 'Clears when the flight ends.',
   'model.priceUnknown': 'Price unknown',
+  'model.notRecorded': 'Not recorded',
   'settings.kicker': 'Settings',
   'settings.title': 'Make it yours',
   'settings.lede': 'Appearance, daemon status, and the agents Cockpit can see. Everything is stored on this device.',

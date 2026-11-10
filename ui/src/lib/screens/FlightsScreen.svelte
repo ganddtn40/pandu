@@ -858,7 +858,7 @@
                 <div>
                   <p class="kicker">{t('model.title')}</p>
                   <h3>
-                    {currentModel || t('common.unknown')}
+                    {currentModel || t('model.notRecorded')}
                     {#if modelState?.override}
                       <span class="status-pill status-pill--warn" data-model-modified>
                         {t('model.modifiedBy')}
@@ -877,7 +877,7 @@
                 <div class="model-card__facts">
                   <div>
                     <span>{t('model.current')}</span>
-                    <strong>{currentModel || t('common.unknown')}</strong>
+                    <strong>{currentModel || t('model.notRecorded')}</strong>
                     {#if currentPricing?.contextWindow}
                       <small>
                         {t('model.contextWindow', {
@@ -902,7 +902,7 @@
                     <div class="model-card__change" data-model-original>
                       <span>{t('model.original')}</span>
                       <strong>
-                        {modelState.override.originalModel ?? modelState.model ?? t('common.unknown')}
+                        {modelState.override.originalModel ?? modelState.model ?? t('model.notRecorded')}
                         {#if modelState.override.originalEffort}
                           · {modelState.override.originalEffort}
                         {/if}

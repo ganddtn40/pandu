@@ -1608,7 +1608,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             source: SessionSource::Demo,
             capture_mode: CaptureMode::Proxy,
             protocol: Some(ProviderProtocol::Gemini),
-            provider: Some("gemini".to_string()),
+            provider: Some("google".to_string()),
             model: Some("gemini-2.5-pro".to_string()),
             agent: Some(gemini_agent),
             workspace_path: Some("~/projects/cockpit-site".to_string()),
@@ -1625,7 +1625,7 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
         .begin_step(BeginStep {
             session_id: third.id.clone(),
             kind: StepKind::Model,
-            provider: Some("gemini".to_string()),
+            provider: Some("google".to_string()),
             model: Some("gemini-2.5-pro".to_string()),
             request: demo_request(
                 ProviderProtocol::Gemini,

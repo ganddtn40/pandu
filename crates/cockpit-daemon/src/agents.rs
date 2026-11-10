@@ -854,6 +854,8 @@ impl AgentControl {
             capture_mode: CaptureMode::Pty,
             source_label: Some("Live PTY session".to_string()),
             status: SessionStatus::Active,
+            provider: Some("anthropic".to_string()),
+            model: Some("claude-sonnet-5-5".to_string()),
             agent: Some(AgentInfo {
                 name: Some("Claude Code".to_string()),
                 version: Some("2.1.0".to_string()),

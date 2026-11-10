@@ -1569,6 +1569,38 @@ async fn api_seeds_demo_flights_and_serves_settings() {
     let list = sessions["sessions"].as_array().unwrap();
     assert_eq!(list.len(), 4);
 
+    // Every demo flight names the vendor that actually serves its model, so
+    // Home and Flights never have to fall back to an "Unknown" label.
+    for session in list {
+        let title = session["title"].as_str().expect("demo flight title");
+        let agent = session["agent"]["name"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{title} has no agent"));
+        let provider = session["provider"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{title} has no provider"));
+        let model = session["model"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{title} has no model"));
+        let expected = match agent {
+            "Codex CLI" => "openai",
+            "Claude Code" => "anthropic",
+            "Gemini CLI" => "google",
+            other => panic!("{title} uses an unexpected agent: {other}"),
+        };
+        assert_eq!(provider, expected, "{title} must use its agent's vendor");
+        let prefix = match provider {
+            "openai" => "gpt-",
+            "anthropic" => "claude-",
+            "google" => "gemini-",
+            other => panic!("{title} uses an unexpected provider: {other}"),
+        };
+        assert!(
+            model.starts_with(prefix),
+            "{title} pairs {agent} with {provider}/{model}"
+        );
+    }
+
     let agent_events: Value = client
         .get(format!(
             "http://{}/api/agent-events?status=open",
