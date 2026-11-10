@@ -197,6 +197,11 @@ const en = {
   'model.effort': 'Effort',
   'model.effortDefault': 'Default ({effort})',
   'model.effortNone': 'Not supported',
+  'model.effortDynamic': 'Dynamic',
+  'model.effortOff': 'Off',
+  'model.effortBudget': '{tokens} tokens',
+  'model.chooseBudget': 'Thinking budget',
+  'model.budgetRange': 'Range {min}–{max} tokens',
   'model.override': 'Override model',
   'model.overrideTitle': 'Override this flight',
   'model.overrideBody':

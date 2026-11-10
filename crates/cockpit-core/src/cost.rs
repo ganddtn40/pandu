@@ -11,6 +11,11 @@ use crate::usage::TokenUsage;
 /// spells this differently. `parameter` is the OpenAI-compatible form,
 /// `anthropic_parameter` the Messages API form, and `responses_parameter` the
 /// OpenAI Responses API form.
+///
+/// A row declares either discrete `levels` or a numeric `budget`. The two are
+/// mutually exclusive: Gemini 2.5 uses `thinkingBudget`, while Gemini 3 and 4
+/// use `thinkingLevel`. Keeping them apart prevents a cross-generation switch
+/// from sending both fields in one request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffortControl {
@@ -19,9 +24,68 @@ pub struct EffortControl {
     pub anthropic_parameter: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub responses_parameter: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub levels: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetControl>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+}
+
+/// Numeric thinking-token control used by the Gemini 2.5 generation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetControl {
+    pub min: u64,
+    pub max: u64,
+    /// Whether `0` disables thinking.
+    #[serde(default)]
+    pub can_disable: bool,
+    /// Whether `-1` (dynamic thinking) is accepted.
+    #[serde(default)]
+    pub dynamic: bool,
+    #[serde(default = "default_budget_step")]
+    pub step: u64,
+}
+
+fn default_budget_step() -> u64 {
+    1024
+}
+
+impl BudgetControl {
+    /// Normalize a user-supplied budget to its canonical form.
+    ///
+    /// `dynamic` and `-1` both become `dynamic`; `off` and `none` both become
+    /// `0` when the model can disable thinking. Everything else must parse as
+    /// an integer inside the verified range.
+    pub fn normalize(&self, value: &str) -> Option<String> {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            return None;
+        }
+        match value.as_str() {
+            "dynamic" | "-1" if self.dynamic => return Some("dynamic".to_string()),
+            "off" | "none" if self.can_disable => return Some("0".to_string()),
+            _ => {}
+        }
+        let parsed = value.parse::<u64>().ok()?;
+        if parsed == 0 {
+            return self.can_disable.then(|| "0".to_string());
+        }
+        (parsed >= self.min && parsed <= self.max).then(|| parsed.to_string())
+    }
+
+    /// Human-readable allowed values, used in validation messages.
+    pub fn describe(&self) -> String {
+        let mut values = vec![format!("{}–{} tokens", self.min, self.max)];
+        if self.dynamic {
+            values.push("dynamic".to_string());
+        }
+        if self.can_disable {
+            values.push("off".to_string());
+        }
+        values.join(", ")
+    }
 }
 
 impl EffortControl {
@@ -40,8 +104,24 @@ impl EffortControl {
         }
     }
 
+    pub fn is_budget(&self) -> bool {
+        self.budget.is_some()
+    }
+
+    /// Normalize one effort value for this control, or `None` if unsupported.
+    pub fn normalize(&self, value: &str) -> Option<String> {
+        let value = value.trim().to_ascii_lowercase();
+        if let Some(budget) = &self.budget {
+            return budget.normalize(&value);
+        }
+        self.levels
+            .iter()
+            .find(|allowed| allowed.eq_ignore_ascii_case(&value))
+            .cloned()
+    }
+
     pub fn supports(&self, level: &str) -> bool {
-        self.levels.iter().any(|allowed| allowed == level)
+        self.normalize(level).is_some()
     }
 }
 
@@ -493,6 +573,7 @@ mod tests {
             anthropic_parameter: Some("output_config.effort".into()),
             responses_parameter: Some("reasoning.effort".into()),
             levels: vec!["low".into(), "high".into()],
+            budget: None,
             default: Some("high".into()),
         };
         assert_eq!(
@@ -509,6 +590,48 @@ mod tests {
         );
         assert!(effort.supports("high"));
         assert!(!effort.supports("medium"));
+    }
+
+    #[test]
+    fn budget_controls_normalize_ranges_and_aliases() {
+        let budget = BudgetControl {
+            min: 128,
+            max: 32_768,
+            can_disable: false,
+            dynamic: true,
+            step: 1024,
+        };
+        assert_eq!(budget.normalize("8192"), Some("8192".to_string()));
+        assert_eq!(budget.normalize("dynamic"), Some("dynamic".to_string()));
+        assert_eq!(budget.normalize("-1"), Some("dynamic".to_string()));
+        assert_eq!(budget.normalize("128"), Some("128".to_string()));
+        assert_eq!(budget.normalize("32768"), Some("32768".to_string()));
+        assert_eq!(budget.normalize("0"), None);
+        assert_eq!(budget.normalize("127"), None);
+        assert_eq!(budget.normalize("32769"), None);
+        assert_eq!(budget.normalize("lots"), None);
+        assert!(!budget.describe().contains("off"));
+    }
+
+    #[test]
+    fn gemini_2_5_uses_a_budget_and_later_generations_use_levels() {
+        for row in BUILT_IN_PRICING.iter() {
+            let Some(effort) = &row.effort else {
+                continue;
+            };
+            if row.model.starts_with("gemini-2.5") {
+                assert!(effort.is_budget(), "{} must use thinkingBudget", row.model);
+                assert!(
+                    effort.parameter.ends_with("thinkingBudget"),
+                    "{} must not point at thinkingLevel",
+                    row.model
+                );
+                assert!(effort.levels.is_empty());
+            } else if row.model.starts_with("gemini-") {
+                assert!(!effort.is_budget(), "{} must use thinkingLevel", row.model);
+                assert!(effort.parameter.ends_with("thinkingLevel"));
+            }
+        }
     }
 
     #[test]

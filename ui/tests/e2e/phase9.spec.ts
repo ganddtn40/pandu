@@ -74,7 +74,15 @@ test.describe('model, effort, and context', () => {
     await expect(panel).toContainText('Estimated relative cost');
     await expect(panel.locator('[data-model-override-confirm]')).toBeEnabled();
 
+    // Gemini 2.5 exposes a numeric thinking budget, not thinking levels.
+    const budget = panel.locator('[data-model-budget]');
+    await expect(budget).toBeVisible();
+    await expect(budget).toContainText('Dynamic');
+    await expect(budget).toContainText('Range 128–32k tokens');
+
     await panel.locator('select').first().selectOption('gemini-3.8-flash');
+    await expect(panel.locator('[data-model-budget]')).toHaveCount(0);
+    await expect(panel.locator('select').nth(1)).toBeVisible();
     await expect(panel).toContainText('less than the current model');
     await shotOf(page, '.model-card', 'override-confirmation.png');
 

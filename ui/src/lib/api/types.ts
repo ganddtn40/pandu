@@ -412,11 +412,20 @@ export interface ApprovalDecision {
 
 // ----- Model & effort ------------------------------------------------------
 
+export interface BudgetControl {
+  min: number;
+  max: number;
+  canDisable: boolean;
+  dynamic: boolean;
+  step: number;
+}
+
 export interface EffortControl {
   parameter: string;
   anthropicParameter?: string;
   responsesParameter?: string;
-  levels: string[];
+  levels?: string[];
+  budget?: BudgetControl;
   default?: string;
 }
 

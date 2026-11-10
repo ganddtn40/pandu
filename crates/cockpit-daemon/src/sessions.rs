@@ -57,6 +57,14 @@ pub enum ModelOverrideError {
         effort: String,
         levels: Vec<String>,
     },
+    EffortOutOfRange {
+        model: String,
+        effort: String,
+        min: u64,
+        max: u64,
+        dynamic: bool,
+        can_disable: bool,
+    },
     EffortNotSupported {
         model: String,
     },
@@ -71,6 +79,7 @@ impl ModelOverrideError {
             Self::ModelNotFound { .. } => "model_not_found",
             Self::ProviderMismatch { .. } => "provider_mismatch",
             Self::EffortUnsupported { .. } => "effort_unsupported",
+            Self::EffortOutOfRange { .. } => "effort_out_of_range",
             Self::EffortNotSupported { .. } => "effort_not_supported",
             Self::Storage(_) => "storage_error",
         }
@@ -94,6 +103,26 @@ impl ModelOverrideError {
                 "`{model}` does not support effort `{effort}`. Allowed levels: {}.",
                 levels.join(", ")
             ),
+            Self::EffortOutOfRange {
+                model,
+                effort,
+                min,
+                max,
+                dynamic,
+                can_disable,
+            } => {
+                let mut allowed = vec![format!("{min}–{max} tokens")];
+                if *dynamic {
+                    allowed.push("dynamic".to_string());
+                }
+                if *can_disable {
+                    allowed.push("off".to_string());
+                }
+                format!(
+                    "`{model}` does not support thinking budget `{effort}`. Allowed values: {}.",
+                    allowed.join(", ")
+                )
+            }
             Self::EffortNotSupported { model } => {
                 format!("`{model}` does not expose a reasoning effort control.")
             }
@@ -344,27 +373,40 @@ impl SessionManager {
             });
         };
 
-        match (pricing.effort.as_ref(), effort) {
-            (Some(control), Some(level)) if !control.supports(level) => {
-                return Err(ModelOverrideError::EffortUnsupported {
-                    model: pricing.model.clone(),
-                    effort: level.to_string(),
-                    levels: control.levels.clone(),
-                });
-            }
+        let normalized_effort = match (pricing.effort.as_ref(), effort) {
+            (Some(control), Some(level)) => match control.normalize(level) {
+                Some(normalized) => Some(normalized),
+                None => {
+                    return Err(match &control.budget {
+                        Some(budget) => ModelOverrideError::EffortOutOfRange {
+                            model: pricing.model.clone(),
+                            effort: level.to_string(),
+                            min: budget.min,
+                            max: budget.max,
+                            dynamic: budget.dynamic,
+                            can_disable: budget.can_disable,
+                        },
+                        None => ModelOverrideError::EffortUnsupported {
+                            model: pricing.model.clone(),
+                            effort: level.to_string(),
+                            levels: control.levels.clone(),
+                        },
+                    });
+                }
+            },
             (None, Some(_)) => {
                 return Err(ModelOverrideError::EffortNotSupported {
                     model: pricing.model.clone(),
                 });
             }
-            _ => {}
-        }
+            (_, None) => None,
+        };
 
         Ok(ModelOverride {
             session_id: session_id.to_string(),
             provider,
             model: pricing.model.clone(),
-            effort: effort.map(str::to_string),
+            effort: normalized_effort,
             original_model: session.model.clone(),
             original_effort: None,
             set_at: now_iso(),

@@ -114,6 +114,24 @@
     selectedModels.find((row) => row.model === overrideModel) ?? null,
   );
   const overrideLevels = $derived(overridePricing?.effort?.levels ?? []);
+  const overrideBudget = $derived(overridePricing?.effort?.budget ?? null);
+  const overrideBudgetValue = $derived.by(() => {
+    const budget = overrideBudget;
+    if (!budget) return 0;
+    const parsed = Number(overrideEffort);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : budget.min;
+  });
+  const overrideBudgetPresets = $derived.by(() => {
+    const budget = overrideBudget;
+    if (!budget) return [];
+    const span = budget.max - budget.min;
+    const step = Math.max(1, budget.step);
+    return [0.25, 0.5, 0.75, 1].map((fraction) => {
+      const raw = budget.min + Math.round((span * fraction) / step) * step;
+      const value = Math.min(budget.max, Math.max(budget.min, raw));
+      return { value: String(value), label: formatTokens(value) };
+    });
+  });
   const canOverride = $derived(
     selectedSession?.captureMode === 'proxy' && modelState?.status === 'active',
   );
@@ -377,6 +395,18 @@
     void previewOverride();
   }
 
+  function onBudgetPreset(value: string): void {
+    overrideEffort = value;
+    void previewOverride();
+  }
+
+  function onBudgetSlider(event: Event): void {
+    const value = Number((event.currentTarget as HTMLInputElement).value);
+    if (!Number.isFinite(value)) return;
+    overrideEffort = String(value);
+    void previewOverride();
+  }
+
   async function applyOverride(): Promise<void> {
     if (!selectedId || !overridePreview || overrideBusy) return;
     overrideBusy = true;
@@ -422,6 +452,11 @@
 
   function effortLabel(row: ModelPricingRow | null, effort: string): string {
     if (!row?.effort) return t('model.effortNone');
+    if (effort === 'dynamic') return t('model.effortDynamic');
+    if (effort === '0') return t('model.effortOff');
+    if (effort && row.effort.budget) {
+      return t('model.effortBudget', { tokens: formatTokens(Number(effort)) });
+    }
     if (effort) return effort;
     return row.effort.default
       ? t('model.effortDefault', { effort: row.effort.default })
@@ -918,6 +953,59 @@
                             {/each}
                           </select>
                         </label>
+                      {:else if overrideBudget}
+                        <div class="model-field model-field--wide">
+                          <span>{t('model.chooseBudget')}</span>
+                          <div class="budget-control" data-model-budget>
+                            <div class="budget-control__presets">
+                              {#if overrideBudget.dynamic}
+                                <button
+                                  type="button"
+                                  class:is-active={overrideEffort === 'dynamic'}
+                                  onclick={() => onBudgetPreset('dynamic')}
+                                >
+                                  {t('model.effortDynamic')}
+                                </button>
+                              {/if}
+                              {#if overrideBudget.canDisable}
+                                <button
+                                  type="button"
+                                  class:is-active={overrideEffort === '0'}
+                                  onclick={() => onBudgetPreset('0')}
+                                >
+                                  {t('model.effortOff')}
+                                </button>
+                              {/if}
+                              {#each overrideBudgetPresets as preset (preset.value)}
+                                <button
+                                  type="button"
+                                  class:is-active={overrideEffort === preset.value}
+                                  onclick={() => onBudgetPreset(preset.value)}
+                                >
+                                  {preset.label}
+                                </button>
+                              {/each}
+                            </div>
+                            <input
+                              type="range"
+                              min={overrideBudget.min}
+                              max={overrideBudget.max}
+                              step={overrideBudget.step}
+                              value={overrideBudgetValue}
+                              onchange={onBudgetSlider}
+                              aria-label={t('model.chooseBudget')}
+                            />
+                            <div class="budget-control__readout">
+                              <strong>{effortLabel(overridePricing, overrideEffort)}</strong>
+                              <small>
+                                {t('model.budgetRange', {
+                                  min: formatTokens(overrideBudget.min),
+                                  max: formatTokens(overrideBudget.max),
+                                })}
+                              </small>
+                            </div>
+                          </div>
+                        </div>
                       {/if}
                     </div>
 

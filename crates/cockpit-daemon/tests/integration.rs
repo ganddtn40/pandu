@@ -833,6 +833,131 @@ async fn routes_gemini_paths_and_replaces_the_google_key() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn gemini_effort_overrides_translate_between_budget_and_levels() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let mut config = config(home.path(), mock.addr);
+    config.gemini.api_key = Some("real-google-key".to_string());
+    let daemon = cockpit_daemon::spawn(config).await.unwrap();
+    let client = reqwest::Client::new();
+
+    let first = client
+        .post(format!(
+            "http://{}/v1beta/models/gemini-3.8-flash:generateContent",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "contents": [{ "role": "user", "parts": [{ "text": "first" }] }],
+            "generationConfig": { "thinkingConfig": { "thinkingLevel": "low" } }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+
+    // Gemini 3.8 -> Gemini 2.5: the level is replaced by a numeric budget.
+    let applied = client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gemini-2.5-pro", "effort": "8192" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(applied.status(), StatusCode::OK);
+    let applied: Value = applied.json().await.unwrap();
+    assert_eq!(applied["override"]["effort"], "8192");
+
+    let second = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1beta/models/gemini-3.8-flash:generateContent",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "contents": [{ "role": "user", "parts": [{ "text": "second" }] }],
+            "generationConfig": { "thinkingConfig": { "thinkingLevel": "low" } }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let _ = second.bytes().await.unwrap();
+
+    let captured = mock.last();
+    assert_eq!(
+        captured.path,
+        "/v1beta/models/gemini-2.5-pro:generateContent"
+    );
+    let forwarded: Value = serde_json::from_str(&captured.body).unwrap();
+    assert_eq!(
+        forwarded["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+        8192
+    );
+    assert!(
+        forwarded["generationConfig"]["thinkingConfig"]
+            .get("thinkingLevel")
+            .is_none()
+    );
+
+    // Gemini 2.5 -> Gemini 3.8: the budget is replaced by a level, and the two
+    // fields never coexist.
+    let applied = client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gemini-3.8-flash", "effort": "high" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(applied.status(), StatusCode::OK);
+
+    let third = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1beta/models/gemini-2.5-pro:generateContent",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "contents": [{ "role": "user", "parts": [{ "text": "third" }] }],
+            "generationConfig": { "thinkingConfig": { "thinkingBudget": 4096 } }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(third.status(), StatusCode::OK);
+    let _ = third.bytes().await.unwrap();
+
+    let captured = mock.last();
+    assert_eq!(
+        captured.path,
+        "/v1beta/models/gemini-3.8-flash:generateContent"
+    );
+    let forwarded: Value = serde_json::from_str(&captured.body).unwrap();
+    assert_eq!(
+        forwarded["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+        "high"
+    );
+    assert!(
+        forwarded["generationConfig"]["thinkingConfig"]
+            .get("thinkingBudget")
+            .is_none()
+    );
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_lists_adapters() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();

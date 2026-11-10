@@ -3480,6 +3480,71 @@ pre {
   font-size: max(var(--text-min), calc(12px * var(--font-scale)));
 }
 
+.model-field--wide {
+  grid-column: 1 / -1;
+}
+
+.budget-control {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+}
+
+.budget-control__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.budget-control__presets button {
+  min-height: 28px;
+  padding: 3px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--inset-bg);
+  color: var(--text-soft);
+  font: inherit;
+  font-size: max(var(--text-min), calc(11px * var(--font-scale)));
+  cursor: pointer;
+}
+
+.budget-control__presets button:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--hairline));
+  color: var(--text);
+}
+
+.budget-control__presets button.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
+
+.budget-control input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.budget-control__readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: max(var(--text-min), calc(11.5px * var(--font-scale)));
+}
+
+.budget-control__readout strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.budget-control__readout small {
+  color: var(--text-faint);
+}
+
 .model-override__cost {
   display: flex;
   align-items: flex-start;

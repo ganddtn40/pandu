@@ -59,14 +59,20 @@ that generation as retired.
 | `gemini-4-argon` | 1,048,576 | 65,536 | $2.00 | $0.10 | $10.00 | `generationConfig.thinkingConfig.thinkingLevel`: low, medium, high | medium |
 | `gemini-3.8-flash` | 1,048,576 | 65,536 | $0.75 | $0.075 | $3.75 | same | medium |
 | `gemini-3.6-flash` | 1,048,576 | 65,536 | $0.75 | $0.075 | $3.75 | minimal, low, medium, high | medium |
-| `gemini-2.5-pro` (deprecated) | 1,048,576 | 65,536 | $1.25 | $0.125 | $10.00 | low, medium, high | medium |
+| `gemini-2.5-pro` (deprecated) | 1,048,576 | 65,536 | $1.25 | $0.125 | $10.00 | `generationConfig.thinkingConfig.thinkingBudget`: 128–32,768 tokens, dynamic (`-1`); cannot disable | dynamic |
 
-Source: `https://ai.google.dev/gemini-api/docs/pricing`. The `gemini-4-argon`
+Source: `https://ai.google.dev/gemini-api/docs/pricing` and
+`https://ai.google.dev/gemini-api/docs/thinking`. The `gemini-4-argon`
 standard rate is in effect through `2026-11-30` ($4 / $20 from `2026-12-01`).
 The two Flash rows are promotional through `2026-12-31` ($1.50 / $7.50 from
 `2027-01-01`). `gemini-2.5-pro` is deprecated; from `2026-12-01` requests route
 to Gemini 3.8 Flash and are billed at its rates. Cockpit keeps the recorded
 model id and flags the row as deprecated rather than rewriting history.
+
+Gemini 2.5 uses a numeric `thinkingBudget`; Gemini 3 and 4 use a string
+`thinkingLevel`. The two are mutually exclusive at the provider: sending both
+returns `400`. A row declares exactly one of `levels` or `budget`, and Cockpit
+never sends both fields in one request.
 
 For Gemini, the model is part of the URL path as well as the body. An override
 rewrites both.
@@ -131,7 +137,8 @@ original body, so replay and export always show what the agent actually sent.
 | OpenAI Chat Completions | `model` | `reasoning_effort` |
 | OpenAI Responses | `model` | `reasoning.effort` |
 | Anthropic Messages | `model` | `output_config.effort` |
-| Gemini | URL path model and body `model` | `generationConfig.thinkingConfig.thinkingLevel` |
+| Gemini (3.x and 4) | URL path model and body `model` | `generationConfig.thinkingConfig.thinkingLevel` |
+| Gemini 2.5 | URL path model and body `model` | `generationConfig.thinkingConfig.thinkingBudget` (number) |
 | DeepSeek (OpenAI format) | `model` | `reasoning_effort` |
 | DeepSeek (Anthropic format) | `model` | `output_config.effort` |
 
@@ -139,11 +146,13 @@ Before writing, Cockpit:
 
 1. Finds the target model in `models.json` for the same canonical provider.
    `google` and `gemini` are the same provider for this check.
-2. Validates the requested effort against that model's allowed levels.
-3. Removes every effort spelling Cockpit knows about from the body, then writes
-   only the field the target model and protocol expect. This prevents a switch
-   from leaving an incompatible `reasoning_effort` next to
-   `output_config.effort`.
+2. Validates the requested effort against that model's allowed levels, or
+   against its verified budget range, `dynamic`, and `off` support.
+3. Removes every effort spelling Cockpit knows about from the body, including
+   both `thinkingLevel` and `thinkingBudget`, then writes only the field the
+   target model and protocol expect. This prevents a switch from leaving an
+   incompatible `reasoning_effort` next to `output_config.effort`, or leaving
+   both Gemini thinking fields in one request.
 4. Leaves every other byte of the JSON semantics alone. Object key order may
    change because the body is parsed and serialized; values, arrays, and unknown
    fields are preserved.
@@ -155,7 +164,8 @@ step is flagged. Fail-open reasons include:
 
 - `model_not_found`: the target is not in the verified table.
 - `provider_mismatch`: the target belongs to another provider.
-- `effort_unsupported`: the target does not accept that effort level.
+- `effort_unsupported`: the target does not accept that effort level or budget.
+  The host API reports an out-of-range budget as `effort_out_of_range`.
 - `effort_not_supported`: an effort was supplied for a model with no effort
   control.
 - `body_not_json`, `body_not_object`, `model_not_in_request`,
@@ -237,10 +247,11 @@ percentage only.
    an effort level from a model name.
 2. Edit `models.json`. Keep the existing schema: `provider`, `model`,
    `displayName`, `aliases`, `contextWindow`, `maxOutput`, `effort`
-   (`parameter`, optional `anthropicParameter` and `responsesParameter`,
-   `levels`, `default`), `inputPerMtok`, `outputPerMtok`, optional
-   `cacheReadPerMtok` and `cacheWritePerMtok`, `currency`, `source`,
-   `verifiedOn`, optional `note`, and `deprecated`.
+   (`parameter`, optional `anthropicParameter` and `responsesParameter`, exactly
+   one of `levels` or `budget`, `default`), `inputPerMtok`, `outputPerMtok`,
+   optional `cacheReadPerMtok` and `cacheWritePerMtok`, `currency`, `source`,
+   `verifiedOn`, optional `note`, and `deprecated`. A budget control declares
+   `min`, `max`, `canDisable`, `dynamic`, and `step`.
 3. Store an unknown value as `null` (or omit the field), not as a plausible
    number or `0`. The UI renders a missing price as **Price unknown**. Only use
    `0` when the provider genuinely charges zero.

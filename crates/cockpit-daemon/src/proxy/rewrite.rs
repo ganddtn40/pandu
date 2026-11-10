@@ -7,7 +7,7 @@
 //! request is forwarded unchanged and the step is flagged as a fail-open.
 
 use bytes::Bytes;
-use cockpit_core::cost::find_builtin_model;
+use cockpit_core::cost::{EffortControl, find_builtin_model};
 use cockpit_core::provider::ProviderProtocol;
 use serde_json::{Map, Value, json};
 
@@ -15,13 +15,17 @@ use crate::sessions::ModelOverride;
 
 /// Every effort spelling Cockpit knows about. Fields that do not apply to the
 /// target model are removed so a switch cannot leave an incompatible parameter
-/// behind.
+/// behind. Gemini 2.5 uses `thinkingBudget` while Gemini 3 and 4 use
+/// `thinkingLevel`; both paths are listed so a cross-generation switch always
+/// clears the other generation's field.
 const EFFORT_PATHS: &[&str] = &[
     "reasoning_effort",
     "reasoning.effort",
     "output_config.effort",
     "generationConfig.thinkingConfig.thinkingLevel",
     "thinkingConfig.thinkingLevel",
+    "generationConfig.thinkingConfig.thinkingBudget",
+    "thinkingConfig.thinkingBudget",
 ];
 
 #[derive(Debug, Clone)]
@@ -113,26 +117,18 @@ fn apply(
     let parameter = control.map(|control| control.parameter_for(protocol, path));
     let original_effort = parameter
         .and_then(|parameter| get_path(object, parameter))
-        .and_then(Value::as_str)
-        .map(str::to_string)
+        .and_then(effort_from_value)
         .or_else(|| {
-            EFFORT_PATHS.iter().find_map(|candidate| {
-                get_path(object, candidate)
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
+            EFFORT_PATHS
+                .iter()
+                .find_map(|candidate| get_path(object, candidate).and_then(effort_from_value))
         });
 
     let target_effort = match (control, override_.effort.as_deref()) {
-        (Some(control), Some(level)) => {
-            if !control.supports(level) {
-                return Err("effort_unsupported");
-            }
-            Some(level.to_string())
-        }
+        (Some(control), Some(level)) => Some(control.normalize(level).ok_or("effort_unsupported")?),
         (Some(control), None) => original_effort
             .clone()
-            .filter(|level| control.supports(level)),
+            .and_then(|level| control.normalize(&level)),
         (None, Some(_)) => return Err("effort_not_supported"),
         (None, None) => None,
     };
@@ -144,7 +140,7 @@ fn apply(
         set_path(
             object,
             control.parameter_for(protocol, path),
-            Value::String(level.to_string()),
+            effort_value(control, level),
         );
     }
 
@@ -160,6 +156,35 @@ fn apply(
             "effort": { "from": original_effort, "to": target_effort },
         }),
     ))
+}
+
+fn effort_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.trim().to_ascii_lowercase()),
+        Value::Number(number) => {
+            if number.as_i64() == Some(-1) {
+                Some("dynamic".to_string())
+            } else {
+                Some(number.to_string())
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Serialize a normalized effort for the target control. Budget models take a
+/// JSON number; level models take a string.
+fn effort_value(control: &EffortControl, effort: &str) -> Value {
+    if control.is_budget() {
+        let numeric = if effort == "dynamic" {
+            -1
+        } else {
+            effort.parse::<i64>().unwrap_or_default()
+        };
+        Value::Number(numeric.into())
+    } else {
+        Value::String(effort.to_string())
+    }
 }
 
 fn model_from_path(path: &str) -> Option<&str> {
@@ -353,6 +378,126 @@ mod tests {
             "high"
         );
         assert_eq!(value["contents"][0]["parts"][0]["text"], "hi");
+    }
+
+    #[test]
+    fn rewrites_gemini_2_5_budget_to_a_level_model() {
+        let body = Bytes::from_static(
+            br#"{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingBudget":8192}}}"#,
+        );
+        let mut row = override_row("gemini-3.8-flash", Some("high"));
+        row.provider = "google".into();
+        let outcome = rewrite_request(
+            &body,
+            "/v1beta/models/gemini-2.5-pro:generateContent",
+            ProviderProtocol::Gemini,
+            "google",
+            Some(&row),
+        );
+        assert_eq!(
+            outcome.path,
+            "/v1beta/models/gemini-3.8-flash:generateContent"
+        );
+        let value: Value = serde_json::from_slice(&outcome.body).unwrap();
+        assert_eq!(
+            value["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "high"
+        );
+        assert!(
+            value["generationConfig"]["thinkingConfig"]
+                .get("thinkingBudget")
+                .is_none()
+        );
+        assert_eq!(outcome.info.unwrap()["effort"]["from"], "8192");
+    }
+
+    #[test]
+    fn rewrites_a_level_model_to_gemini_2_5_budget() {
+        let body = Bytes::from_static(
+            br#"{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}}"#,
+        );
+        let mut row = override_row("gemini-2.5-pro", Some("8192"));
+        row.provider = "google".into();
+        let outcome = rewrite_request(
+            &body,
+            "/v1beta/models/gemini-3.8-flash:streamGenerateContent",
+            ProviderProtocol::Gemini,
+            "google",
+            Some(&row),
+        );
+        assert_eq!(
+            outcome.path,
+            "/v1beta/models/gemini-2.5-pro:streamGenerateContent"
+        );
+        let value: Value = serde_json::from_slice(&outcome.body).unwrap();
+        assert_eq!(
+            value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            8192
+        );
+        assert!(
+            value["generationConfig"]["thinkingConfig"]
+                .get("thinkingLevel")
+                .is_none()
+        );
+        assert_eq!(outcome.info.unwrap()["effort"]["from"], "low");
+    }
+
+    #[test]
+    fn rewrites_openai_effort_to_gemini_dynamic_budget() {
+        let body = Bytes::from_static(
+            br#"{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"reasoning_effort":"high"}"#,
+        );
+        let mut row = override_row("gemini-2.5-pro", Some("dynamic"));
+        row.provider = "google".into();
+        let outcome = rewrite_request(
+            &body,
+            "/v1beta/models/gemini-3.8-flash:generateContent",
+            ProviderProtocol::Gemini,
+            "google",
+            Some(&row),
+        );
+        let value: Value = serde_json::from_slice(&outcome.body).unwrap();
+        assert_eq!(
+            value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            -1
+        );
+        assert!(value.get("reasoning_effort").is_none());
+        assert!(value.get("thinkingConfig").is_none());
+    }
+
+    #[test]
+    fn rewrites_gemini_to_anthropic_and_removes_thinking_config() {
+        let body = Bytes::from_static(
+            br#"{"model":"claude-sonnet-4","messages":[],"generationConfig":{"thinkingConfig":{"thinkingLevel":"high","thinkingBudget":4096}}}"#,
+        );
+        let mut row = override_row("claude-opus-5-5", Some("max"));
+        row.provider = "anthropic".into();
+        let outcome = rewrite_request(
+            &body,
+            "/v1/messages",
+            ProviderProtocol::Anthropic,
+            "anthropic",
+            Some(&row),
+        );
+        let value: Value = serde_json::from_slice(&outcome.body).unwrap();
+        assert_eq!(value["output_config"]["effort"], "max");
+        assert!(value.get("generationConfig").is_none());
+    }
+
+    #[test]
+    fn out_of_range_budget_fails_open() {
+        let body = Bytes::from_static(br#"{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}"#);
+        let mut row = override_row("gemini-2.5-pro", Some("999999"));
+        row.provider = "google".into();
+        let outcome = rewrite_request(
+            &body,
+            "/v1beta/models/gemini-2.5-pro:generateContent",
+            ProviderProtocol::Gemini,
+            "google",
+            Some(&row),
+        );
+        assert_eq!(outcome.body, body);
+        assert_eq!(outcome.info.unwrap()["reason"], "effort_unsupported");
     }
 
     #[test]
