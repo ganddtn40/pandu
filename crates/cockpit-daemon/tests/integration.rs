@@ -69,6 +69,10 @@ impl MockUpstream {
             .cloned()
             .expect("the mock received no request")
     }
+
+    fn count(&self) -> usize {
+        self.captured.lock().expect("mock capture lock").len()
+    }
 }
 
 impl Drop for MockUpstream {
@@ -89,15 +93,40 @@ async fn mock_handler(
     let body = String::from_utf8_lossy(&bytes).to_string();
     captured.lock().expect("mock capture lock").push(Captured {
         path: path.clone(),
-        headers,
+        headers: headers.clone(),
         body: body.clone(),
     });
+
+    // Fixtures are driven by request headers so a test can make the provider
+    // reject an overridden request or report no usage without changing paths.
+    if let Some(status) = headers.get("x-mock-reject") {
+        let status = status
+            .parse::<u16>()
+            .ok()
+            .and_then(|value| StatusCode::from_u16(value).ok())
+            .unwrap_or(StatusCode::BAD_REQUEST);
+        return Response::builder()
+            .status(status)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "error": {
+                        "message": "unsupported parameter: reasoning_effort",
+                        "type": "invalid_request_error",
+                        "param": "reasoning_effort"
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap();
+    }
 
     let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     let stream = parsed
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let zero_usage = headers.contains_key("x-mock-zero-usage");
 
     if path.ends_with("/chat/completions") && stream {
         return Response::builder()
@@ -107,6 +136,11 @@ async fn mock_handler(
             .unwrap();
     }
     if path.ends_with("/chat/completions") {
+        let usage = if zero_usage {
+            json!({ "prompt_tokens": 0, "completion_tokens": 0 })
+        } else {
+            json!({ "prompt_tokens": 12, "completion_tokens": 5 })
+        };
         return json_response(json!({
             "id": "chatcmpl-1",
             "object": "chat.completion",
@@ -116,7 +150,7 @@ async fn mock_handler(
                 "message": { "role": "assistant", "content": "Hello from the mock" },
                 "finish_reason": "stop"
             }],
-            "usage": { "prompt_tokens": 12, "completion_tokens": 5 }
+            "usage": usage
         }));
     }
     if path.ends_with("/messages") {
@@ -227,6 +261,103 @@ async fn wait_for_step(client: &reqwest::Client, daemon: &ServerHandle, session_
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+}
+
+/// Wait for the Nth step (1-based, oldest first) to leave the running state.
+async fn wait_for_step_number(
+    client: &reqwest::Client,
+    daemon: &ServerHandle,
+    session_id: &str,
+    number: usize,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let response = client
+            .get(format!(
+                "http://{}/api/sessions/{session_id}/steps",
+                daemon.addr
+            ))
+            .send()
+            .await
+            .expect("steps request");
+        let payload: Value = response.json().await.expect("steps JSON");
+        let steps = payload["steps"].as_array().cloned().unwrap_or_default();
+        if let Some(step) = steps.get(number.saturating_sub(1)) {
+            if step["status"] != "running" {
+                return step.clone();
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "step {number} did not finish in time: {payload}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// Insert a completed step carrying a provider-reported context meter. The
+/// context-window guard reads the latest meter, so this is the smallest way to
+/// model a flight that has already grown past a smaller model's window.
+fn seed_context(daemon: &ServerHandle, session_id: &str, tokens: u64) {
+    use cockpit_core::model::{CapturedRequest, StepKind, StepStatus};
+    use cockpit_core::provider::ProviderProtocol;
+    use cockpit_core::usage::TokenUsage;
+    use cockpit_daemon::store::{BeginStep, CompleteStep};
+
+    let request = CapturedRequest {
+        protocol: ProviderProtocol::Openai,
+        method: "POST".to_string(),
+        path: "/v1/chat/completions".to_string(),
+        model: Some("gpt-4.1".to_string()),
+        stream: false,
+        headers: BTreeMap::new(),
+        body: None,
+        system_prompt: None,
+        prompt_text: None,
+        redaction_count: 0,
+    };
+    let step = daemon
+        .state
+        .store
+        .begin_step(BeginStep {
+            session_id: session_id.to_string(),
+            kind: StepKind::Model,
+            provider: Some("openai".to_string()),
+            model: Some("gpt-4.1".to_string()),
+            request,
+        })
+        .expect("seed step");
+    daemon
+        .state
+        .store
+        .complete_step(
+            &step.id,
+            CompleteStep {
+                status: StepStatus::Completed,
+                response_status: 200,
+                response_headers: BTreeMap::new(),
+                response_text: None,
+                response_thinking: None,
+                finish_reason: None,
+                usage: TokenUsage::default(),
+                cost_usd: None,
+                cost_known: false,
+                model: None,
+                error: None,
+                ttft_ms: None,
+                latency_ms: 0,
+                metadata: Some(json!({
+                    "context": {
+                        "tokens": tokens,
+                        "window": 1_048_576,
+                        "percent": 0.48,
+                        "source": "provider"
+                    }
+                })),
+            },
+            0,
+        )
+        .expect("complete seed step");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -953,6 +1084,237 @@ async fn gemini_effort_overrides_translate_between_budget_and_levels() {
             .get("thinkingBudget")
             .is_none()
     );
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_4xx_reverts_the_override_and_never_retries() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let first = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "first" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+    let _ = wait_for_step(&client, &daemon, &session_id).await;
+
+    let applied = client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.5", "effort": "high" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(applied.status(), StatusCode::OK);
+    let applied: Value = applied.json().await.unwrap();
+    assert_eq!(applied["override"]["model"], "gpt-5.5");
+
+    let rejected = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1/chat/completions",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .header("x-mock-reject", "400")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "reject me" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let rejected_body: Value = rejected.json().await.unwrap();
+    assert_eq!(
+        rejected_body["error"]["message"],
+        "unsupported parameter: reasoning_effort"
+    );
+    assert_eq!(
+        mock.count(),
+        2,
+        "Cockpit must not retry a request the provider rejected"
+    );
+
+    // The rejected step stays in the history and explains what happened.
+    let step = wait_for_step_number(&client, &daemon, &session_id, 2).await;
+    assert_eq!(step["status"], "failed");
+    assert_eq!(step["response"]["status"], 400);
+    let info = &step["metadata"]["override"];
+    assert_eq!(info["applied"], true);
+    assert_eq!(info["providerRejected"], true);
+    assert_eq!(info["reverted"], true);
+    assert_eq!(info["revertReason"], "provider_rejected");
+    assert_eq!(info["providerStatus"], 400);
+    assert!(
+        info["providerError"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported parameter")
+    );
+
+    let model: Value = client
+        .get(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(model["override"], Value::Null);
+
+    // The next request goes out with the original model and no leftover
+    // effort field.
+    let third = client
+        .post(format!(
+            "http://{}/s/{session_id}/v1/chat/completions",
+            daemon.addr
+        ))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "after revert" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(third.status(), StatusCode::OK);
+    let _ = third.bytes().await.unwrap();
+    assert_eq!(mock.count(), 3);
+    let forwarded: Value = serde_json::from_str(&mock.last().body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-4.1");
+    assert!(forwarded.get("reasoning_effort").is_none());
+
+    let audit: Value = client
+        .get(format!("http://{}/api/remote/audit?limit=50", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let reverted: Vec<&Value> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["event"] == "model.override.reverted")
+        .collect();
+    assert_eq!(reverted.len(), 1);
+    assert_eq!(reverted[0]["detail"]["actor"], "cockpit");
+    assert_eq!(reverted[0]["detail"]["reason"], "provider_rejected");
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_override_that_exceeds_the_target_context_window_is_blocked() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let first = client
+        .post(format!("http://{}/v1/chat/completions", daemon.addr))
+        .header("content-type", "application/json")
+        .json(&json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "first" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let session_id = first.headers()["x-cockpit-session-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let _ = first.bytes().await.unwrap();
+    let _ = wait_for_step(&client, &daemon, &session_id).await;
+
+    // gpt-5.4-mini has a 400,000-token window; the flight has already used
+    // 500,000 tokens, so the switch would fail on the very next request.
+    seed_context(&daemon, &session_id, 500_000);
+
+    let preview = client
+        .get(format!(
+            "http://{}/api/sessions/{session_id}/model/preview?model=gpt-5.4-mini",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preview.status(), StatusCode::CONFLICT);
+    let preview: Value = preview.json().await.unwrap();
+    assert_eq!(preview["error"]["code"], "context_window_exceeded");
+
+    let applied = client
+        .put(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "model": "gpt-5.4-mini" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(applied.status(), StatusCode::CONFLICT);
+    let applied: Value = applied.json().await.unwrap();
+    assert_eq!(applied["error"]["code"], "context_window_exceeded");
+
+    let model: Value = client
+        .get(format!(
+            "http://{}/api/sessions/{session_id}/model",
+            daemon.addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(model["override"], Value::Null);
+    assert_eq!(
+        mock.count(),
+        1,
+        "a blocked override never reaches the provider"
+    );
+
+    let audit: Value = client
+        .get(format!("http://{}/api/remote/audit?limit=50", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let denied: Vec<&Value> = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| {
+            entry["event"] == "model.override.denied"
+                && entry["detail"]["reason"] == "context_window_exceeded"
+        })
+        .collect();
+    assert_eq!(denied.len(), 1, "the apply attempt is audited");
 
     daemon.shutdown().await.unwrap();
 }

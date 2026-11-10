@@ -539,15 +539,16 @@ general request editor.
   provider will reject.
 - **Only two fields.** The rewrite changes `model` and the provider-specific
   effort field (`reasoning_effort`, `reasoning.effort`, `output_config.effort`,
-  or `generationConfig.thinkingConfig.thinkingLevel`), plus the model segment in
-  a Gemini URL. Every known effort spelling is removed before the target field is
+  `generationConfig.thinkingConfig.thinkingLevel`, or
+  `generationConfig.thinkingConfig.thinkingBudget`), plus the model segment in a
+  Gemini URL. Every known effort spelling is removed before the target field is
   written, so an incompatible parameter cannot be left behind. The recorded
   request body is never modified.
 - **Audited.** `model.override.set`, `model.override.cleared`,
-  `model.override.denied`, `model.switch`, `model.switch.manual`, and
-  `model.switch.denied` are appended to the hash-chained audit log with the
-  session, provider, from/to model and effort, and mode. No prompt, request body,
-  or credential is recorded.
+  `model.override.reverted`, `model.override.denied`, `model.switch`,
+  `model.switch.manual`, and `model.switch.denied` are appended to the
+  hash-chained audit log with the session, provider, from/to model and effort,
+  and mode. No prompt, request body, or credential is recorded.
 - **PTY switch needs a verified adapter.** `POST /api/sessions/{id}/model/switch`
   types an adapter-declared command only when the adapter has
   `[model_switch] verified = true` and the template contains `{model}`. A
@@ -558,7 +559,9 @@ Evidence: `crates/cockpit-daemon/tests/integration.rs`:
 `host_override_rewrites_only_the_forwarded_request`,
 `override_rewrites_streaming_requests_and_passes_sse_bytes_through`,
 `with_the_override_off_the_forwarded_bytes_are_identical`,
-`invalid_overrides_are_rejected_and_audited`, and
+`invalid_overrides_are_rejected_and_audited`,
+`a_provider_4xx_reverts_the_override_and_never_retries`,
+`an_override_that_exceeds_the_target_context_window_is_blocked`, and
 `pty_model_switch_needs_a_verified_adapter_command`.
 `crates/cockpit-daemon/tests/remote.rs::every_remote_endpoint_enforces_its_scope`.
 Unit tests: `proxy::rewrite::tests::*`, `cost::tests::*`,

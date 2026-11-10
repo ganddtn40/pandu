@@ -68,6 +68,11 @@ pub enum ModelOverrideError {
     EffortNotSupported {
         model: String,
     },
+    ContextWindowExceeded {
+        model: String,
+        tokens: u64,
+        window: u64,
+    },
     Storage(String),
 }
 
@@ -81,6 +86,7 @@ impl ModelOverrideError {
             Self::EffortUnsupported { .. } => "effort_unsupported",
             Self::EffortOutOfRange { .. } => "effort_out_of_range",
             Self::EffortNotSupported { .. } => "effort_not_supported",
+            Self::ContextWindowExceeded { .. } => "context_window_exceeded",
             Self::Storage(_) => "storage_error",
         }
     }
@@ -126,6 +132,13 @@ impl ModelOverrideError {
             Self::EffortNotSupported { model } => {
                 format!("`{model}` does not expose a reasoning effort control.")
             }
+            Self::ContextWindowExceeded {
+                model,
+                tokens,
+                window,
+            } => format!(
+                "This flight's latest request used {tokens} tokens, which exceeds `{model}`'s {window}-token context window. Compact the flight or start a new one before switching."
+            ),
             Self::Storage(error) => format!("Cockpit could not store the override: {error}"),
         }
     }
@@ -373,6 +386,24 @@ impl SessionManager {
             });
         };
 
+        // A model switch cannot shrink the prompt. Block before installing an
+        // override that the provider would reject on the very next request.
+        if let Some(window) = pricing.context_window {
+            if let Some(context) = self.store.latest_context(session_id)? {
+                let tokens = context
+                    .get("tokens")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                if tokens > window {
+                    return Err(ModelOverrideError::ContextWindowExceeded {
+                        model: pricing.model.clone(),
+                        tokens,
+                        window,
+                    });
+                }
+            }
+        }
+
         let normalized_effort = match (pricing.effort.as_ref(), effort) {
             (Some(control), Some(level)) => match control.normalize(level) {
                 Some(normalized) => Some(normalized),
@@ -415,10 +446,46 @@ impl SessionManager {
 
     /// Drop an override (host "turn off" or the end of the flight).
     pub fn clear_model_override(&self, session_id: &str) -> Option<ModelOverride> {
-        self.remove_model_override(session_id, "host")
+        self.remove_model_override(session_id, "host", "model.override.cleared", "host")
     }
 
-    fn remove_model_override(&self, session_id: &str, reason: &str) -> Option<ModelOverride> {
+    /// Drop an override after the provider rejected a request that used it.
+    ///
+    /// This is called once per rejected request. It never retries the request:
+    /// the provider response is forwarded as-is and the step records the
+    /// rejection. The next request therefore uses the agent's original model.
+    pub fn revert_model_override(
+        &self,
+        session_id: &str,
+        reason: &str,
+        provider_status: Option<u16>,
+    ) -> Option<ModelOverride> {
+        let removed =
+            self.remove_model_override(session_id, reason, "model.override.reverted", "cockpit");
+        if let Some(existing) = &removed {
+            self.bus.publish(
+                "model.override.reverted",
+                Some(session_id),
+                None,
+                json!({
+                    "model": existing.model,
+                    "effort": existing.effort,
+                    "reason": reason,
+                    "providerStatus": provider_status,
+                    "actor": "cockpit",
+                }),
+            );
+        }
+        removed
+    }
+
+    fn remove_model_override(
+        &self,
+        session_id: &str,
+        reason: &str,
+        event: &str,
+        actor: &str,
+    ) -> Option<ModelOverride> {
         let removed = self
             .overrides
             .lock()
@@ -426,14 +493,14 @@ impl SessionManager {
             .remove(session_id);
         if let Some(existing) = &removed {
             self.audit_override(
-                "model.override.cleared",
+                event,
                 session_id,
                 json!({
                     "sessionId": session_id,
                     "model": existing.model,
                     "effort": existing.effort,
                     "reason": reason,
-                    "actor": "host",
+                    "actor": actor,
                 }),
             );
             self.bus.publish(
@@ -496,7 +563,7 @@ impl SessionManager {
     pub fn end_session(&self, id: &str, status: SessionStatus) -> Option<Session> {
         // A host override never outlives its flight, even if the session was
         // already closed by another path.
-        self.remove_model_override(id, "session_ended");
+        self.remove_model_override(id, "session_ended", "model.override.cleared", "host");
         let before = self.store.get_session(id).ok().flatten()?;
         if before.status != SessionStatus::Active {
             return Some(before);

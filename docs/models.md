@@ -157,7 +157,29 @@ Before writing, Cockpit:
    change because the body is parsed and serialized; values, arrays, and unknown
    fields are preserved.
 
-### 3.2 Fail-open
+### 3.2 Window and provider rejection safety
+
+- **Window preflight.** Before installing an override, Cockpit reads the flight's
+  latest context meter. If its token count is larger than the target model's
+  `contextWindow`, the switch is rejected with `context_window_exceeded` (HTTP
+  `409`). The preview applies the same check. A model switch cannot compact a
+  prompt, so installing it would only guarantee that the next request fails.
+- **One-shot auto-revert.** If the provider returns a 4xx for a request whose
+  override was applied, Cockpit reverts the override immediately, records
+  `model.override.reverted` (actor `cockpit`, reason `provider_rejected`, provider
+  status), and flags the step metadata with `providerRejected: true`,
+  `reverted: true`, `revertReason`, `providerStatus`, and a truncated
+  `providerError`. The provider response is forwarded unchanged. Cockpit never
+  retries the request in a loop; the next request uses the agent's original
+  model.
+- **Provider-bound artifacts.** Signatures, thinking blocks, cache keys, and some
+  tool-call references are issued for a specific provider and model. Cockpit
+  rewrites only the model and effort fields, so a mid-flight switch can leave an
+  artifact the target model rejects. That rejection is handled by the one-shot
+  revert above; the artifact is not rewritten or stripped. Start a new flight
+  when the provider requires fresh artifacts.
+
+### 3.3 Fail-open
 
 If a safe rewrite is impossible, the request is forwarded **unmodified** and the
 step is flagged. Fail-open reasons include:
@@ -176,7 +198,7 @@ the intended model, so the UI can show the step was not modified. Forwarding the
 agent's original request is always preferred to sending a request the provider
 will reject.
 
-### 3.3 Byte-identical passthrough
+### 3.4 Byte-identical passthrough
 
 With no override, the proxy forwards the original `Bytes` handle and the original
 path. It does not parse or re-serialize the body. The integration test

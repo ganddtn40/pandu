@@ -222,6 +222,8 @@ const en = {
   'model.confirming': 'Applying…',
   'model.applied': 'Model override applied.',
   'model.cleared': 'Model override cleared.',
+  'model.reverted':
+    'The provider rejected the override (HTTP {status}). Cockpit reverted this flight to its original model.',
   'model.failed': 'Cockpit could not apply that override.',
   'model.hostOnly': 'Model changes are host-only.',
   'model.manualTitle': 'Manual model switch',

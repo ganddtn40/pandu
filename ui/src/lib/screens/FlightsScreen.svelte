@@ -65,6 +65,7 @@
   let playing = $state(false);
   let replayIndex = $state(0);
   let liveBaseline = $state(0);
+  let revertedSeen = $state(0);
   let loadingDemo = $state(false);
   let loadToken = 0;
   let modelState = $state<SessionModelState | null>(null);
@@ -267,6 +268,31 @@
   $effect(() => {
     if (!selectedStepId || details[selectedStepId]) return;
     void loadStepDetail(selectedStepId);
+  });
+
+  // A provider can reject a rewritten request (for example when it no longer
+  // accepts a parameter for the target model). Cockpit reverts once and keeps
+  // the rejection on the step; surface it instead of leaving the card stale.
+  $effect(() => {
+    const id = selectedId;
+    if (!id) return;
+    const event = daemonState.liveEvents
+      .filter(
+        (entry) =>
+          entry.type === 'model.override.reverted' &&
+          entry.sessionId === id &&
+          entry.sequence > revertedSeen,
+      )
+      .at(-1);
+    if (!event) return;
+    revertedSeen = event.sequence;
+    const status = event.payload.providerStatus;
+    toast(
+      t('model.reverted', {
+        status: typeof status === 'number' ? String(status) : '4xx',
+      }),
+    );
+    void loadModelState(id);
   });
 
   $effect(() => {

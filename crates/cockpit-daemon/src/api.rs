@@ -505,6 +505,7 @@ fn model_override_error(error: ModelOverrideError) -> ApiError {
     let status = match error {
         ModelOverrideError::SessionNotFound => StatusCode::NOT_FOUND,
         ModelOverrideError::SessionEnded => StatusCode::CONFLICT,
+        ModelOverrideError::ContextWindowExceeded { .. } => StatusCode::CONFLICT,
         ModelOverrideError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,
     };

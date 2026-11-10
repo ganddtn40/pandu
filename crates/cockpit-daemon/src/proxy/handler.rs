@@ -10,6 +10,7 @@ use cockpit_core::sse::SseParser;
 use cockpit_core::text::{parse_json_body, truncate_text};
 use futures_util::StreamExt;
 use http::StatusCode;
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -259,10 +260,9 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
         &rewrite_provider,
         model_override.as_ref(),
     );
-    let override_info = rewrite.info;
+    let mut override_info = rewrite.info;
     let upstream_path = rewrite.path;
     let forward_body = rewrite.body;
-
     let mut upstream_url = format!(
         "{}{}",
         state.config.upstream_base(route.protocol),
@@ -313,6 +313,31 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
     };
 
     let upstream_status = upstream.status();
+
+    // A provider 4xx on a request that actually used the override means the
+    // target model rejected the rewritten request. Revert once, flag this
+    // step, and forward the provider response untouched. Cockpit never retries
+    // the request, so the next request uses the agent's original model.
+    if upstream_status.is_client_error() {
+        if let (Some(active), Some(info)) = (&model_override, override_info.as_mut()) {
+            if info
+                .get("applied")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                let reverted = state.sessions.revert_model_override(
+                    &active.session_id,
+                    "provider_rejected",
+                    Some(upstream_status.as_u16()),
+                );
+                info["providerRejected"] = json!(true);
+                info["reverted"] = json!(reverted.is_some());
+                info["revertReason"] = json!("provider_rejected");
+                info["providerStatus"] = json!(upstream_status.as_u16());
+            }
+        }
+    }
+
     let is_event_stream = upstream
         .headers()
         .get("content-type")
@@ -448,6 +473,15 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
     };
 
     let response_text = String::from_utf8_lossy(&response_body).to_string();
+    if let Some(info) = override_info.as_mut() {
+        if info
+            .get("providerRejected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            info["providerError"] = json!(truncate_text(&response_text, 2_000));
+        }
+    }
     let parsed = parse_json_body(&response_text);
     let collected = parsed
         .value
