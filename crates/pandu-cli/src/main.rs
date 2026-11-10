@@ -26,12 +26,7 @@ use tracing_subscriber::EnvFilter;
 mod pty;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "pandu",
-    version,
-    about = "Local flight recorder for coding agents",
-    long_about = "Pandu records what your coding agent sends to model providers, keeps the receipts in SQLite, and shows you every flight."
-)]
+#[command(name = brand::CLI_COMMAND, version, about = brand::TAGLINE)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
