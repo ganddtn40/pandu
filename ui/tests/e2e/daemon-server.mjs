@@ -23,7 +23,14 @@ if (!existsSync(binary)) {
   process.exit(1);
 }
 
-const home = path.join(root, 'ui', '.tmp', `e2e-${mode}-${port}`);
+// Screenshots are committed to the docs, so the disposable home must be an
+// absolute path outside the repository and without a developer's user name.
+// The Settings screen shows this path and opens it in the file manager.
+const neutralBase =
+  process.platform === 'win32'
+    ? path.join(process.env.ProgramData ?? 'C:\\ProgramData', 'Pandu')
+    : path.join('/var/tmp', 'pandu');
+const home = path.join(neutralBase, mode);
 rmSync(home, { recursive: true, force: true });
 mkdirSync(home, { recursive: true });
 
@@ -66,9 +73,10 @@ const child = spawn(binary, ['serve'], {
   cwd: root,
   env: {
     ...process.env,
-    // The update and migration fixtures use a repository-relative home so the
-    // committed screenshots do not contain a developer's absolute user path.
-    PANDU_HOME: isUpdate || isMigrate ? path.relative(root, home) : home,
+    // Every mode uses an absolute, neutral home. The daemon resolves paths
+    // before reporting them, so the Settings screen never shows a repository
+    // test path and the committed screenshots stay free of a developer name.
+    PANDU_HOME: home,
     PANDU_HOST: '127.0.0.1',
     PANDU_PORT: port,
     PANDU_LOG_WATCH: '0',

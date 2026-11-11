@@ -102,14 +102,24 @@ pub async fn health(State(state): State<AppState>) -> Response {
             "ok": database_ok,
             "version": pandu_core::VERSION,
             "database": if database_ok { "ok" } else { "unavailable" },
-            "databasePath": state.config.database_path.display().to_string(),
-            "dataDir": state.config.home.display().to_string(),
-            "backupsDir": backups_directory(&state).display().to_string(),
+            "databasePath": display_path(&state.config.database_path),
+            "dataDir": display_path(&state.config.home),
+            "backupsDir": display_path(&backups_directory(&state)),
             "uptimeMs": state.started_at.elapsed().as_millis() as u64,
             "demoMode": state.config.demo_mode,
         })),
     )
         .into_response()
+}
+
+/// Resolve a configured path against the working directory before showing it.
+/// A relative path is a test or shell convenience, not a real data location;
+/// the UI must never present one as if it were the user's folder.
+fn display_path(path: &std::path::Path) -> String {
+    std::path::absolute(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
 }
 
 fn backups_directory(state: &AppState) -> PathBuf {
@@ -1908,5 +1918,23 @@ fn demo_request(
         system_prompt: Some(system.to_string()),
         prompt_text: Some(prompt.to_string()),
         redaction_count: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_path;
+
+    #[test]
+    fn a_relative_data_path_is_resolved_before_it_reaches_the_ui() {
+        let relative = std::path::Path::new("ui")
+            .join(".tmp")
+            .join("e2e-update-4326");
+        let shown = display_path(&relative);
+        assert!(
+            std::path::Path::new(&shown).is_absolute(),
+            "health must report an absolute path, got {shown}"
+        );
+        assert!(!shown.starts_with("ui"), "the relative form leaked: {shown}");
     }
 }

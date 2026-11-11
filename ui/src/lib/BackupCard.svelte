@@ -5,6 +5,7 @@
   import { CLI_COMMAND, REPOSITORY } from './brand';
   import { copyText } from './clipboard';
   import { t } from './i18n/i18n.svelte';
+  import { displayFolderPath, parentFolderPath } from './paths';
   import { toast } from './toast-store.svelte';
 
   let copied = $state<string | null>(null);
@@ -13,9 +14,13 @@
   let lastBackup = $state<string | null>(null);
   let lastBytes = $state(0);
 
-  const database = $derived(daemonState.health?.databasePath ?? '—');
-  const dataDir = $derived(daemonState.health?.dataDir ?? database);
-  const backupsDir = $derived(daemonState.health?.backupsDir ?? '—');
+  const dataDir = $derived.by(() => {
+    const health = daemonState.health;
+    if (health?.dataDir) return displayFolderPath(health.dataDir);
+    if (health?.databasePath) return parentFolderPath(health.databasePath);
+    return '—';
+  });
+  const backupsDir = $derived(displayFolderPath(daemonState.health?.backupsDir));
   const backupCommand = `${CLI_COMMAND} backup`;
   const encryptedBackupCommand = `${CLI_COMMAND} backup --encrypt`;
   const restoreCommand = `${CLI_COMMAND} restore <archive>`;
@@ -95,7 +100,7 @@
     <div>
       <dt>{t('settings.backupDataFolder')}</dt>
       <dd class="backup-path">
-        <code>{dataDir}</code>
+        <code data-backup-data-path>{dataDir}</code>
         <button
           class="btn btn--small btn--ghost"
           type="button"
@@ -110,7 +115,7 @@
     <div>
       <dt>{t('settings.backupBackupFolder')}</dt>
       <dd class="backup-path">
-        <code>{backupsDir}</code>
+        <code data-backup-backups-path>{backupsDir}</code>
         <button
           class="btn btn--small btn--ghost"
           type="button"

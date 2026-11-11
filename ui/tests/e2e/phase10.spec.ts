@@ -211,6 +211,16 @@ test.describe.serial('phase 10: updates, migrations, and data safety', () => {
     await expect(backup).toContainText('turns remote access off');
     await expect(backup).toContainText('Data folder');
     await expect(backup).toContainText('Open folder');
+    // The daemon reports resolved, absolute folders. A repository-relative
+    // test path must never reach the Settings screen or the screenshots.
+    const dataPath = await backup.locator('[data-backup-data-path]').textContent();
+    const backupsPath = await backup.locator('[data-backup-backups-path]').textContent();
+    const absolute = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/;
+    expect(dataPath).toMatch(absolute);
+    expect(backupsPath).toMatch(absolute);
+    expect(dataPath).not.toContain('.tmp');
+    expect(backupsPath).not.toContain('.tmp');
+    expect(backupsPath).toContain('backups');
     await expect(backup.getByRole('button', { name: 'Create backup now' })).toBeEnabled();
     await shotOf(page, '[data-backup-card]', 'settings-backup.png');
   });

@@ -3,6 +3,7 @@
   import { daemonState } from './api/daemon.svelte';
   import { storageKey } from './brand';
   import { t } from './i18n/i18n.svelte';
+  import { fileName } from './paths';
 
   const DISMISSED_KEY = storageKey('migration.notice');
 
@@ -46,7 +47,7 @@
       <h2>{t('migration.title', { from: migration.fromVersion, to: migration.toVersion })}</h2>
       <p>
         {#if migration.backupPath}
-          {t('migration.backup', { path: migration.backupPath })}
+          {t('migration.backup', { path: fileName(migration.backupPath) })}
         {:else}
           {t('migration.noBackup')}
         {/if}
