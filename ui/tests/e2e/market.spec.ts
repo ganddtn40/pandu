@@ -8,11 +8,17 @@ mkdirSync(SHOTS, { recursive: true });
 const MARKET_DAEMON = 'http://127.0.0.1:4323';
 const OFFLINE_DAEMON = 'http://127.0.0.1:4324';
 const STATE_DAEMON = 'http://127.0.0.1:4325';
-const MARKET_HOME = path.resolve('.tmp', 'e2e-market-4323');
+// Match the disposable homes that `daemon-server.mjs` creates: an absolute,
+// neutral path outside the repository, never a developer's user name.
+const NEUTRAL_BASE =
+  process.platform === 'win32'
+    ? path.join(process.env.ProgramData ?? 'C:\\ProgramData', 'Pandu')
+    : path.join('/var/tmp', 'pandu');
+const MARKET_HOME = path.join(NEUTRAL_BASE, 'market');
 const USER_HOME = path.join(MARKET_HOME, 'user');
 const PROJECT_CONFIG = path.join(MARKET_HOME, 'workspace', '.mcp.json');
 const MANIFEST_DIR = path.join(MARKET_HOME, 'market', 'installed');
-const STATE_HOME = path.resolve('.tmp', 'e2e-market-state-4325');
+const STATE_HOME = path.join(NEUTRAL_BASE, 'market-state');
 const STATE_USER_HOME = path.join(STATE_HOME, 'user');
 const STATE_MANIFEST_DIR = path.join(STATE_HOME, 'market', 'installed');
 const SECRET_VALUE = 'e2e-secret-value';
