@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
+  "version": "0.2.0",
+  "description": "A local flight recorder and control tower for AI coding agents.",
+  "homepage": "https://github.com/ganddtn40/pandu",
+  "license": "MIT",
+  "notes": [
+    "Draft generated from brand.json by packaging/channel-manifests.mjs.",
+    "Replace the zero hash with the published SHA256SUMS value for pandu-cli-x86_64-pc-windows-msvc.zip."
+  ],
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/ganddtn40/pandu/releases/download/v0.2.0/pandu-cli-x86_64-pc-windows-msvc.zip",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "extract_dir": "pandu-cli-x86_64-pc-windows-msvc"
+    }
+  },
+  "bin": "pandu.exe",
+  "checkver": {
+    "github": "https://github.com/ganddtn40/pandu"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/ganddtn40/pandu/releases/download/v$version/pandu-cli-x86_64-pc-windows-msvc.zip"
+      }
+    }
+  }
+}

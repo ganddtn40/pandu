@@ -12,27 +12,40 @@
   "urlScheme": "pandu",
   "channels": {
     "npm": "pandu",
-    "crates": ["pandu-core", "pandu-daemon", "pandu-cli"],
+    "crates": [
+      "pandu-core",
+      "pandu-daemon",
+      "pandu-cli"
+    ],
     "winget": "ganddtn40.Pandu",
     "scoop": "pandu"
   },
   "artifacts": {
-    "windows-x86_64": {
+    "windows-cli-x86_64": {
       "binary": "pandu.exe",
-      "archive": "pandu-x86_64-pc-windows-msvc.zip",
-      "installer": "pandu-x86_64-pc-windows-msvc-setup.exe"
+      "archive": "pandu-cli-x86_64-pc-windows-msvc.zip"
     },
-    "macos-universal": {
-      "binary": "pandu",
-      "archive": "pandu-universal-apple-darwin.tar.gz"
+    "windows-app-x86_64": {
+      "binary": "Pandu.exe",
+      "nsis": "Pandu_0.2.0_x64-setup.exe",
+      "msi": "Pandu_0.2.0_x64_en-US.msi",
+      "portable": "pandu-0.2.0-x86_64-pc-windows-msvc-portable.zip"
     },
-    "linux-x86_64": {
+    "macos-cli-aarch64": {
       "binary": "pandu",
-      "archive": "pandu-x86_64-unknown-linux-gnu.tar.gz"
+      "archive": "pandu-cli-aarch64-apple-darwin.tar.xz"
+    },
+    "macos-cli-x86_64": {
+      "binary": "pandu",
+      "archive": "pandu-cli-x86_64-apple-darwin.tar.xz"
+    },
+    "linux-cli-x86_64": {
+      "binary": "pandu",
+      "archive": "pandu-cli-x86_64-unknown-linux-gnu.tar.xz"
     },
     "android": {
       "package": "io.github.ganddtn40.pandu",
-      "archive": "pandu-android.apk"
+      "archive": "pandu-0.2.0-android-universal-release-signed.apk"
     }
   }
 }

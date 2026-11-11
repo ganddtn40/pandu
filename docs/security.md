@@ -1,6 +1,6 @@
 # Pandu security model
 
-Status: Phase 9 (verified models, host-only overrides, context meter). Branch
+Status: Phase 11 (packaging, Windows shell, Android companion, PWA). Branch
 `rewrite`.
 This document describes what the current build protects, how, and what it does
 not protect yet. It is a working threat model, not a certification.
@@ -781,12 +781,15 @@ listed so a reviewer can decide whether a later phase must close them.
    and project names are still visible. The optional ntfy ping is generic, but
    public ntfy.sh is a third party that sees the random topic and timing. Use a
    self-hosted ntfy server if that metadata matters.
-8. **No Android or push notifications.** The companion app is Phase 11. There is
-   no FCM/APNs path, no cloud relay, and no telemetry. The update check is one
-   HTTPS `GET` to the GitHub Releases API at most once every 24 hours; it sends
-   no token or machine identifier, can be disabled, and never installs without
-   an explicit user action. ntfy is a user-configured third-party notification
-   path, not a companion app.
+8. **Android notifications are local polling, not push.** The companion checks
+   the paired daemon with WorkManager at Android's 15-minute minimum while it is
+   backgrounded, and over the live WebSocket while it is open. There is no
+   FCM/APNs path, no cloud relay, and no telemetry. Notification text is kept
+   minimal, but the OS decides where it appears, including the lock screen.
+   ntfy remains an optional user-configured third-party path. The update check
+   is one HTTPS `GET` to the GitHub Releases API at most once every 24 hours; it
+   sends no token or machine identifier, can be disabled, and never installs
+   without an explicit user action.
 9. **Installed market entries are third-party code.** Pandu verifies the
    registry signature, the pinned commit, and the content hash, and it shows a
    preview before writing. It does not sandbox the skill or the MCP server. A

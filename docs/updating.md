@@ -3,8 +3,9 @@
 Pandu can tell you when a new version is available. It never installs an update
 without you asking, and it never downloads a build it cannot verify.
 
-This guide is for everyone. If you only use the desktop app, read the first two
-sections. If you use the command line, read the CLI section too.
+This guide is for everyone. If you only use the desktop app, read
+[The update card](#the-update-card) and [Desktop app](#desktop-app). If you use
+the command line, read the CLI section too.
 
 ## What Pandu checks
 
@@ -114,23 +115,40 @@ falls back to the test key used by debug builds and fixtures.
 
 ## Android
 
-Pandu does not install APKs silently. When the Android app ships, it will:
+The Android companion does not update itself. Android has no silent self-update
+for apps installed outside a store, and Pandu does not request the
+`REQUEST_INSTALL_PACKAGES` permission.
 
-1. Download the APK over HTTPS.
-2. Check its SHA-256 against the signed release manifest.
-3. Check the APK signer certificate.
-4. Hand the verified file to the Android system installer.
+To update:
 
-You confirm the install in the system dialog. If you prefer a store-like
-updater, [Obtainium](https://github.com/ImranR98/Obtainium) can follow the
-GitHub releases for this repository and perform its own verification.
+1. Download the newer signed APK from the same GitHub release page.
+2. Check its SHA-256 against `SHA256SUMS`, and optionally its signer with
+   `apksigner verify --print-certs`.
+3. Open the APK and confirm the system install dialog. Android keeps the app
+   data and the Keystore token when the signing key is unchanged.
+
+If Android refuses the update, the signing key changed. Uninstall the old app
+and pair again. If you prefer a store-like updater,
+[Obtainium](https://github.com/ImranR98/Obtainium) can follow the GitHub
+releases and perform its own verification.
 
 ## Desktop app
 
-The desktop shell is not part of this build yet. When it ships, it will use the
-same signed manifest, the same production updater key, and the same rule: show
-the update, ask first, never install silently. It will not have a second trust
-root.
+The Windows desktop app uses the same update check and the same production
+updater key as the CLI, and it shows the same update card. It does not bundle a
+self-updater, so **Update now** never replaces the executable:
+
+1. Open the release page from the update card, or download the newer installer
+   from the GitHub release.
+2. Verify `SHA256SUMS` as described in
+   [`install/en.md`](install/en.md#verify-the-download-first).
+3. Quit Pandu from the tray.
+4. Run the newer NSIS installer over the old install, or extract the newer
+   portable zip. Your data in `%USERPROFILE%\.pandu` is not touched.
+5. Start Pandu again.
+
+The desktop app never downloads or installs a build silently, and it never has
+a second trust root.
 
 ## Your data is separate from the app
 

@@ -111,8 +111,10 @@ over an opaque `--sheet-bg`; the canvas sits below their scrims.
 
 ## Budgets
 
-- JavaScript < 150 KB gzip (current build: 228.6 KB, 72.6 KB gzip)
-- CSS: 73.0 KB, 12.5 KB gzip
+- JavaScript < 150 KB gzip for the host entry plus its preloaded shared chunk
+  (current build: 145.6 KB gzip). The remote shell is a separate 8.7 KB gzip
+  chunk that loads only on a remote origin.
+- CSS: 137.4 KB, 20.8 KB gzip
 - No layout shift from font loading
 - 44 px minimum touch targets
 - Contrast ≥ 4.5:1 for text over every surface and accent pair
@@ -130,8 +132,8 @@ pnpm test
 pnpm exec playwright test
 ```
 
-Screenshots from the visual suite land in `../docs/screenshots/phase5/`.
-`pnpm test` currently runs 13 files / 110 tests. The Playwright suite runs 38
+Screenshots from the visual suite land in `../docs/screenshots/phase*/`.
+`pnpm test` currently runs 20 files / 143 tests. The Playwright suite runs 59
 tests across desktop (1440×900) and phone (390×844, plus 360×640) in Dark,
 Light, and Frost, covering real daemon data, demo labels, first-run onboarding,
 Inbox decisions, flight replay and deep links, lazy snapshot diffs, live

@@ -9,23 +9,44 @@ account, no cloud, no telemetry.
 Pandu is not an AI agent; it guides, records and protects the agents you already use.
 
 > **Status:** the 0.2.0 rewrite is in progress on the `rewrite` branch. Phases
-> 0–8 are complete: the Rust core, proxy, adapters, guards, snapshots, the
+> 0–11 are complete: the Rust core, proxy, adapters, guards, snapshots, the
 > design v2 UI, the five tabs wired to real daemon data, host-confirmed remote
-> access, and the signed skill/MCP market. The shipped 0.1.0 TypeScript/Node
-> implementation is preserved under `legacy/` as the behavior spec. Remaining
-> work is tracked in the [roadmap](docs/ROADMAP.md).
+> access, the signed skill/MCP market, model controls, updates and backups, and
+> the Windows desktop app, Android companion, and PWA packages. Phase 12 — the
+> remaining documentation, benchmarks, and language catalogs — is tracked in the
+> [roadmap](docs/ROADMAP.md). The shipped 0.1.0 TypeScript/Node implementation is
+> preserved under `legacy/` as the behavior spec.
 
-## What v0.2.0 will be
+## Install
 
-- **One binary.** `pandu` starts the local daemon and opens the embedded UI.
+The beginner guides cover the Windows desktop app, the Android companion, and
+the installable web app, in seven languages:
+
+| Language | Guide |
+| --- | --- |
+| English | [docs/install/en.md](docs/install/en.md) |
+| Bahasa Indonesia | [docs/install/id.md](docs/install/id.md) |
+| Español | [docs/install/es.md](docs/install/es.md) |
+| Français | [docs/install/fr.md](docs/install/fr.md) |
+| Deutsch | [docs/install/de.md](docs/install/de.md) |
+| 日本語 | [docs/install/ja.md](docs/install/ja.md) |
+| 中文 | [docs/install/zh.md](docs/install/zh.md) |
+
+Platform-specific details: [Android](docs/install/android.md),
+[PWA](docs/install/pwa.md), and [troubleshooting](docs/install/troubleshooting.md).
+
+## What v0.2.0 is
+
+- **One binary.** `pandu` starts the local daemon and serves the embedded UI;
+  the Windows shell opens it in a desktop window.
 - **Five tabs.** Home, Inbox, Flights, Market, Settings, plus a global quick
   prompt (`Ctrl/Cmd+K`).
 - **Design v2.** Dark graphite bento dashboards with matte cards, hairline
   borders, one accent, and floating glass chrome. Three themes (Dark, Light,
   Frost), three surface styles (Bento Matte, Liquid Glass, Hybrid), and full
   appearance customization in Settings.
-- **Three capture modes.** Proxy, log-watch, and hook/OTel, each labeled honestly
-  per flight.
+- **Two capture modes today.** Proxy and log-watch are implemented; hook/OTel is
+  deferred, and a single trust badge per flight is still on the roadmap.
 - **Local by default.** SQLite on disk, no telemetry, no TLS interception, no
   credential capture.
 - **Fail-open.** If Pandu breaks, your agent keeps working.
@@ -80,16 +101,20 @@ The full contract is in [`docs/DESIGN.md`](docs/DESIGN.md).
 | `design` | Logo sources and export scripts |
 | `adapters` | Data-driven TOML agent definitions |
 | `docs` | Rewrite record, roadmap, design system, beginner docs, issue drafts |
-| `packaging` | cargo-dist, npm wrapper, winget, scoop, Tauri, Android |
+| `packaging` | cargo-dist, winget/scoop drafts, release manifest, notices |
 | `legacy` | 0.1.0 TypeScript/Node behavior spec |
 
 ## Development
 
-Requirements once the rewrite is runnable:
+Requirements:
 
-- Rust stable 1.85+ (`rust-toolchain.toml` installs components via rustup)
+- Rust stable 1.89+ (`rust-toolchain.toml` installs components via rustup)
 - Node.js 22+ and pnpm 10+
 - Git (optional; snapshots degrade gracefully without it)
+- Windows desktop builds: the Tauri 2 prerequisites and WebView2 (the installer
+  downloads the bootstrapper when it is missing)
+- Android builds: JDK 17, Android SDK, and NDK; see
+  [docs/install/android.md](docs/install/android.md)
 
 Rust gates:
 

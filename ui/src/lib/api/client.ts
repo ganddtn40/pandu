@@ -234,9 +234,28 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 }
 
-/** The pairing/remote token is shown once and stored only on this device. */
+/**
+ * The pairing/remote token is shown once and stored only on this device.
+ *
+ * The browser and PWA use localStorage. The Android companion replaces this
+ * with a native store: the token is kept in memory for the running page and
+ * written to the Android Keystore, never to WebView storage.
+ */
+export interface RemoteTokenStore {
+  save(token: string | null): void;
+}
+
+let nativeTokenStore: RemoteTokenStore | null = null;
+let memoryToken: string | null = null;
+
+export function useRemoteTokenStore(store: RemoteTokenStore, initial: string | null): void {
+  nativeTokenStore = store;
+  memoryToken = initial;
+}
+
 export function remoteToken(): string | null {
   if (typeof window === 'undefined') return null;
+  if (nativeTokenStore) return memoryToken;
   try {
     return window.localStorage.getItem(REMOTE_TOKEN_KEY);
   } catch {
@@ -246,12 +265,24 @@ export function remoteToken(): string | null {
 
 export function setRemoteToken(token: string | null): void {
   if (typeof window === 'undefined') return;
+  if (nativeTokenStore) {
+    memoryToken = token;
+    nativeTokenStore.save(token);
+    return;
+  }
   try {
     if (token) window.localStorage.setItem(REMOTE_TOKEN_KEY, token);
     else window.localStorage.removeItem(REMOTE_TOKEN_KEY);
   } catch {
     // Storage can be unavailable in private windows.
   }
+}
+
+/** Point the UI at a paired host without reloading the page. */
+export function setDaemonOverride(origin: string | null): void {
+  if (typeof window === 'undefined') return;
+  if (origin) window.__panduDaemonUrl = trimTrailingSlash(origin);
+  else delete window.__panduDaemonUrl;
 }
 
 async function remoteRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

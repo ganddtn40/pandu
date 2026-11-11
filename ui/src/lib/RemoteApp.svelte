@@ -22,6 +22,7 @@
     Session,
     Step,
   } from './api/types';
+  import type { CompanionHooks } from './companion/native';
   import { formatDuration, timeAgo } from './format';
   import { t } from './i18n/i18n.svelte';
   import { isAuthPrompt, isHighRisk, remoteScopeKey } from './remote-format';
@@ -29,6 +30,8 @@
 
   type Tab = 'inbox' | 'flights' | 'agents';
   type PairStatus = 'idle' | 'waiting' | 'denied' | 'expired';
+
+  let { companion = null }: { companion?: CompanionHooks | null } = $props();
 
   let tab = $state<Tab>('inbox');
   let cleanup: (() => void) | undefined;
@@ -38,6 +41,9 @@
   let deviceName = $state('');
   let pin = $state('');
   let pasteToken = $state('');
+  let hostInput = $state('');
+  let qrFingerprint = $state<string | null>(null);
+  let scanBusy = $state(false);
   let pairBusy = $state(false);
   let pairStatus = $state<PairStatus>('idle');
   let pairError = $state<string | null>(null);
@@ -76,6 +82,7 @@
   const promptRemaining = $derived(2000 - promptText.length);
 
   onMount(() => {
+    hostInput = companion?.host ?? '';
     deviceName = guessDeviceName();
     cleanup = initRemoteApp();
     return () => {
@@ -122,6 +129,7 @@
     }
     pairBusy = true;
     try {
+      if (companion) hostInput = await companion.adoptHost(hostInput);
       verificationCode = newVerificationCode();
       ticket = await claimPairing(
         code.trim(),
@@ -152,6 +160,11 @@
         showPairingSummary = true;
         toast(t('remote.pairApproved'));
         acceptPairingToken(result.token);
+        if (companion) {
+          void companion.completePairing().catch(() => {
+            // Notification permission or the background watch is optional.
+          });
+        }
       } else if (result.status === 'denied') {
         stopPolling();
         ticket = null;
@@ -176,6 +189,23 @@
     acceptPairingToken(value);
   }
 
+  async function scanQr(): Promise<void> {
+    if (!companion || scanBusy || pairBusy) return;
+    scanBusy = true;
+    pairError = null;
+    try {
+      const payload = await companion.scan();
+      hostInput = await companion.adoptHost(payload.url);
+      code = payload.code;
+      qrFingerprint = payload.fingerprint ?? null;
+      await submitPairing();
+    } catch (error) {
+      pairError = remoteErrorMessage(error);
+    } finally {
+      scanBusy = false;
+    }
+  }
+
   async function forget(): Promise<void> {
     await forgetThisDevice();
     confirmForget = false;
@@ -186,6 +216,13 @@
     if (deciding) return;
     deciding = event.id;
     try {
+      if (companion && isHighRisk(event)) {
+        const confirmed = await companion.confirmHighRisk(event.title);
+        if (!confirmed) {
+          toast(t('companion.approvalCancelled'));
+          return;
+        }
+      }
       const needsPin = isHighRisk(event) && info?.hasPin === true;
       await decideRemoteGuard(event, decision, needsPin ? (pinByEvent[event.id] ?? '') : undefined);
       const next = { ...pinByEvent };
@@ -305,17 +342,51 @@
         </button>
       {:else}
         <form class="remote-app__form" onsubmit={(event) => { event.preventDefault(); void submitPairing(); }}>
-          <label class="remote-app__field">
-            <span>{t('remote.pairCode')}</span>
-            <input
-              type="text"
-              bind:value={code}
-              placeholder={t('remote.pairCodePlaceholder')}
-              autocomplete="one-time-code"
-              autocapitalize="characters"
-              spellcheck="false"
-            />
-          </label>
+          {#if companion}
+            <label class="remote-app__field">
+              <span>{t('companion.host')}</span>
+              <input
+                type="url"
+                bind:value={hostInput}
+                placeholder={t('companion.hostPlaceholder')}
+                autocomplete="url"
+                autocapitalize="off"
+                spellcheck="false"
+              />
+              <small>{t('companion.hostNote')}</small>
+            </label>
+            {#if qrFingerprint}
+              <p class="remote-app__note">
+                <Icon name="shield" size={15} />
+                {t('companion.fingerprint', { fingerprint: qrFingerprint })}
+              </p>
+            {/if}
+          {/if}
+          <div class="remote-app__field">
+            <label for="remote-pair-code">{t('remote.pairCode')}</label>
+            <div class="remote-app__scan-row">
+              <input
+                id="remote-pair-code"
+                type="text"
+                bind:value={code}
+                placeholder={t('remote.pairCodePlaceholder')}
+                autocomplete="one-time-code"
+                autocapitalize="characters"
+                spellcheck="false"
+              />
+              {#if companion}
+                <button
+                  class="btn btn--ghost remote-app__scan"
+                  type="button"
+                  onclick={scanQr}
+                  disabled={scanBusy || pairBusy}
+                >
+                  <Icon name="camera" size={15} />
+                  {scanBusy ? t('common.loading') : t('companion.scan')}
+                </button>
+              {/if}
+            </div>
+          </div>
           <label class="remote-app__field">
             <span>{t('remote.pairDeviceName')}</span>
             <input

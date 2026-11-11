@@ -1,0 +1,24 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "The Android companion may scan a pairing QR, ask for biometric confirmation, and show local notifications.",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": [
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel",
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "biometric:allow-authenticate",
+    "biometric:allow-check-status",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "keystore:allow-load",
+    "keystore:allow-save",
+    "keystore:allow-clear",
+    "keystore:allow-host",
+    "keystore:allow-configure",
+    "keystore:allow-schedule-watch",
+    "keystore:allow-notifications-init"
+  ]
+}

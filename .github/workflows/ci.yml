@@ -1,5 +1,8 @@
 name: CI
 
+# Pull requests and branch pushes never receive a secret. Signing, publishing,
+# and the offline update manifest live in release.yml, which only runs on a tag.
+
 on:
   push:
     branches: [main, rewrite]
@@ -8,25 +11,35 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NODE_VERSION: '24'
+
 jobs:
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt, clippy
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -35,7 +48,295 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Audit the model registry
-        run: cargo run --quiet -p pandu-cli -- models audit
+        if: runner.os == 'Linux'
+        run: cargo run --quiet --locked -p pandu-cli -- models audit
+
+      - name: Check the release daemon build
+        if: runner.os == 'Linux'
+        run: cargo check --release --locked -p pandu-daemon
+
+  ui:
+    name: UI and browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm --dir ui check
+
+      - name: Unit tests
+        run: pnpm --dir ui test
+
+      - name: Build the UI
+        run: pnpm --dir ui build
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Build the daemon binary
+        run: cargo build --locked -p pandu-cli
+
+      - name: Install the Playwright browser
+        run: pnpm --dir ui exec playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: pnpm --dir ui exec playwright test
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-traces
+          path: ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  licenses:
+    name: Licenses and notices
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: Audit Rust licenses, advisories, and sources
+        run: cargo deny check
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Audit shipped JavaScript licenses
+        run: node packaging/check-licenses.mjs
+
+      - name: Verify the generated notices
+        run: node packaging/notices.mjs --check
+
+  shell:
+    name: Desktop shell
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache the shell build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/src-tauri
+
+      - name: Cache the plugin build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/plugins/keystore
+          key: keystore-plugin
+
+      - name: Check shell formatting
+        working-directory: app/src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Lint the shell
+        working-directory: app/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check the Android plugin on the host target
+        working-directory: app/plugins/keystore
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check the shell tests
+        working-directory: app/src-tauri
+        run: cargo test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            app/pnpm-lock.yaml
+            ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: |
+          pnpm --dir ui install --frozen-lockfile
+          pnpm --dir app install --frozen-lockfile
+
+      - name: Check brand drift
+        run: node app/scripts/check-brand.mjs
+
+      - name: Check the app scripts
+        run: |
+          node --check app/scripts/check-brand.mjs
+          node --check app/scripts/sync-brand.mjs
+          node --check app/scripts/android-init.mjs
+          node --check app/scripts/android-build.mjs
+          node --check app/scripts/checksums.mjs
+          node --check app/scripts/portable.mjs
+          node --check app/scripts/resources.mjs
+          node --check app/scripts/smoke.mjs
+
+      - name: Build the desktop executable
+        run: pnpm --dir app exec tauri build --no-bundle
+
+      - name: Smoke-test the built app
+        run: node app/scripts/smoke.mjs
+
+      - name: Upload the smoke report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-report
+          path: dist/smoke-report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  android:
+    name: Android companion (unsigned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Java 17
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install the Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Install the Android platform, build tools, and NDK
+        run: |
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018"
+
+      - name: Install Rust with Android targets
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache the Android build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            app/pnpm-lock.yaml
+            ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: |
+          pnpm --dir ui install --frozen-lockfile
+          pnpm --dir app install --frozen-lockfile
+
+      - name: Create the hardened Android project
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: node app/scripts/android-init.mjs
+
+      - name: Build the unsigned APK
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: node app/scripts/android-build.mjs --out dist/android
+
+      - name: Upload the unsigned APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-unsigned
+          path: dist/android
+          if-no-files-found: error
+          retention-days: 14
+
+  docs:
+    name: Documentation coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require a beginner install guide in every supported language
+        run: |
+          for lang in en id es fr de ja zh; do
+            test -s "docs/install/${lang}.md" || {
+              echo "Missing docs/install/${lang}.md"
+              exit 1
+            }
+          done
+
+      - name: Require the packaging drafts
+        run: |
+          test -s packaging/winget/ganddtn40.Pandu.yaml
+          test -s packaging/scoop/pandu.json
+          test -s docs/install/android.md
+          test -s docs/install/pwa.md
+          test -s docs/install/troubleshooting.md
+
+      - name: Check the channel manifests match brand.json
+        run: node packaging/channel-manifests.mjs --check

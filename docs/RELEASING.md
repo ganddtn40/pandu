@@ -1,7 +1,10 @@
 # Releasing Pandu
 
-This checklist covers a tagged CLI release. Nothing here is published until a
-maintainer makes an explicit release decision.
+This checklist covers a tagged release of the CLI, the Windows desktop app, the
+Android companion, and the PWA assets. Nothing here is published until a
+maintainer makes an explicit release decision. CI builds the artifacts and
+creates a **draft** release; a maintainer signs the update manifest offline and
+publishes the draft by hand.
 
 ## 0. Rename the GitHub repository first
 
@@ -148,6 +151,29 @@ pnpm --dir ui check
 pnpm --dir ui test
 pnpm --dir ui build
 pnpm --dir ui exec playwright test
+```
+
+Desktop shell and packaging:
+
+```powershell
+pnpm --dir app install --frozen-lockfile
+node app/scripts/check-brand.mjs
+pnpm --dir app exec tauri build --bundles nsis msi
+node app/scripts/smoke.mjs
+node app/scripts/resources.mjs --seconds 5
+node app/scripts/portable.mjs --skip-build
+node packaging/notices.mjs --check
+node packaging/check-licenses.mjs
+node packaging/channel-manifests.mjs --check
+cargo deny check
+```
+
+Android (requires JDK 17, the Android SDK, NDK 27.2.12479018, and the four
+Rust Android targets):
+
+```powershell
+node app/scripts/android-init.mjs
+node app/scripts/android-build.mjs --out dist/android
 ```
 
 Build the CLI before Playwright:
@@ -298,35 +324,146 @@ home only after a verified install. A damaged state file fails closed. If a
 maintainer needs to republish the same version, sign it with a new, higher
 sequence and a new expiry; do not reuse the previous manifest.
 
-### Tauri and Android
+### Desktop app and Android
 
-The desktop Tauri shell does not exist yet. When it lands, configure its updater
-with the same production public key and the same manifest asset; do not give it
-a second trust root. The Android shell also does not exist yet: when it lands,
-verify the APK SHA-256 and signer certificate before handing the file to the
-system installer. Pandu never installs silently on Android. Document Obtainium
-for users who prefer it; Obtainium follows the GitHub release assets and does
-its own verification.
+The Windows desktop app uses the same update check and the same production
+updater trust root as the CLI. It does not bundle the Tauri updater plugin, so
+it never downloads or replaces its own binary and never needs a second key:
+
+- The update card reports the new version and links to the release page.
+- To update, quit Pandu from the tray, verify `SHA256SUMS`, and run the newer
+  NSIS installer over the old install. The portable build is replaced by
+  extracting the new zip. User data under `%USERPROFILE%\.pandu` is untouched.
+- The NSIS installer is per-user and does not need administrator rights. The
+  MSI is per-machine for managed deployment; see `docs/install/en.md`.
+
+Android never updates itself:
+
+1. Pandu does not download or install APKs silently.
+2. The Android system installer shows the permissions and asks for
+   confirmation.
+3. Verify the APK SHA-256 against `SHA256SUMS` and, when building from source,
+   the signer certificate with `apksigner verify --verbose --print-certs`.
+4. [Obtainium](https://github.com/ImranR98/Obtainium) can follow the GitHub
+   releases and do its own verification for users who prefer a store-like
+   updater.
+
+The Android signing key is separate from the updater key and the registry key.
+A tag release fails closed when `PANDU_ANDROID_KEYSTORE_BASE64`,
+`PANDU_ANDROID_KEYSTORE_PASSWORD`, `PANDU_ANDROID_KEY_ALIAS`, or
+`PANDU_ANDROID_KEY_PASSWORD` is missing. Pull-request builds still produce an
+unsigned APK for smoke testing.
 
 ## 5. Version and artifacts
 
-1. Update the version in `Cargo.toml` (`workspace.package.version`) and
-   `ui/package.json`.
+1. Update the version in every place that carries it:
+
+   - `Cargo.toml` (`workspace.package.version`),
+   - `app/src-tauri/Cargo.toml`,
+   - `app/src-tauri/tauri.conf.json`,
+   - `app/package.json`,
+   - `ui/package.json`,
+   - `packaging/manifest.json`.
+
+   Run `node app/scripts/sync-brand.mjs`, then
+   `node app/scripts/check-brand.mjs`. The tag must be `v<version>` and must
+   equal `app/src-tauri/tauri.conf.json`; the `plan` job refuses a mismatch.
+
 2. Update `packaging/manifest.json` if artifact names or channels changed.
 3. Build from the tagged commit, never from a developer working tree.
-4. Sign `pandu-update.json` and publish checksums next to every artifact.
-5. Confirm the npm wrapper verifies the downloaded binary checksum before
-   running it.
-6. Android signing keys come from the release environment; never commit a
-   keystore or password. Keep the APK signing key separate from the updater key.
+4. Tag and push:
+
+   ```powershell
+   git tag -s v0.2.0 -m "Pandu 0.2.0"
+   git push origin v0.2.0
+   ```
+
+   The tag workflow runs every gate, builds the artifacts, and creates a
+   **draft** release. It does not publish anything.
+
+5. The draft contains:
+
+   | Artifact | Built by | Notes |
+   | --- | --- | --- |
+   | `pandu-cli-<target>.zip` / `.tar.xz` | cargo-dist | Windows, Linux, macOS (x86_64 and aarch64) |
+   | `pandu-cli-installer.ps1`, `pandu-cli-installer.sh` | cargo-dist | Per-user CLI installers |
+   | `Pandu_<version>_x64-setup.exe` | Tauri NSIS | Per-user, no administrator rights |
+   | `Pandu_<version>_x64_en-US.msi` | Tauri WiX | Per-machine, managed deployment |
+   | `pandu-<version>-x86_64-pc-windows-msvc-portable.zip` | `app/scripts/portable.mjs` | No installer |
+   | `pandu-<version>-android-universal-release-signed.apk` | Gradle + `apksigner` | Signed in CI, verified |
+   | `<crate>-sbom.json` | cargo-cyclonedx | CycloneDX 1.5 |
+   | `THIRD_PARTY_NOTICES.md` | `packaging/notices.mjs` | Rust and JavaScript licenses |
+   | `SHA256SUMS` | `app/scripts/checksums.mjs` | Every asset |
+
+6. Authenticode is a placeholder. Set `WINDOWS_CERTIFICATE_BASE64` and
+   `WINDOWS_CERTIFICATE_PASSWORD` to sign the standalone executable, the NSIS
+   installer, and the MSI. Without them the workflow ships unsigned artifacts
+   and says so in the step summary. The executable inside the NSIS and MSI
+   bundles stays unsigned either way; do not claim otherwise. Open-source
+   projects can apply to SignPath.io or Azure Trusted Signing, but eligibility
+   is not automatic: check the current programme rules before promising a
+   signed build.
+
+7. Android signing keys come from the release environment; never commit a
+   keystore or password. Keep the APK signing key separate from the updater and
+   registry keys.
+
+8. Sign `pandu-update.json` offline (section 4) and upload it to the draft.
+   `pandu update` is the only automatic installer. The desktop app and the
+   Android app never install silently.
+
+9. Refresh the channel drafts only after the release is public:
+
+   ```powershell
+   node packaging/channel-manifests.mjs
+   ```
+
+   This reads the real `SHA256SUMS`, replaces the zero placeholders, and
+   rewrites `packaging/winget/ganddtn40.Pandu.yaml` and
+   `packaging/scoop/pandu.json`. Submit them to `microsoft/winget-pkgs` and the
+   scoop bucket separately; the release workflow does not publish to either
+   channel.
+
+10. Publish the draft by hand, after the manifest is uploaded and verified.
+
+The tag workflow also produces a CycloneDX SBOM, a GitHub artifact provenance
+attestation for every uploaded file, `THIRD_PARTY_NOTICES.md`, and the
+`cargo-deny` / pnpm license gates. A failed license, registry, or updater gate
+stops the release before the draft is created.
 
 ## 6. Post-release checks
 
-```powershell
-pandu --version
-pandu doctor
-```
+1. Download `SHA256SUMS` and every asset from the published release. Verify
+   each hash. Run `apksigner verify --verbose --print-certs` on the APK.
+2. Install on a clean Windows virtual machine:
+   - NSIS per-user: no administrator prompt, WebView2 bootstrapper runs when
+     the runtime is missing.
+   - MSI per-machine: installs for every user and needs administrator rights.
+   - Portable zip: starts with WebView2 already installed.
+   Confirm the tray icon, close-to-tray behavior, `pandu://flights/<id>`, and
+   that uninstall keeps `%USERPROFILE%\.pandu` unless you opt in to deletion.
+3. Install the APK on a clean phone or emulator. Confirm the camera permission
+   is requested only after **Scan QR**, the Keystore token survives a restart,
+   the four notification channels exist, the 15-minute background check runs,
+   and a high-risk approval requires the PIN or biometric.
+4. Install the PWA over the Tailscale HTTPS URL. Confirm the install prompt,
+   the app-shell cache, and that no API or flight content is cached.
+5. Run the published CLI:
 
-Install from each advertised channel on a clean machine, confirm the UI opens,
-run one demo flight, and confirm no network request is made without an explicit
-user action. Update the changelog and close the release issue.
+   ```powershell
+   pandu --version
+   pandu doctor
+   ```
+
+   Record one demo flight and confirm no network request is made without an
+   explicit user action.
+6. Check the update path with a release build. With a signed manifest on the
+   release, `pandu update --check` reports it; with no production key embedded,
+   the build must say updates are unavailable and accept nothing.
+7. Verify provenance for one artifact:
+
+   ```powershell
+   gh attestation verify .\Pandu_0.2.0_x64-setup.exe --repo ganddtn40/pandu
+   ```
+
+8. Update the changelog and close the release issue.

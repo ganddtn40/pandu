@@ -5,6 +5,7 @@
   import BottomTabs from './lib/BottomTabs.svelte';
   import GlassPreview from './lib/GlassPreview.svelte';
   import HomePreview from './lib/HomePreview.svelte';
+  import InstallPrompt from './lib/InstallPrompt.svelte';
   import OnboardingPreview from './lib/OnboardingPreview.svelte';
   import QuickPrompt from './lib/QuickPrompt.svelte';
   import RemoteBanner from './lib/RemoteBanner.svelte';
@@ -97,4 +98,5 @@
 <AppearanceSheet />
 <AddAgent />
 <QuickPrompt />
+<InstallPrompt />
 <Toast />

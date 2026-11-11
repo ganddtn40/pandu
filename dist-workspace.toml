@@ -1,0 +1,40 @@
+# cargo-dist configuration for the Pandu command-line binary.
+#
+# The desktop app and the Android companion are built by the Tauri jobs in
+# `.github/workflows/release.yml`; this file only describes `pandu`.
+#
+# The release workflow is hand-maintained so it can combine the CLI, the Tauri
+# bundles, the Android APK, the SBOM, and the provenance attestation on one
+# draft release. `allow-dirty = ["ci"]` keeps `dist build` from insisting that
+# the generated workflow replace it.
+#
+# Homebrew, npm, winget, and scoop are drafted under `packaging/` but are not
+# published here: enabling a publisher before its channel exists would make
+# every tag fail. Add the publisher and its credentials in the same change.
+
+[workspace]
+# `dist-workspace.toml` is a dist-level workspace file. The Cargo workspace
+# itself is the single member; dist reads `Cargo.toml` for the package list.
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.34.0"
+ci = "github"
+allow-dirty = ["ci"]
+create-release = false
+pr-run-mode = "plan"
+
+packages = ["pandu-cli"]
+
+targets = [
+  "x86_64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+]
+
+installers = ["powershell", "shell"]
+checksum = "sha256"
+install-path = "CARGO_HOME"
+install-success-msg = "Pandu is installed. Run `pandu --help`."
+source-tarball = true

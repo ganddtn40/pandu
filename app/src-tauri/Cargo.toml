@@ -1,0 +1,61 @@
+[package]
+name = "pandu-app"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/ganddtn40/pandu"
+description = "Pandu desktop and Android shell"
+publish = false
+
+# This crate is deliberately outside the root workspace: the desktop shell has
+# its own toolchain (Tauri, WebView2, Android) and must not change the daemon
+# gates. `pandu-daemon` is consumed by path.
+[workspace]
+
+[lib]
+name = "pandu_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "Pandu"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+pandu-core = { path = "../../crates/pandu-core" }
+pandu-daemon = { path = "../../crates/pandu-daemon" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tokio = { version = "1", features = ["time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-autostart = "2"
+# `deep-link` makes the plugin forward a `pandu://` argument from the second
+# process to the running instance before invoking the callback.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+[target.'cfg(mobile)'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+tauri-plugin-biometric = "2"
+tauri-plugin-notification = "2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+pandu-plugin-keystore = { path = "../plugins/keystore" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

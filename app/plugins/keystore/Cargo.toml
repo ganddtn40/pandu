@@ -1,0 +1,23 @@
+[package]
+name = "pandu-plugin-keystore"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+description = "Android Keystore token storage and guard watch for the Pandu companion"
+publish = false
+links = "tauri-plugin-keystore"
+
+# The plugin is built by the Android app, not by the repository workspace.
+[workspace]
+
+[lib]
+name = "pandu_plugin_keystore"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+serde_json = "1"
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2" }

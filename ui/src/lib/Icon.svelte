@@ -80,6 +80,7 @@ const paths: Record<string, string[]> = {
   rotate: ['M3 12a9 9 0 1 0 3-6.7', 'M3 4v5h5'],
   monitor: ['M3 5h18v11H3z', 'M9 20h6', 'M12 16v4'],
   phone: ['M7 3h10v18H7z', 'M10 18h4'],
+  camera: ['M4 8h3l1.5-2h7L17 8h3v11H4z', 'M12 17a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z'],
   snow: ['M12 2v20', 'm4 6 16 12', 'm20 6-16 12', 'm9 3 3 3 3-3', 'm9 21 3-3 3 3'],
   'chevron-down': ['m6 9 6 6 6-6'],
   send: ['m4 4 16 8-16 8 3-8-3-8Z', 'M7 12h13'],

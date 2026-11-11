@@ -18,8 +18,65 @@ function brandHtml(): Plugin {
   };
 }
 
+/**
+ * The web app manifest is generated from `brand.json` so the install name,
+ * description, and identifiers never drift from the native shells.
+ */
+function brandManifest(): Plugin {
+  return {
+    name: 'pandu-brand-manifest',
+    generateBundle() {
+      const manifest = {
+        name: brand.name,
+        short_name: brand.name,
+        description: brand.tagline,
+        id: '/',
+        start_url: '/',
+        scope: '/',
+        display: 'standalone',
+        display_override: ['window-controls-overlay', 'standalone'],
+        background_color: '#0b0d10',
+        theme_color: '#0b0d10',
+        lang: 'en',
+        dir: 'ltr',
+        categories: ['developer', 'productivity', 'utilities'],
+        icons: [
+          {
+            src: '/icons/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/icons/icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/logo.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any',
+          },
+        ],
+        shortcuts: [
+          { name: 'Inbox', url: '/inbox' },
+          { name: 'Flights', url: '/flights' },
+          { name: 'Settings', url: '/settings' },
+        ],
+      };
+      this.emitFile({
+        type: 'asset',
+        fileName: 'manifest.webmanifest',
+        source: `${JSON.stringify(manifest, null, 2)}\n`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), brandHtml()],
+  plugins: [svelte(), brandHtml(), brandManifest()],
   server: {
     host: '127.0.0.1',
     port: 5174,
@@ -34,5 +91,11 @@ export default defineConfig({
     target: 'es2022',
     cssCodeSplit: false,
     reportCompressedSize: true,
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        companion: 'companion.html',
+      },
+    },
   },
 });

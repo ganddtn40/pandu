@@ -1,16 +1,19 @@
 name: Release
 
-# A release is blocked unless the bundled production registry verifies with the
-# production trust root. The production private key stays offline: CI only uses
-# the public key compiled into the release binary. Until the maintainer
-# provisions that key, every release build fails closed with "Registry is being
-# prepared." and this workflow refuses to publish.
+# Releases are cut from a tag only. A tag build runs every gate, builds the
+# command-line binary with cargo-dist, the Windows desktop bundles with Tauri,
+# and the Android companion with Gradle, then creates a DRAFT GitHub release.
+#
+# The draft is intentionally incomplete: `pandu-update.json` is not produced
+# here. The maintainer signs that manifest offline with the Minisign key and
+# uploads it to the draft. The updater gate below proves the release binary
+# embeds the production trust root and refuses the test key; `pandu update`
+# verifies the signed manifest before it installs anything.
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,23 +22,509 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  NODE_VERSION: '24'
+  CARGO_DIST_VERSION: '0.34.0'
+
 jobs:
-  registry-gate:
-    name: Verify production registry trust root
-    runs-on: ubuntu-latest
+  plan:
+    name: Plan the release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require a tag that matches the app version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./app/src-tauri/tauri.conf.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match app version v$version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-dist@0.34.0
+
+      - name: Plan the CLI artifacts
+        run: dist plan --tag="$GITHUB_REF_NAME" --output-format=json > plan-dist-manifest.json
+
+      - name: Upload the plan
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-plan
+          path: plan-dist-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  cli-local:
+    name: CLI (${{ matrix.target }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache the CLI build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-dist@0.34.0
+
+      - name: Fetch the release plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-plan
+          path: target/distrib
+
+      - name: Build the CLI artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist build --artifacts=local --target="${{ matrix.target }}" \
+            --tag="$GITHUB_REF_NAME" --output-format=json > dist-manifest.json
+          cp dist-manifest.json "target/distrib/${{ matrix.target }}-dist-manifest.json"
+
+      - name: Attest the CLI artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/distrib/*
+
+      - name: Upload the CLI artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-local-${{ matrix.target }}
+          path: target/distrib
+          if-no-files-found: error
+          retention-days: 7
+
+  cli-global:
+    name: CLI installers
+    needs: [plan, cli-local]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-dist@0.34.0
+
+      - name: Fetch every local artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: target/distrib
+          merge-multiple: true
+
+      - name: Build the shell and PowerShell installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist build --artifacts=global --tag="$GITHUB_REF_NAME" \
+            --output-format=json > dist-manifest.json
+          cp dist-manifest.json target/distrib/global-dist-manifest.json
+
+      - name: Attest the installers
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/distrib/*
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-global
+          path: target/distrib
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-app:
+    name: Windows desktop app
+    needs: plan
+    runs-on: windows-2022
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+
+      - name: Cache the desktop build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            app/pnpm-lock.yaml
+            ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: |
+          pnpm --dir ui install --frozen-lockfile
+          pnpm --dir app install --frozen-lockfile
+
+      - name: Check brand drift
+        run: node app/scripts/check-brand.mjs
+
+      - name: Build the MSI and NSIS bundles
+        run: pnpm --dir app exec tauri build --bundles nsis msi
+
+      - name: Smoke-test the packaged app
+        run: node app/scripts/smoke.mjs
+
+      - name: Measure the resource budget
+        run: node app/scripts/resources.mjs --seconds 5
+
+      - name: Sign Windows binaries with Authenticode
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_BASE64) {
+            Write-Host "No Authenticode certificate is configured. Shipping unsigned Windows artifacts."
+            "Authenticode: skipped (no WINDOWS_CERTIFICATE_BASE64 secret)." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "pandu-codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+
+          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+          if (-not $signtool) {
+            $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+            $signtool = Get-ChildItem $kits -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+          }
+          if (-not $signtool) { throw "signtool.exe was not found." }
+
+          $files = @()
+          $files += Get-ChildItem "app/src-tauri/target/release/Pandu.exe" -ErrorAction SilentlyContinue
+          $files += Get-ChildItem "app/src-tauri/target/release/bundle/nsis" -Filter *.exe -ErrorAction SilentlyContinue
+          $files += Get-ChildItem "app/src-tauri/target/release/bundle/msi" -Filter *.msi -ErrorAction SilentlyContinue
+          foreach ($file in $files) {
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+              /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $($file.FullName)." }
+          }
+          Remove-Item $pfx -Force
+
+      - name: Build the portable zip
+        run: node app/scripts/portable.mjs --skip-build
+
+      - name: Stage the Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/windows | Out-Null
+          Copy-Item app/src-tauri/target/release/bundle/nsis/*.exe dist/windows/ -ErrorAction Stop
+          Copy-Item app/src-tauri/target/release/bundle/msi/*.msi dist/windows/ -ErrorAction Stop
+          Copy-Item dist/*-portable.zip dist/windows/ -ErrorAction Stop
+          Copy-Item dist/smoke-report.json dist/windows/ -ErrorAction Stop
+          Copy-Item dist/resource-report.json dist/windows/ -ErrorAction Stop
+          Copy-Item dist/resource-report.md dist/windows/ -ErrorAction Stop
+
+      - name: Write the Windows checksums
+        run: node app/scripts/checksums.mjs --dir dist/windows
+
+      - name: Attest the Windows artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/windows/*
+
+      - name: Upload the Windows artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-app
+          path: dist/windows
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    name: Android companion (signed)
+    needs: plan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Java 17
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install the Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Install the Android platform, build tools, and NDK
+        run: |
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018"
+
+      - name: Install Rust with Android targets
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache the Android build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: |
+            app/pnpm-lock.yaml
+            ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: |
+          pnpm --dir ui install --frozen-lockfile
+          pnpm --dir app install --frozen-lockfile
+
+      - name: Create the hardened Android project
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: node app/scripts/android-init.mjs
+
+      - name: Build the unsigned APK
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: node app/scripts/android-build.mjs --out dist/android
+
+      - name: Require the Android signing secrets
+        env:
+          PANDU_ANDROID_KEYSTORE_BASE64: ${{ secrets.PANDU_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "${PANDU_ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "::error::PANDU_ANDROID_KEYSTORE_BASE64 is not configured. A release APK must be signed; refusing to publish an unsigned one."
+            exit 1
+          fi
+
+      - name: Sign and verify the APK
+        env:
+          PANDU_ANDROID_KEYSTORE_BASE64: ${{ secrets.PANDU_ANDROID_KEYSTORE_BASE64 }}
+          PANDU_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PANDU_ANDROID_KEYSTORE_PASSWORD }}
+          PANDU_ANDROID_KEY_ALIAS: ${{ secrets.PANDU_ANDROID_KEY_ALIAS }}
+          PANDU_ANDROID_KEY_PASSWORD: ${{ secrets.PANDU_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/pandu-release.keystore"
+          printf '%s' "$PANDU_ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          mkdir -p dist/android-signed
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          for apk in dist/android/*.apk; do
+            base="$(basename "${apk%.apk}")"
+            name="${base%-unsigned}-signed.apk"
+            out="dist/android-signed/$name"
+            "$apksigner" sign \
+              --ks "$keystore" \
+              --ks-pass "env:PANDU_ANDROID_KEYSTORE_PASSWORD" \
+              --ks-key-alias "$PANDU_ANDROID_KEY_ALIAS" \
+              --key-pass "env:PANDU_ANDROID_KEY_PASSWORD" \
+              --out "$out" "$apk"
+            "$apksigner" verify --verbose --print-certs "$out"
+          done
+          rm -f "$keystore"
+          node app/scripts/checksums.mjs --dir dist/android-signed
+
+      - name: Attest the signed APK
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/android-signed/*
+
+      - name: Upload the signed APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-signed
+          path: dist/android-signed
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Workspace checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Type-check the UI
+        run: pnpm --dir ui check
+
+      - name: Unit-test the UI
+        run: pnpm --dir ui test
+
+      - name: Build the UI
+        run: pnpm --dir ui build
+
+  licenses:
+    name: Licenses and notices
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: Audit Rust licenses, advisories, and sources
+        run: cargo deny check
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.9.1
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Audit shipped JavaScript licenses
+        run: node packaging/check-licenses.mjs
+
+      - name: Verify the generated notices
+        run: node packaging/notices.mjs --check
+
+  registry-gate:
+    name: Verify the production registry trust root
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check registry tooling syntax
-        run: node --check registry/sign.mjs && node --check registry/hash.mjs
+        run: |
+          node --check registry/sign.mjs
+          node --check registry/hash.mjs
 
       - name: Verify the bundled index with the production key
         run: |
@@ -49,21 +538,23 @@ jobs:
             --dir registry --online --links
 
   update-gate:
-    name: Verify updater trust root and signing tool
-    runs-on: ubuntu-latest
+    name: Verify the updater trust root and signing tool
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Check updater tooling syntax
-        run: node --check packaging/sign-update.mjs
+      - name: Check the updater tooling
+        run: |
+          node --check packaging/sign-update.mjs
+          node --check packaging/check-licenses.mjs
 
       # Release builds embed only a production updater key. These tests run in
       # release mode so the test key is compiled out and the build is forced to
@@ -74,32 +565,167 @@ jobs:
           cargo test --release --locked -p pandu-daemon --lib \
             update::service::tests::status_reports_the_build_trust_root_honestly
 
-  publish:
-    name: Publish release
-    needs: [registry-gate, update-gate]
-    if: ${{ needs.registry-gate.result == 'success' && needs.update-gate.result == 'success' }}
-    runs-on: ubuntu-latest
+  sbom:
+    name: Software bill of materials
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build release CLI
-        run: cargo build --release --locked -p pandu-cli
-
-      # Phase 7 replaces this artifact upload with the cargo-dist publish step.
-      # The `needs: registry-gate` edge is what blocks publishing: an unsigned
-      # index, a stale key id, a missing production key, or a bad signature
-      # fails the gate and this job never runs.
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          name: pandu-${{ github.ref_name }}-linux-x86_64
-          path: target/release/pandu
+          tool: cargo-cyclonedx@0.5.10
+
+      - name: Generate the SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/sbom
+          for crate in pandu-core pandu-daemon pandu-cli; do
+            cargo cyclonedx --manifest-path "crates/$crate/Cargo.toml" \
+              --format json --spec-version 1.5 \
+              --override-filename "$crate-sbom"
+            sbom="$(find . -maxdepth 3 -name "$crate-sbom*" -not -path './target/*' -print -quit)"
+            test -n "$sbom"
+            cp "$sbom" "dist/sbom/$crate-sbom.json"
+          done
+          cargo cyclonedx --manifest-path app/src-tauri/Cargo.toml \
+            --format json --spec-version 1.5 \
+            --override-filename pandu-app-sbom
+          sbom="$(find app -maxdepth 3 -name 'pandu-app-sbom*' -print -quit)"
+          test -n "$sbom"
+          cp "$sbom" dist/sbom/pandu-app-sbom.json
+
+      - name: Attest the SBOMs
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/sbom/*
+
+      - name: Upload the SBOMs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: dist/sbom
           if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create the draft release
+    needs:
+      - plan
+      - cli-global
+      - windows-app
+      - android
+      - verify
+      - licenses
+      - registry-gate
+      - update-gate
+      - sbom
+    if: ${{ always() && needs.plan.result == 'success' && needs.cli-global.result == 'success' && needs.windows-app.result == 'success' && needs.android.result == 'success' && needs.verify.result == 'success' && needs.licenses.result == 'success' && needs.registry-gate.result == 'success' && needs.update-gate.result == 'success' && needs.sbom.result == 'success' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the CLI archives and installers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-local-*
+          path: dist/cli
+          merge-multiple: true
+
+      - name: Download the CLI installers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-global
+          path: dist/cli
+          merge-multiple: true
+
+      - name: Download the Windows artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-app
+          path: dist/windows
+
+      - name: Download the signed Android APK
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-signed
+          path: dist/android
+
+      - name: Download the SBOMs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+          path: dist/sbom
+
+      - name: Stage the release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          find dist/cli -maxdepth 1 -type f \
+            ! -name '*dist-manifest.json' \
+            -exec cp {} dist/release/ \;
+          cp dist/windows/* dist/release/
+          cp dist/android/* dist/release/
+          cp dist/sbom/* dist/release/
+          cp THIRD_PARTY_NOTICES.md dist/release/
+          cat > dist/release/RELEASE-NOTES.md <<'EOF'
+          This is a draft release. It is not installable as an automatic update yet.
+
+          The update manifest (`pandu-update.json`) is deliberately absent. A
+          maintainer must sign it offline with the production Minisign key and
+          upload it to this draft before publishing. CI never holds that key.
+
+          Every asset is listed in `SHA256SUMS`. Verify the checksum before
+          running or installing anything. The Windows artifacts are unsigned
+          unless the release notes say an Authenticode certificate was used.
+          The Android APK is signed in CI and verified with `apksigner`.
+
+          Read the install guides in `docs/install/` before installing.
+          EOF
+
+      - name: Write SHA256SUMS
+        run: node app/scripts/checksums.mjs --dir dist/release --out dist/release/SHA256SUMS
+
+      - name: Attest the release assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/release/*
+
+      - name: Create the draft release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: ${{ github.ref_name }}
+          body_path: dist/release/RELEASE-NOTES.md
+          files: dist/release/*
+          fail_on_unmatched_files: true
+
+      - name: Summarize the next step
+        shell: bash
+        run: |
+          {
+            echo "## Draft release created for $GITHUB_REF_NAME"
+            echo
+            echo "1. Download the artifacts from the draft release."
+            echo "2. Sign `pandu-update.json` offline with the production Minisign key."
+            echo "3. Upload the signed manifest to the draft."
+            echo "4. Verify it with `pandu update --check` before publishing."
+          } >> "$GITHUB_STEP_SUMMARY"

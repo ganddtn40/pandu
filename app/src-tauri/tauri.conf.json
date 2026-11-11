@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pandu",
+  "version": "0.2.0",
+  "identifier": "io.github.ganddtn40.pandu",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../ui dev",
+    "devUrl": "http://127.0.0.1:5174",
+    "beforeBuildCommand": "pnpm --dir ../ui build",
+    "frontendDist": "../../ui/dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; worker-src 'self'",
+      "dangerousDisableAssetCspModification": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../ui/dist": "ui/dist"
+    },
+    "publisher": "Pandu contributors",
+    "copyright": "MIT",
+    "category": "DeveloperTool",
+    "shortDescription": "A local flight recorder and control tower for AI coding agents.",
+    "longDescription": "Pandu records what AI coding agents do, shows it live, replays it, and asks permission before risky actions. Everything stays on your machine. Zero telemetry.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer/hooks.nsh",
+        "displayLanguageSelector": false,
+        "compression": "lzma"
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["pandu"]
+      }
+    }
+  }
+}

@@ -1047,6 +1047,26 @@ const en = {
   'remote.sessionFor': 'Signed in as {name}',
   'remote.context': 'Context',
   'remote.contextValue': '{percent}% context',
+
+  // Android companion and PWA
+  'companion.host': 'Host address',
+  'companion.hostPlaceholder': 'https://your-host.tailnet.ts.net',
+  'companion.hostNote': 'The HTTPS address shown by the host. Use `tailscale serve` or a trusted tunnel; plain HTTP is refused outside loopback.',
+  'companion.scan': 'Scan QR',
+  'companion.fingerprint': 'Host certificate fingerprint: {fingerprint}. Compare it with the host before pairing.',
+  'companion.qrInvalid': 'That QR code is not a {product} pairing code.',
+  'companion.qrCancelled': 'The scanner closed before a code was read.',
+  'companion.cameraDenied': 'Camera access is off. Enable it in Android settings, or type the code instead.',
+  'companion.hostInvalid': 'Enter the HTTPS address of the host, without a path or credentials.',
+  'companion.biometricTitle': 'Confirm it is you',
+  'companion.biometricSubtitle': 'High-risk approval',
+  'companion.biometricReason': 'Approve “{title}”?',
+  'companion.approvalCancelled': 'Nothing was sent. The approval was not confirmed.',
+  'pwa.installTitle': 'Install {product}',
+  'pwa.installBody': 'Keep the dashboard one tap away. The app shell is cached; flights and API data never are.',
+  'pwa.install': 'Install',
+  'pwa.notNow': 'Not now',
+
   'update.availableBadge': 'Update available',
   'update.demoBadge': 'Demo',
   'update.demoDisabled': 'This update card uses demo data. Updating is disabled in demo mode.',
@@ -1492,6 +1512,25 @@ const id: Catalog = {
   'migration.backup': 'Cadangan disimpan ke {path} sebelum peningkatan.',
   'migration.noBackup': 'Peningkatan selesai, tetapi cadangan tidak dapat ditulis.',
   'migration.note': 'Penerbangan, pengaturan, dan perangkat terpasang Anda dipertahankan. Simpan cadangan sampai Anda yakin dengan versi baru.',
+
+  // Pendamping Android dan PWA
+  'companion.host': 'Alamat host',
+  'companion.hostPlaceholder': 'https://host-anda.tailnet.ts.net',
+  'companion.hostNote': 'Alamat HTTPS yang ditampilkan host. Gunakan `tailscale serve` atau terowongan tepercaya; HTTP biasa ditolak di luar loopback.',
+  'companion.scan': 'Pindai QR',
+  'companion.fingerprint': 'Sidik jari sertifikat host: {fingerprint}. Cocokkan dengan host sebelum mempairing.',
+  'companion.qrInvalid': 'Kode QR itu bukan kode pairing {product}.',
+  'companion.qrCancelled': 'Pemindai ditutup sebelum kode terbaca.',
+  'companion.cameraDenied': 'Akses kamera mati. Aktifkan di pengaturan Android, atau ketik kodenya.',
+  'companion.hostInvalid': 'Masukkan alamat HTTPS host, tanpa jalur atau kredensial.',
+  'companion.biometricTitle': 'Pastikan ini Anda',
+  'companion.biometricSubtitle': 'Persetujuan berisiko tinggi',
+  'companion.biometricReason': 'Setujui “{title}”?',
+  'companion.approvalCancelled': 'Tidak ada yang dikirim. Persetujuan tidak dikonfirmasi.',
+  'pwa.installTitle': 'Pasang {product}',
+  'pwa.installBody': 'Dashboard tetap satu ketukan. Shell aplikasi di-cache; penerbangan dan data API tidak pernah.',
+  'pwa.install': 'Pasang',
+  'pwa.notNow': 'Nanti saja',
 };
 
 const es: Catalog = {

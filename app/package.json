@@ -1,0 +1,26 @@
+{
+  "name": "@pandu/app",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Pandu desktop and Android shell.",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:nsis": "tauri build --bundles nsis",
+    "build:msi": "tauri build --bundles msi",
+    "build:portable": "node scripts/portable.mjs",
+    "android:init": "node scripts/android-init.mjs",
+    "android:build": "node scripts/android-build.mjs",
+    "checksums": "node scripts/checksums.mjs",
+    "resources": "node scripts/resources.mjs",
+    "icons": "tauri icon ../design/logo/png/pandu-mark-1024.png",
+    "check:brand": "node scripts/check-brand.mjs",
+    "sync:brand": "node scripts/sync-brand.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

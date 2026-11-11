@@ -16,7 +16,7 @@ pnpm --version
 git --version
 ```
 
-Pandu needs Rust stable 1.85 or newer. Node 22+ and pnpm 10+ are only needed to
+Pandu needs Rust stable 1.89 or newer. Node 22+ and pnpm 10+ are only needed to
 build or test the UI. Git is optional; snapshots degrade gracefully without it.
 
 ## 2. Build from source

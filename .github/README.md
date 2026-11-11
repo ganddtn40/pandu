@@ -1,14 +1,16 @@
 # GitHub configuration
 
-Community files and release automation are added in Phase 7:
+Release automation lives here:
 
-- Issue forms: bug, feature, new agent adapter, translation
-- PR template with a checklist
-- `CODEOWNERS`, labels list
-- `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`
-- Dependabot and release-drafter
-- Release workflow built on cargo-dist
+- `.github/workflows/ci.yml` runs the Rust workspace on Windows, macOS, and
+  Linux, plus the UI, Playwright, adapter fixtures, packaging, Android, and docs
+  gates.
+- `.github/workflows/release.yml` runs on a version tag, builds the CLI with
+  cargo-dist, the Windows bundles with Tauri, and the Android APK, then creates
+  an unsigned draft release for offline Minisign signing.
+- `.github/workflows/registry.yml` validates the signed market registry.
+- `CODEOWNERS` routes review for the security-sensitive paths.
 
-Current CI (`.github/workflows/ci.yml`) checks the Rust workspace on Windows,
-macOS, and Linux. It grows to include UI tests, Playwright, adapter fixtures, and
-packaging in later phases.
+Community files (issue forms, PR template, `SECURITY.md`,
+`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, Dependabot) are Phase 12 work and are
+not present yet.

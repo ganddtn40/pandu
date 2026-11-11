@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-schedule-watch"
+description = "Enables the schedule_watch command without any pre-configured scope."
+commands.allow = ["schedule_watch"]
+
+[[permission]]
+identifier = "deny-schedule-watch"
+description = "Denies the schedule_watch command without any pre-configured scope."
+commands.deny = ["schedule_watch"]

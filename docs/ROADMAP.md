@@ -8,9 +8,13 @@ This roadmap is honest about scope: v0.2.0 is intentionally small. Features that
 are not in v1 have a written spec and a `help wanted` issue draft, so they can
 come back without reopening old decisions.
 
-## v0.2.0 — the rewrite (in progress)
+## v0.2.0 — the rewrite (Phases 0–11 complete; Phase 12 in progress)
 
-**Theme:** one binary, five tabs, three capture modes, design v2.
+**Theme:** one binary, five tabs, proxy and log-watch capture, design v2.
+
+Phases 0–11 are complete. Phase 12 covers the remaining documentation,
+benchmarks, and language catalogs; the unchecked product and quality items in
+this roadmap are still open before the release criteria below can be met.
 
 ### Product
 
@@ -83,9 +87,9 @@ The full token, surface, theme, and accessibility contract is in
 
 ### App and UI
 
-- [ ] Tauri 2 Windows app embedding the daemon (single exe)
-- [ ] Tauri 2 Android companion with QR/short-code pairing
-- [ ] Web/PWA build served by the daemon
+- [x] Tauri 2 Windows app embedding the daemon (single exe)
+- [x] Tauri 2 Android companion with QR/short-code pairing
+- [x] Web/PWA build served by the daemon
 - [x] Svelte 5 + TypeScript + Vite
 - [x] Design v2 shell, appearance engine, bento components, and quick prompt
 - [x] Custom WebGL2 glass engine with CSS fallback, matte fallback, reduced
@@ -94,20 +98,26 @@ The full token, surface, theme, and accessibility contract is in
 - [x] Playwright gates for the shell and design system
 - [x] Playwright e2e for the five tabs against disposable demo and live daemons
 - [x] i18n scaffolding: English complete, drafts fall back per key
-- [ ] 14 complete language catalogs, RTL, missing-key CI gate
+- [ ] 14 complete language catalogs, RTL, missing-key CI gate (7 shipped:
+      `en`, `id`, `es`, `fr`, `de`, `ja`, `zh`)
 
 ### Install and release
 
-- [ ] cargo-dist CLI installers: PowerShell and shell
+- [x] cargo-dist CLI installers: PowerShell and shell
 - [ ] npm wrapper (`npx pandu`)
-- [ ] winget and scoop manifests
-- [ ] Windows Tauri bundle (MSI/NSIS)
-- [ ] Signed Android APK with documented keystore steps
-- [ ] Web/PWA bundle
+- [x] winget and scoop manifests (drafts with hashes filled at release time)
+- [x] Windows Tauri bundle (MSI/NSIS)
+- [x] Signed Android APK with documented keystore steps
+- [x] Web/PWA bundle
 - [ ] macOS, iOS, and Linux bundles (planned after v0.2.0)
 - [x] Signed update checks every 24 hours (can be disabled), no auto-install,
   `pandu update` / `pandu rollback`, and a signed release manifest
-- [ ] README and beginner docs in all 14 languages
+- [ ] README and beginner docs in all 14 languages (7 shipped)
+
+Android and CLI release artifacts are produced by the tag workflow, not by a
+local `cargo build`: the Android SDK/NDK and the release keystore live in CI.
+The first tagged run is still required to prove the Android signing and
+cargo-dist paths end to end.
 
 ### Platform support
 
@@ -129,21 +139,25 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo test --workspace`
 - [x] `pnpm check`
-- [x] `pnpm test` (13 files / 110 tests)
-- [x] Playwright design, visual, and daemon e2e suite (38 tests)
+- [x] `pnpm test` (20 files / 143 tests)
+- [x] Playwright design, visual, and daemon e2e suite (59 tests)
 - [x] Text contrast ≥ 4.5:1 across every theme, surface, and accent pair
 - [x] 44 px minimum touch targets on phone
 - [x] Zero idle canvas redraws and visible focus rings
-- [x] UI JavaScript < 150 KB gzip (currently ~72.6 KB gzip)
-- [ ] `cargo deny check`
+- [x] UI JavaScript < 150 KB gzip for the host entry plus its preloaded shared
+      chunk (currently ~145.6 KB gzip; the remote shell loads only on a remote
+      origin)
+- [x] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction
 - [x] Guard and budget tests
 - [x] Adapter parser tests on fixtures
 - [ ] Crash-safe SQLite tests
-- [ ] CI matrix on Windows, macOS, Linux
+- [x] CI matrix on Windows, macOS, Linux
 - [ ] Performance: binary < 12 MB, idle RAM < 40 MB, startup < 300 ms, Android
-      APK < 15 MB, proxy overhead < 2 ms p99
+      APK < 15 MB, proxy overhead < 2 ms p99 (measured on Windows: CLI binary
+      9.31 MB, daemon ready 58 ms, core idle 32.5 MB, desktop total 404.4 MB
+      with WebView2; APK and proxy p99 still unmeasured)
 
 ### Release plan
 
@@ -151,13 +165,13 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 | --- | --- |
 | 4B | Design v2 complete; user visual approval (hard stop) — complete |
 | 5 | Five tabs wired to the daemon, onboarding, i18n catalogs — complete |
-| 6 | Agent control and notifications |
-| 7 | Remote access security |
-| 8 | Market registry |
-| 9 | Model, effort, and context controls |
-| 10 | Updates and backups |
-| 11 | Packaging: Windows, Android, Web/PWA |
-| 12 | Docs, benchmarks, 14 languages, v0.3.0 |
+| 6 | Agent control and notifications — complete |
+| 7 | Remote access security — complete |
+| 8 | Market registry — complete |
+| 9 | Model, effort, and context controls — complete |
+| 10 | Updates and backups — complete |
+| 11 | Packaging: Windows, Android, Web/PWA — complete |
+| 12 | Docs, benchmarks, 14 languages, v0.3.0 — in progress |
 
 ## Not in v0.2.0
 
@@ -221,7 +235,9 @@ or picking up a `help wanted` draft.
 - A clean-machine install works on Windows, Android, and Web/PWA.
 - macOS, iOS, and Linux remain clearly labeled as planned until their bundles
   ship.
-- The Android companion pairs and views flights over the LAN.
+- The Android companion pairs and views flights over an HTTPS tunnel (for
+  example `tailscale serve`); cleartext LAN HTTP is intentionally blocked in
+  release builds.
 - The performance budgets are measured and recorded in the release notes.
 - No known data-loss, credential-leak, or agent-breaking bug is open.
 - `legacy/` is deleted only after parity is demonstrated in its own commit.

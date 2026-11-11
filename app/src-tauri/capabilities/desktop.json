@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "The desktop window only needs the app's own validated commands. No shell, filesystem, HTTP, or window-creation permissions are granted to the webview.",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": ["main"],
+  "permissions": []
+}
