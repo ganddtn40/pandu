@@ -38,6 +38,7 @@ pub struct ApiError {
     status: StatusCode,
     message: String,
     code: &'static str,
+    details: Option<Value>,
 }
 
 impl ApiError {
@@ -46,7 +47,15 @@ impl ApiError {
             status,
             message: message.into(),
             code,
+            details: None,
         }
+    }
+
+    /// Attach structured data the client needs to act on the error, such as
+    /// the sessions that must be confirmed before an update.
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
@@ -64,16 +73,14 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(json!({
-                "error": {
-                    "code": self.code,
-                    "message": self.message,
-                }
-            })),
-        )
-            .into_response()
+        let mut error = json!({
+            "code": self.code,
+            "message": self.message,
+        });
+        if let Some(details) = self.details {
+            error["details"] = details;
+        }
+        (self.status, Json(json!({ "error": error }))).into_response()
     }
 }
 

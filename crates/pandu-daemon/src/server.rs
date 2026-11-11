@@ -471,6 +471,16 @@ pub(crate) const HOST_ROUTES: &[HostRoute] = &[
     },
     HostRoute {
         method: "POST",
+        path: "/update/apply",
+        build: || post(update::apply),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/update/rollback",
+        build: || post(update::rollback),
+    },
+    HostRoute {
+        method: "POST",
         path: "/update/snooze",
         build: || post(update::snooze),
     },

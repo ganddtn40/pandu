@@ -1554,6 +1554,103 @@ async fn backup_api_is_csrf_protected_and_reports_real_paths() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn update_apply_and_rollback_require_csrf_confirmation_and_a_real_build() {
+    use pandu_core::model::{SessionSource, SessionStatus};
+    use pandu_core::provider::AgentInfo;
+    use pandu_daemon::store::NewSession;
+
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let cfg = config(home.path(), mock.addr);
+    let daemon = pandu_daemon::spawn(cfg)
+        .await
+        .expect("the daemon should start");
+    let client = reqwest::Client::new();
+
+    daemon
+        .state
+        .store
+        .create_session(NewSession {
+            title: "Refactor auth".to_string(),
+            source: SessionSource::Manual,
+            status: SessionStatus::Active,
+            agent: Some(AgentInfo {
+                name: Some("Claude Code".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+
+    for path in ["/api/update/apply", "/api/update/rollback"] {
+        let denied = client
+            .post(format!("http://{}{path}", daemon.addr))
+            .header(reqwest::header::ORIGIN, format!("http://{}", daemon.addr))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&json!({ "confirm": true, "sessionIds": [] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN, "{path}");
+
+        // Without explicit consent the endpoint lists the running sessions.
+        let unconfirmed = client
+            .post(format!("http://{}{path}", daemon.addr))
+            .headers(host_headers(&daemon))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unconfirmed.status(), StatusCode::CONFLICT, "{path}");
+        let body: Value = unconfirmed.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "confirmation_required", "{path}");
+        assert_eq!(
+            body["error"]["details"]["sessions"][0]["title"],
+            "Refactor auth"
+        );
+        assert_eq!(
+            body["error"]["details"]["sessions"][0]["agent"],
+            "Claude Code"
+        );
+
+        // Confirming without echoing the session ids is still refused.
+        let stale = client
+            .post(format!("http://{}{path}", daemon.addr))
+            .headers(host_headers(&daemon))
+            .json(&json!({ "confirm": true, "sessionIds": [] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::CONFLICT, "{path}");
+        let body: Value = stale.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "confirmation_required", "{path}");
+    }
+
+    daemon.shutdown().await.unwrap();
+
+    // Demo mode refuses a confirmed update before the updater is ever started.
+    let demo_home = tempfile::tempdir().unwrap();
+    let mut demo_cfg = config(demo_home.path(), mock.addr);
+    demo_cfg.demo_mode = true;
+    let demo_daemon = pandu_daemon::spawn(demo_cfg)
+        .await
+        .expect("the demo daemon should start");
+    for path in ["/api/update/apply", "/api/update/rollback"] {
+        let response = client
+            .post(format!("http://{}{path}", demo_daemon.addr))
+            .headers(host_headers(&demo_daemon))
+            .json(&json!({ "confirm": true, "sessionIds": [] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT, "{path}");
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "demo_mode", "{path}");
+    }
+    demo_daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_seeds_demo_flights_and_serves_settings() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();
