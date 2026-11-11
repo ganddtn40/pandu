@@ -81,6 +81,54 @@ pub fn resolve_update_trust_root(debug: bool, production_key: Option<&str>) -> U
     }
 }
 
+/// What the build can truthfully say about update signing.
+///
+/// This is deliberately separate from [`UpdateTrustRoot`]: the UI needs one
+/// exact label per build state, while verification only needs to know whether a
+/// key may be used at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateSigning {
+    /// A debug build that can verify test-signed fixtures.
+    TestKey,
+    /// A release build with a provisioned production key.
+    ProductionKey,
+    /// A release build without a usable production key. Updates are disabled.
+    Disabled,
+}
+
+impl UpdateSigning {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TestKey => "test",
+            Self::ProductionKey => "production",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    /// The exact label the UI must show for this state.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TestKey => "Test key (development)",
+            Self::ProductionKey => "Signed updates ready (production key)",
+            Self::Disabled => "No production key: updates disabled",
+        }
+    }
+}
+
+/// Map the build mode and production key to the label the UI shows.
+///
+/// A release build that embeds the test key reports `Disabled`: it has no
+/// production key and refuses every update.
+pub fn update_signing(debug: bool, production_key: Option<&str>) -> UpdateSigning {
+    if debug {
+        return UpdateSigning::TestKey;
+    }
+    match resolve_update_trust_root(false, production_key) {
+        UpdateTrustRoot::Ready => UpdateSigning::ProductionKey,
+        UpdateTrustRoot::Preparing | UpdateTrustRoot::Refused => UpdateSigning::Disabled,
+    }
+}
+
 /// The public key this build may use, or `None` when it must fail closed.
 pub fn active_update_public_key(debug: bool) -> Option<&'static str> {
     match resolve_update_trust_root(debug, PRODUCTION_UPDATER_PUBLIC_KEY_BASE64) {
@@ -635,6 +683,33 @@ mod tests {
             resolve_update_trust_root(true, None),
             UpdateTrustRoot::Ready
         );
+    }
+
+    #[test]
+    fn the_signing_label_is_exact_for_each_build_state() {
+        assert_eq!(update_signing(true, None).label(), "Test key (development)");
+        assert_eq!(
+            update_signing(false, Some("a-production-key")).label(),
+            "Signed updates ready (production key)"
+        );
+        assert_eq!(
+            update_signing(false, None).label(),
+            "No production key: updates disabled"
+        );
+        assert_eq!(
+            update_signing(false, Some("   ")).label(),
+            "No production key: updates disabled"
+        );
+        assert_eq!(
+            update_signing(false, Some(TEST_UPDATER_PUBLIC_KEY_BASE64)).label(),
+            "No production key: updates disabled"
+        );
+        assert_eq!(update_signing(true, None).as_str(), "test");
+        assert_eq!(
+            update_signing(false, Some("a-production-key")).as_str(),
+            "production"
+        );
+        assert_eq!(update_signing(false, None).as_str(), "disabled");
     }
 
     #[test]

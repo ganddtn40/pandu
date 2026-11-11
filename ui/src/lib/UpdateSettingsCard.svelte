@@ -91,11 +91,11 @@
   }
 
   const trustKey = $derived(
-    status?.trust === 'ready'
-      ? 'update.trustReady'
-      : status?.trust === 'refused'
-        ? 'update.trustRefused'
-        : 'update.trustPreparing',
+    status?.signing === 'production'
+      ? 'update.signingProduction'
+      : status?.signing === 'disabled'
+        ? 'update.signingDisabled'
+        : 'update.signingTest',
   );
 </script>
 

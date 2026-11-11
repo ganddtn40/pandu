@@ -194,6 +194,7 @@ export type UpdateState =
   | 'error';
 
 export type UpdateTrust = 'ready' | 'preparing' | 'refused';
+export type UpdateSigning = 'test' | 'production' | 'disabled';
 
 /** The daemon's update view. Rendered directly; never recomputed in the UI. */
 export interface UpdateStatus {
@@ -212,6 +213,8 @@ export interface UpdateStatus {
   snoozedUntil?: string | null;
   skippedVersion?: string | null;
   trust: UpdateTrust;
+  signing: UpdateSigning;
+  signingLabel: string;
   message?: string | null;
   canInstall: boolean;
   installCommand: string;

@@ -150,7 +150,7 @@ test.describe.serial('phase 10: updates, migrations, and data safety', () => {
       'data-update-status',
       'available',
     );
-    await expect(updates).toContainText('Signed updates ready');
+    await expect(updates).toContainText('Test key (development)');
     await expect(updates).toContainText('Current version');
     await expect(updates).toContainText('0.2.0');
     await expect(updates).toContainText('Latest version');
@@ -165,11 +165,14 @@ test.describe.serial('phase 10: updates, migrations, and data safety', () => {
 
     const backup = page.locator('[data-backup-card]');
     await expect(backup).toBeVisible();
-    await expect(backup).toContainText('pandu.db');
-    await expect(backup).toContainText('pandu backup');
+    await expect(backup).toContainText('flight history');
+    await expect(backup).toContainText('pandu backup --encrypt');
     await expect(backup).toContainText('pandu restore <archive>');
     await expect(backup).toContainText('--include-remote');
     await expect(backup).toContainText('turns remote access off');
+    await expect(backup).toContainText('Data folder');
+    await expect(backup).toContainText('Open folder');
+    await expect(backup.getByRole('button', { name: 'Create backup now' })).toBeEnabled();
     await shotOf(page, '[data-backup-card]', 'settings-backup.png');
   });
 

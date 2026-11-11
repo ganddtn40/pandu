@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use pandu_core::brand;
 use pandu_core::update::{
     PRODUCTION_UPDATER_PUBLIC_KEY_BASE64, UpdateError, VersionRelation, compare_versions,
-    notes_summary, resolve_update_trust_root, sanitize_release_notes,
+    notes_summary, resolve_update_trust_root, sanitize_release_notes, update_signing,
 };
 use serde_json::json;
 
@@ -128,6 +128,7 @@ impl UpdateService {
         let enabled = self.enabled();
         let trust =
             resolve_update_trust_root(cfg!(debug_assertions), PRODUCTION_UPDATER_PUBLIC_KEY_BASE64);
+        let signing = update_signing(cfg!(debug_assertions), PRODUCTION_UPDATER_PUBLIC_KEY_BASE64);
         let runtime = self.runtime.lock().expect("update state");
         let last_checked_at = self.setting(SETTING_LAST_CHECK);
         let snoozed_until = self.setting(SETTING_SNOOZE_UNTIL);
@@ -203,6 +204,8 @@ impl UpdateService {
             snoozed_until,
             skipped_version,
             trust: trust.as_str().to_string(),
+            signing: signing.as_str().to_string(),
+            signing_label: signing.label().to_string(),
             message,
             can_install: trust == pandu_core::update::UpdateTrustRoot::Ready && latest.is_some(),
             install_command: format!("{} update", brand::CLI_COMMAND),
@@ -973,8 +976,12 @@ mod tests {
         // build with no production key must report that it cannot update.
         if cfg!(debug_assertions) {
             assert_eq!(status.trust, "ready");
+            assert_eq!(status.signing, "test");
+            assert_eq!(status.signing_label, "Test key (development)");
         } else {
             assert_eq!(status.trust, "preparing");
+            assert_eq!(status.signing, "disabled");
+            assert_eq!(status.signing_label, "No production key: updates disabled");
             assert_eq!(
                 status.message.as_deref(),
                 Some(pandu_core::update::UPDATE_PREPARING_MESSAGE)

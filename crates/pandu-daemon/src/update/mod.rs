@@ -11,8 +11,8 @@ pub mod service;
 use serde::{Deserialize, Serialize};
 
 pub use pandu_core::update::{
-    ReleaseArtifact, ReleaseManifest, UpdateError, UpdateTrustRoot, active_update_key_id,
-    active_update_public_key, resolve_update_trust_root,
+    ReleaseArtifact, ReleaseManifest, UpdateError, UpdateSigning, UpdateTrustRoot,
+    active_update_key_id, active_update_public_key, resolve_update_trust_root, update_signing,
 };
 
 pub const STATE_IDLE: &str = "idle";
@@ -44,6 +44,10 @@ pub struct UpdateStatus {
     pub snoozed_until: Option<String>,
     pub skipped_version: Option<String>,
     pub trust: String,
+    /// One of `test`, `production`, or `disabled`.
+    pub signing: String,
+    /// The exact label the UI must show for `signing`.
+    pub signing_label: String,
     pub message: Option<String>,
     pub can_install: bool,
     pub install_command: String,
