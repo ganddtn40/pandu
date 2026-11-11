@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import SafeMarkdown from './SafeMarkdown.svelte';
   import { updateApi } from './api/client';
   import { applyUpdateStatus, daemonErrorMessage, daemonState } from './api/daemon.svelte';
   import type { UpdateState } from './api/types';
@@ -169,7 +170,7 @@
     {#if status.notes}
       <details class="update-notes" data-update-notes>
         <summary>{t('update.notesTitle')}</summary>
-        <p>{status.notes}</p>
+        <SafeMarkdown source={status.notes} />
       </details>
     {:else if status.latestVersion}
       <p class="settings-card__note">{t('update.noNotes')}</p>

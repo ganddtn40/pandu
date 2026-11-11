@@ -161,6 +161,45 @@ test.describe.serial('phase 10: updates, migrations, and data safety', () => {
 
     await updates.locator('summary').click();
     await expect(updates.locator('[data-update-notes]')).toContainText('Highlights');
+    const notes = updates.locator('[data-update-notes]');
+    await expect(notes.locator('h4')).toHaveText('Highlights');
+    await expect(notes.locator('ul li')).toHaveCount(3);
+    await expect(notes.locator('li code').first()).toHaveText('pandu backup');
+    await expect(notes.locator('img')).toHaveCount(0);
+    await expect(notes.locator('script')).toHaveCount(0);
+
+    // A link is rendered as text, never as an anchor, and opening one asks first.
+    const link = notes.locator('[data-md-link]');
+    await expect(link).toHaveText('updating guide');
+    await expect(notes.locator('a')).toHaveCount(0);
+    await expect(notes.locator('[data-md-link-confirm]')).toHaveCount(0);
+    await link.click();
+    const linkConfirm = notes.locator('[data-md-link-confirm]');
+    await expect(linkConfirm).toBeVisible();
+    await expect(linkConfirm).toContainText(
+      'https://github.com/ganddtn40/pandu/blob/main/docs/updating.md',
+    );
+    await linkConfirm.locator('[data-md-link-cancel]').click();
+    await expect(linkConfirm).toHaveCount(0);
+
+    // Confirm once more, but capture window.open instead of leaving the app.
+    await page.evaluate(() => {
+      const opened: string[] = [];
+      (window as unknown as { __openedLinks: string[] }).__openedLinks = opened;
+      window.open = ((url?: string | URL) => {
+        opened.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    await link.click();
+    await linkConfirm.locator('[data-md-link-open]').click();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __openedLinks: string[] }).__openedLinks,
+      ),
+    ).toEqual(['https://github.com/ganddtn40/pandu/blob/main/docs/updating.md']);
+    await expect(linkConfirm).toHaveCount(0);
+
     await shotOf(page, '[data-update-settings]', 'settings-updates.png');
 
     const backup = page.locator('[data-backup-card]');
