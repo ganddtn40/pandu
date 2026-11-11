@@ -43,6 +43,9 @@ test.describe('model, effort, and context', () => {
     // than being presented as the live flight's meter.
     const contextSection = page.locator('[data-live-context]');
     await expect(contextSection).toContainText('Latest per flight');
+    // The section header is the only "Context" label. Repeating it on every
+    // meter made the Home tile read "Context" twice.
+    await expect(contextSection.locator('.context-meter__label')).toHaveCount(0);
     const reviewEntry = contextSection
       .locator('[data-context-flight]')
       .filter({ hasText: 'Review landing page copy' });
@@ -55,6 +58,14 @@ test.describe('model, effort, and context', () => {
     await expect(meter).toContainText('High context');
     await expect(meter).toContainText('Provider usage');
     await expect(meter).toContainText('864k / 1.0M');
+
+    const liveTile = page.locator('.tile--live');
+    await expect(liveTile.locator('.tile__body')).toContainText(
+      /checkout-service · claude-sonnet-5-5/,
+    );
+    const statLabels = await liveTile.locator('.mini-stat span').allTextContents();
+    expect(statLabels).toContain('Tokens');
+    expect(statLabels).not.toContain('tokens');
 
     await shot(page, 'home-context-meter.png');
   });

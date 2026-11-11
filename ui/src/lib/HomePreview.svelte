@@ -382,7 +382,7 @@
                 </span>
                 <h2>{live.title}</h2>
                 <p class="tile__body">
-                  {live.workspacePath || t('common.local')}{#if live.model} · {live.model}{/if}
+                  {live.workspacePath || t('common.local')}{#if live.model}{' · '}{live.model}{/if}
                 </p>
                 <div class="live-steps">
                   {#each liveEvents as event}
@@ -412,7 +412,7 @@
               <div class="live-side">
                 <div class="mini-stat"><span>{t('home.elapsed')}</span><strong>{formatElapsed(live.startedAt, now)}</strong></div>
                 <div class="mini-stat"><span>{t('common.cost')}</span><strong>{formatUsd(live.totals.totalCostUsd, live.totals.unknownCostCalls, t('common.priceUnknown'))}</strong></div>
-                <div class="mini-stat"><span>{t('common.tokens')}</span><strong>{formatTokens(sessionTokens(live))}</strong></div>
+                <div class="mini-stat"><span>{t('widgets.tokens')}</span><strong>{formatTokens(sessionTokens(live))}</strong></div>
                 <div class="mini-stat">
                   <span>{t('widgets.guards')}</span>
                   <strong class:ok={pendingCount === 0}>
@@ -442,7 +442,7 @@
                         <span class="status-pill status-pill--live">{t('context.thisFlight')}</span>
                       {/if}
                     </div>
-                    <ContextMeter meter={entry.meter} compact />
+                    <ContextMeter meter={entry.meter} compact showLabel={false} />
                   </div>
                 {/each}
               </div>

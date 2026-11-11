@@ -7,7 +7,13 @@
     meter,
     compact = false,
     label,
-  }: { meter: ContextMeterData; compact?: boolean; label?: string } = $props();
+    showLabel = true,
+  }: {
+    meter: ContextMeterData;
+    compact?: boolean;
+    label?: string;
+    showLabel?: boolean;
+  } = $props();
 
   const percent = $derived(meter.percent);
   const width = $derived(percent === undefined ? 0 : Math.min(100, Math.max(0, percent)));
@@ -34,7 +40,9 @@
   data-context-high={meter.high ? 'true' : 'false'}
 >
   <div class="context-meter__head">
-    <span class="context-meter__label">{label ?? t('context.title')}</span>
+    {#if showLabel}
+      <span class="context-meter__label">{label ?? t('context.title')}</span>
+    {/if}
     <strong class="context-meter__value">{percentText}</strong>
   </div>
   <div
