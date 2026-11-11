@@ -27,6 +27,7 @@
   let copied = $state(false);
 
   const status = $derived(daemonState.update);
+  const demo = $derived(daemonState.health?.demoMode === true);
 
   function stateKey(state: UpdateState): MessageKey {
     return STATE_KEYS[state] ?? 'update.stateError';
@@ -117,7 +118,17 @@
         {t(stateKey(status.state))}
       </span>
     {/if}
+    {#if demo}
+      <span class="status-pill status-pill--demo" data-update-demo>{t('update.demoBadge')}</span>
+    {/if}
   </div>
+
+  {#if demo}
+    <p class="update-message" data-update-demo-note>
+      <Icon name="info" size={14} />
+      {t('update.demoDisabled')}
+    </p>
+  {/if}
 
   {#if !status}
     <p class="settings-card__note">{t('update.unavailableStatus')}</p>
@@ -217,8 +228,10 @@
       <button
         class="btn btn--small btn--ghost"
         type="button"
-        disabled={!status?.canInstall}
+        disabled={demo || !status?.canInstall}
+        title={demo ? t('update.demoDisabled') : undefined}
         onclick={() => {
+          if (demo) return;
           installOpen = !installOpen;
         }}
       >

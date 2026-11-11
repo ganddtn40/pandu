@@ -14,6 +14,7 @@
   let menuEl = $state<HTMLDivElement | null>(null);
 
   const status = $derived(daemonState.update);
+  const demo = $derived(daemonState.health?.demoMode === true);
   const visible = $derived(
     status?.latestVersion != null &&
       (status.state === 'available' || status.state === 'snoozed'),
@@ -71,6 +72,9 @@
     <div class="update-card__body">
       <p class="update-card__eyebrow">
         <span class="status-pill status-pill--accent">{t('update.availableBadge')}</span>
+        {#if demo}
+          <span class="status-pill status-pill--demo" data-update-demo>{t('update.demoBadge')}</span>
+        {/if}
         <span>{t('update.channelLabel', { channel: status.channel })}</span>
         {#if status.publishedAt}
           <span>· {formatDate(status.publishedAt)}</span>
@@ -88,7 +92,12 @@
           {t('update.snoozedUntil', { time: formatDate(status.snoozedUntil) })}
         </p>
       {/if}
-      {#if status.trust !== 'ready' && status.message}
+      {#if demo}
+        <p class="update-card__warning" data-update-demo-note>
+          <Icon name="info" size={14} />
+          {t('update.demoDisabled')}
+        </p>
+      {:else if status.trust !== 'ready' && status.message}
         <p class="update-card__warning">
           <Icon name="alert" size={14} />
           {status.message}
@@ -118,9 +127,14 @@
       <button
         class="btn btn--primary"
         type="button"
-        disabled={!status.canInstall}
-        title={!status.canInstall ? (status.message ?? t('update.installUnavailable')) : undefined}
+        disabled={demo || !status.canInstall}
+        title={demo
+          ? t('update.demoDisabled')
+          : !status.canInstall
+            ? (status.message ?? t('update.installUnavailable'))
+            : undefined}
         onclick={() => {
+          if (demo) return;
           installOpen = !installOpen;
         }}
       >

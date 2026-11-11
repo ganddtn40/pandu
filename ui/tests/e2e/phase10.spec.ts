@@ -89,6 +89,11 @@ test.describe.serial('phase 10: updates, migrations, and data safety', () => {
     await expect(card).toContainText('You have 0.2.0.');
     await expect(card).toContainText('Backup and restore');
     await expect(card).toContainText('stable channel');
+    // The update daemon runs with demo data. The card must say so and must not
+    // offer a real install.
+    await expect(card.locator('[data-update-demo]')).toHaveText('Demo');
+    await expect(card.locator('[data-update-demo-note]')).toContainText('demo data');
+    await expect(card.getByRole('button', { name: 'Update now' })).toBeDisabled();
     // The fixture body contains an image tag. Notes are sanitized before the
     // UI renders them, so neither the tag nor its remote URL may appear.
     await expect(card).not.toContainText('tracker.png');
@@ -150,6 +155,9 @@ test.describe.serial('phase 10: updates, migrations, and data safety', () => {
     await expect(updates).toContainText('0.2.0');
     await expect(updates).toContainText('Latest version');
     await expect(updates).toContainText('0.3.0');
+    await expect(updates.locator('[data-update-demo]')).toHaveText('Demo');
+    await expect(updates.locator('[data-update-demo-note]')).toContainText('demo data');
+    await expect(updates.getByRole('button', { name: 'Update now' })).toBeDisabled();
 
     await updates.locator('summary').click();
     await expect(updates.locator('[data-update-notes]')).toContainText('Highlights');
