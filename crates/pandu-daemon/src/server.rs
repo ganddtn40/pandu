@@ -484,6 +484,18 @@ pub(crate) const HOST_ROUTES: &[HostRoute] = &[
         path: "/migrations",
         build: || get(update::migrations),
     },
+    // Backup and folder reveal are host-only. The remote listener never sees
+    // them, and the CSRF middleware covers both POST routes.
+    HostRoute {
+        method: "POST",
+        path: "/backup",
+        build: || post(api::create_backup),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/reveal",
+        build: || post(api::reveal),
+    },
     HostRoute {
         method: "POST",
         path: "/demo/seed",

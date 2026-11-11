@@ -7,12 +7,19 @@
 
 use std::collections::BTreeMap;
 use std::fs::File;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+use argon2::{Algorithm, Argon2, Params, Version};
+use chacha20poly1305::XChaCha20Poly1305;
+use chacha20poly1305::aead::KeyInit;
+use chacha20poly1305::aead::generic_array::GenericArray;
+use chacha20poly1305::aead::stream::{DecryptorBE32, EncryptorBE32};
 use chrono::{SecondsFormat, Utc};
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 use pandu_core::brand;
@@ -26,10 +33,28 @@ use crate::store::{
 pub const BACKUP_SCHEMA: u32 = 1;
 pub const MANIFEST_FILE: &str = "manifest.json";
 pub const SETTINGS_FILE: &str = "settings.json";
+/// Encrypted archives start with this marker. The header that follows carries
+/// the Argon2id parameters, salt, and XChaCha20-Poly1305 nonce.
+pub const ENCRYPTED_MAGIC: &[u8] = b"PANDU-BACKUP-ENC-1\n";
 /// Upper bound on the compressed archive. A local archive is never trusted
 /// just because the user picked it.
 const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+const SALT_LEN: usize = 16;
+/// XChaCha20-Poly1305 has a 24-byte nonce. The stream API spends the last five
+/// bytes on the block counter and the final-block flag, so the caller supplies
+/// the 19-byte prefix and the header stores exactly that prefix.
+const NONCE_LEN: usize = 19;
+const TAG_LEN: usize = 16;
+const CHUNK_SIZE: usize = 1024 * 1024;
+const KDF_MEMORY_KIB: u32 = 64 * 1024;
+const KDF_ITERATIONS: u32 = 3;
+const KDF_PARALLELISM: u32 = 1;
+const MAX_KDF_MEMORY_KIB: u32 = 256 * 1024;
+const MAX_KDF_ITERATIONS: u32 = 10;
+const MAX_KDF_PARALLELISM: u32 = 4;
+const ENCRYPTION_HEADER_BYTES: usize = ENCRYPTED_MAGIC.len() + 12 + SALT_LEN + NONCE_LEN;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +76,7 @@ pub struct BackupSummary {
     pub database_schema: u32,
     pub settings_count: usize,
     pub include_remote: bool,
+    pub encrypted: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,15 +87,23 @@ pub struct RestoreSummary {
     pub database_schema: u32,
     pub settings_count: usize,
     pub include_remote: bool,
+    pub encrypted: bool,
     pub remote_enabled: bool,
     pub pre_restore_backup: Option<String>,
 }
 
 /// Create a backup archive. `destination` must not already exist.
+///
+/// The archive contains flight history: prompts, responses, tool output, and
+/// code snapshots. Secret-looking settings and remote device tokens are
+/// excluded, but the remaining content can still be sensitive. When a
+/// passphrase is supplied the tar.gz is encrypted with XChaCha20-Poly1305 and
+/// an Argon2id key. Every archive is created owner-only.
 pub fn create_backup(
     database: &Path,
     destination: &Path,
     include_remote: bool,
+    passphrase: Option<&str>,
 ) -> Result<BackupSummary> {
     if !database.exists() {
         return Err(DaemonError::config(format!(
@@ -121,7 +155,28 @@ pub fn create_backup(
         .map_err(|error| DaemonError::other(format!("could not finish the backup: {error}")))?;
     file.sync_all()?;
     drop(file);
-    std::fs::rename(&pending, destination)?;
+
+    let encrypted = passphrase.is_some();
+    if let Some(passphrase) = passphrase {
+        let encrypted_pending = encrypted_pending_path(destination);
+        let _ = std::fs::remove_file(&encrypted_pending);
+        if let Err(error) = encrypt_file(&pending, &encrypted_pending, passphrase) {
+            let _ = std::fs::remove_file(&pending);
+            let _ = std::fs::remove_file(&encrypted_pending);
+            return Err(error);
+        }
+        std::fs::remove_file(&pending)?;
+        if let Err(error) = std::fs::rename(&encrypted_pending, destination) {
+            let _ = std::fs::remove_file(&encrypted_pending);
+            return Err(error.into());
+        }
+    } else {
+        std::fs::rename(&pending, destination)?;
+    }
+    if let Err(error) = restrict_to_owner(destination) {
+        let _ = std::fs::remove_file(destination);
+        return Err(error);
+    }
 
     Ok(BackupSummary {
         path: destination.display().to_string(),
@@ -129,7 +184,34 @@ pub fn create_backup(
         database_schema,
         settings_count: settings.len(),
         include_remote,
+        encrypted,
     })
+}
+
+/// The default archive name for a data directory.
+pub fn default_backup_path(home: &Path, encrypted: bool) -> PathBuf {
+    let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let suffix = if encrypted { "tar.gz.enc" } else { "tar.gz" };
+    let directory = home.join("backups");
+    let mut candidate = directory.join(format!("{}-backup-{stamp}.{suffix}", brand::SLUG));
+    for attempt in 1..100 {
+        if !candidate.exists() {
+            break;
+        }
+        candidate = directory.join(format!("{}-backup-{stamp}-{attempt}.{suffix}", brand::SLUG));
+    }
+    candidate
+}
+
+/// Whether an archive is encrypted, without asking for a passphrase.
+pub fn is_encrypted_archive(archive: &Path) -> Result<bool> {
+    let mut file = File::open(archive)?;
+    let mut magic = vec![0u8; ENCRYPTED_MAGIC.len()];
+    match file.read_exact(&mut magic) {
+        Ok(()) => Ok(magic == ENCRYPTED_MAGIC),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Restore a backup archive over `database`.
@@ -137,7 +219,11 @@ pub fn create_backup(
 /// The current database is copied to a timestamped pre-restore file first. The
 /// archive is validated before anything is replaced, and remote access is off
 /// after the restore no matter what the archive says.
-pub fn restore_backup(archive: &Path, database: &Path) -> Result<RestoreSummary> {
+pub fn restore_backup(
+    archive: &Path,
+    database: &Path,
+    passphrase: Option<&str>,
+) -> Result<RestoreSummary> {
     if !archive.exists() {
         return Err(DaemonError::config(format!(
             "the backup {} does not exist",
@@ -156,7 +242,20 @@ pub fn restore_backup(archive: &Path, database: &Path) -> Result<RestoreSummary>
     let workspace = tempfile::Builder::new()
         .prefix(".pandu-restore-")
         .tempdir_in(parent)?;
-    extract(archive, workspace.path())?;
+    let encrypted = is_encrypted_archive(archive)?;
+    let plaintext_archive = if encrypted {
+        let Some(passphrase) = passphrase else {
+            return Err(DaemonError::config(
+                "this backup is encrypted. Provide the passphrase to restore it.",
+            ));
+        };
+        let decrypted = workspace.path().join("archive.tar.gz");
+        decrypt_file(archive, &decrypted, passphrase)?;
+        decrypted
+    } else {
+        archive.to_path_buf()
+    };
+    extract(&plaintext_archive, workspace.path())?;
 
     let manifest: BackupManifest = read_json(&workspace.path().join(MANIFEST_FILE))?;
     if manifest.schema != BACKUP_SCHEMA {
@@ -253,6 +352,7 @@ pub fn restore_backup(archive: &Path, database: &Path) -> Result<RestoreSummary>
         database_schema: prepared_version,
         settings_count: settings.len(),
         include_remote: manifest.include_remote,
+        encrypted,
         remote_enabled: false,
         pre_restore_backup: pre_restore.map(|path| path.display().to_string()),
     })
@@ -386,6 +486,239 @@ fn pending_path(destination: &Path) -> PathBuf {
     destination.with_file_name(format!(".{name}.pending"))
 }
 
+fn encrypted_pending_path(destination: &Path) -> PathBuf {
+    let name = destination
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "backup".to_string());
+    destination.with_file_name(format!(".{name}.pending.enc"))
+}
+
+fn create_owner_only(path: &Path) -> Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    Ok(options.open(path)?)
+}
+
+/// Restrict an archive to the current user. On Unix this is mode 0600. On
+/// Windows it removes inherited ACEs and grants full control to the current
+/// user SID with `icacls`, which is present on supported Windows versions.
+fn restrict_to_owner(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let sid = current_user_sid().ok_or_else(|| {
+            DaemonError::other("could not determine the current Windows user SID")
+        })?;
+        let output = std::process::Command::new("icacls")
+            .arg(path)
+            .arg("/inheritance:r")
+            .arg("/grant:r")
+            .arg(format!("*{sid}:F"))
+            .output()
+            .map_err(|error| {
+                DaemonError::other(format!("could not set owner-only permissions: {error}"))
+            })?;
+        if !output.status.success() {
+            return Err(DaemonError::other(
+                "could not set owner-only permissions on the backup",
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn current_user_sid() -> Option<String> {
+    let output = std::process::Command::new("whoami")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let sid = text.split(',').nth(1)?.trim().trim_matches('"').to_string();
+    sid.starts_with("S-1-").then_some(sid)
+}
+
+fn derive_key(
+    passphrase: &str,
+    salt: &[u8],
+    memory_kib: u32,
+    iterations: u32,
+    parallelism: u32,
+) -> Result<[u8; 32]> {
+    if passphrase.is_empty() {
+        return Err(DaemonError::config("the backup passphrase is empty"));
+    }
+    let params = Params::new(memory_kib, iterations, parallelism, Some(32)).map_err(|error| {
+        DaemonError::config(format!("invalid backup encryption parameters: {error}"))
+    })?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = [0u8; 32];
+    argon
+        .hash_password_into(passphrase.as_bytes(), salt, &mut key)
+        .map_err(|error| DaemonError::other(format!("could not derive the backup key: {error}")))?;
+    Ok(key)
+}
+
+fn cipher(
+    passphrase: &str,
+    salt: &[u8],
+    memory_kib: u32,
+    iterations: u32,
+    parallelism: u32,
+) -> Result<XChaCha20Poly1305> {
+    let key = derive_key(passphrase, salt, memory_kib, iterations, parallelism)?;
+    XChaCha20Poly1305::new_from_slice(&key)
+        .map_err(|_| DaemonError::other("could not initialize backup encryption"))
+}
+
+fn encrypt_file(source: &Path, destination: &Path, passphrase: &str) -> Result<()> {
+    let total = std::fs::metadata(source)?.len();
+    let mut salt = [0u8; SALT_LEN];
+    let mut nonce = [0u8; NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut salt);
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    let cipher = cipher(
+        passphrase,
+        &salt,
+        KDF_MEMORY_KIB,
+        KDF_ITERATIONS,
+        KDF_PARALLELISM,
+    )?;
+    let mut encryptor = EncryptorBE32::from_aead(cipher, GenericArray::from_slice(&nonce));
+    let mut input = BufReader::new(File::open(source)?);
+    let mut output = BufWriter::new(create_owner_only(destination)?);
+
+    output.write_all(ENCRYPTED_MAGIC)?;
+    output.write_all(&KDF_MEMORY_KIB.to_le_bytes())?;
+    output.write_all(&KDF_ITERATIONS.to_le_bytes())?;
+    output.write_all(&KDF_PARALLELISM.to_le_bytes())?;
+    output.write_all(&salt)?;
+    output.write_all(&nonce)?;
+
+    let full_chunks = total / CHUNK_SIZE as u64;
+    let remainder = total % CHUNK_SIZE as u64;
+    let mut buffer = vec![0u8; CHUNK_SIZE];
+    // Every chunk but the final one is sealed with `encrypt_next`. The final
+    // chunk consumes the encryptor, so it is handled outside the loop.
+    let next_chunks = if remainder == 0 && full_chunks > 0 {
+        full_chunks - 1
+    } else {
+        full_chunks
+    };
+    for _ in 0..next_chunks {
+        input.read_exact(&mut buffer)?;
+        let encrypted = encryptor
+            .encrypt_next(&buffer[..])
+            .map_err(|_| DaemonError::other("could not encrypt the backup"))?;
+        output.write_all(&encrypted)?;
+    }
+    if remainder > 0 {
+        let mut tail = vec![0u8; remainder as usize];
+        input.read_exact(&mut tail)?;
+        let encrypted = encryptor
+            .encrypt_last(&tail[..])
+            .map_err(|_| DaemonError::other("could not encrypt the backup"))?;
+        output.write_all(&encrypted)?;
+    } else if full_chunks > 0 {
+        input.read_exact(&mut buffer)?;
+        let encrypted = encryptor
+            .encrypt_last(&buffer[..])
+            .map_err(|_| DaemonError::other("could not encrypt the backup"))?;
+        output.write_all(&encrypted)?;
+    } else {
+        let encrypted = encryptor
+            .encrypt_last(&[][..])
+            .map_err(|_| DaemonError::other("could not encrypt the backup"))?;
+        output.write_all(&encrypted)?;
+    }
+    output.flush()?;
+    output.get_ref().sync_all()?;
+    Ok(())
+}
+
+fn decrypt_file(source: &Path, destination: &Path, passphrase: &str) -> Result<()> {
+    let total = std::fs::metadata(source)?.len();
+    if total < ENCRYPTION_HEADER_BYTES as u64 + TAG_LEN as u64 {
+        return Err(DaemonError::config(
+            "the encrypted backup is truncated or not a backup archive.",
+        ));
+    }
+    let mut input = BufReader::new(File::open(source)?);
+    let mut magic = vec![0u8; ENCRYPTED_MAGIC.len()];
+    input.read_exact(&mut magic)?;
+    if magic != ENCRYPTED_MAGIC {
+        return Err(DaemonError::config(
+            "the backup is not in the encrypted backup format.",
+        ));
+    }
+    let mut params = [0u8; 12];
+    input.read_exact(&mut params)?;
+    let memory_kib = u32::from_le_bytes(params[0..4].try_into().expect("four bytes"));
+    let iterations = u32::from_le_bytes(params[4..8].try_into().expect("four bytes"));
+    let parallelism = u32::from_le_bytes(params[8..12].try_into().expect("four bytes"));
+    if !(1024..=MAX_KDF_MEMORY_KIB).contains(&memory_kib)
+        || !(1..=MAX_KDF_ITERATIONS).contains(&iterations)
+        || !(1..=MAX_KDF_PARALLELISM).contains(&parallelism)
+    {
+        return Err(DaemonError::config(
+            "the encrypted backup uses unsupported key-derivation parameters.",
+        ));
+    }
+    let mut salt = [0u8; SALT_LEN];
+    let mut nonce = [0u8; NONCE_LEN];
+    input.read_exact(&mut salt)?;
+    input.read_exact(&mut nonce)?;
+
+    let cipher = cipher(passphrase, &salt, memory_kib, iterations, parallelism)?;
+    let mut decryptor = DecryptorBE32::from_aead(cipher, GenericArray::from_slice(&nonce));
+    let mut output = BufWriter::new(create_owner_only(destination)?);
+    let mut remaining = total - ENCRYPTION_HEADER_BYTES as u64;
+    let chunk_size = (CHUNK_SIZE + TAG_LEN) as u64;
+    let chunks = remaining.div_ceil(chunk_size);
+    let mut buffer = vec![0u8; CHUNK_SIZE + TAG_LEN];
+    for index in 0..chunks {
+        let chunk_len = remaining.min(chunk_size) as usize;
+        input.read_exact(&mut buffer[..chunk_len])?;
+        if index + 1 == chunks {
+            let plaintext = decryptor.decrypt_last(&buffer[..chunk_len]).map_err(|_| {
+                DaemonError::config(
+                    "the backup could not be decrypted. The passphrase is wrong, or the archive is damaged.",
+                )
+            })?;
+            output.write_all(&plaintext)?;
+            remaining -= chunk_len as u64;
+            break;
+        }
+        let plaintext = decryptor.decrypt_next(&buffer[..chunk_len]).map_err(|_| {
+            DaemonError::config(
+                "the backup could not be decrypted. The passphrase is wrong, or the archive is damaged.",
+            )
+        })?;
+        output.write_all(&plaintext)?;
+        remaining -= chunk_len as u64;
+    }
+    debug_assert_eq!(remaining, 0);
+    output.flush()?;
+    output.get_ref().sync_all()?;
+    Ok(())
+}
+
 fn pre_restore_path(database: &Path) -> PathBuf {
     unique_path(database, "pre-restore")
 }
@@ -470,7 +803,7 @@ mod tests {
 
     fn archive(directory: &Path, database: &Path, include_remote: bool) -> PathBuf {
         let path = directory.join("backup.tar.gz");
-        create_backup(database, &path, include_remote).unwrap();
+        create_backup(database, &path, include_remote, None).unwrap();
         path
     }
 
@@ -486,8 +819,13 @@ mod tests {
         let database = database_with_data(directory.path());
         let archive = archive(directory.path(), &database, false);
 
-        let summary =
-            create_backup(&database, &directory.path().join("second.tar.gz"), false).unwrap();
+        let summary = create_backup(
+            &database,
+            &directory.path().join("second.tar.gz"),
+            false,
+            None,
+        )
+        .unwrap();
         assert_eq!(summary.settings_count, 3, "only safe settings are exported");
         assert_eq!(summary.database_schema, SCHEMA_VERSION);
 
@@ -576,7 +914,7 @@ mod tests {
         store.checkpoint().unwrap();
         drop(store);
 
-        let summary = restore_backup(&archive, &database).unwrap();
+        let summary = restore_backup(&archive, &database, None).unwrap();
         assert_eq!(summary.database_schema, SCHEMA_VERSION);
         assert!(!summary.remote_enabled);
         assert!(summary.pre_restore_backup.is_some());
@@ -640,7 +978,9 @@ mod tests {
         }
 
         let before = std::fs::read(&database).unwrap();
-        let error = restore_backup(&archive, &database).unwrap_err().to_string();
+        let error = restore_backup(&archive, &database, None)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("newer version"), "{error}");
         assert!(error.contains("Update Pandu"), "{error}");
         assert_eq!(std::fs::read(&database).unwrap(), before);
@@ -668,7 +1008,9 @@ mod tests {
         );
 
         let before = std::fs::read(&database).unwrap();
-        let error = restore_backup(&archive, &database).unwrap_err().to_string();
+        let error = restore_backup(&archive, &database, None)
+            .unwrap_err()
+            .to_string();
         assert!(
             error.contains("integrity check") || error.contains("database"),
             "{error}"
@@ -692,13 +1034,111 @@ mod tests {
         builder.append(&header, &b"evil"[..]).unwrap();
         builder.into_inner().unwrap().finish().unwrap();
 
-        let error = restore_backup(&archive, &directory.path().join(brand::DATABASE_FILE))
+        let error = restore_backup(&archive, &directory.path().join(brand::DATABASE_FILE), None)
             .unwrap_err()
             .to_string();
         assert!(
             error.contains("absolute path") || error.contains("nested path"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn an_encrypted_backup_round_trips_with_the_passphrase() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = database_with_data(directory.path());
+        let archive = directory.path().join("encrypted.tar.gz.enc");
+        let summary = create_backup(&database, &archive, false, Some("correct horse")).unwrap();
+        assert!(summary.encrypted);
+        assert!(is_encrypted_archive(&archive).unwrap());
+        let header = std::fs::read(&archive).unwrap();
+        assert!(header.starts_with(ENCRYPTED_MAGIC));
+        assert!(
+            !header.windows(4).any(|window| window == b"pandu.db"),
+            "the encrypted archive must not expose plaintext tar entries"
+        );
+
+        let summary = restore_backup(&archive, &database, Some("correct horse")).unwrap();
+        assert!(summary.encrypted);
+        let store = Store::open(&database).unwrap();
+        assert_eq!(
+            store.get_setting("appearance.theme").unwrap().as_deref(),
+            Some("dark")
+        );
+        assert_eq!(store.list_sessions(10, 0, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_encrypted_backup_refuses_a_wrong_passphrase() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = database_with_data(directory.path());
+        let archive = directory.path().join("encrypted.tar.gz.enc");
+        create_backup(&database, &archive, false, Some("correct horse")).unwrap();
+        let before = std::fs::read(&database).unwrap();
+
+        let error = restore_backup(&archive, &database, Some("battery staple"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("passphrase is wrong"), "{error}");
+        assert_eq!(std::fs::read(&database).unwrap(), before);
+    }
+
+    #[test]
+    fn an_encrypted_backup_requires_a_passphrase() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = database_with_data(directory.path());
+        let archive = directory.path().join("encrypted.tar.gz.enc");
+        create_backup(&database, &archive, false, Some("correct horse")).unwrap();
+        let before = std::fs::read(&database).unwrap();
+
+        let error = restore_backup(&archive, &database, None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("encrypted"), "{error}");
+        assert_eq!(std::fs::read(&database).unwrap(), before);
+    }
+
+    #[test]
+    fn archives_are_readable_only_by_the_current_user() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = database_with_data(directory.path());
+        let archive = archive(directory.path(), &database, false);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&archive).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "archive mode must be owner-only");
+        }
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("icacls")
+                .arg(&archive)
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success(), "{text}");
+            let whoami = std::process::Command::new("whoami").output().unwrap();
+            let user = String::from_utf8_lossy(&whoami.stdout).trim().to_string();
+            assert!(
+                text.to_lowercase().contains(&user.to_lowercase()),
+                "missing owner ACE for {user}: {text}"
+            );
+            assert!(
+                !text.contains("(I)"),
+                "inherited ACEs remain on the archive: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_backup_path_uses_the_documented_names() {
+        let directory = tempfile::tempdir().unwrap();
+        let plain = default_backup_path(directory.path(), false);
+        assert_eq!(plain.parent().unwrap(), directory.path().join("backups"));
+        assert!(plain.to_string_lossy().ends_with(".tar.gz"));
+        let encrypted = default_backup_path(directory.path(), true);
+        assert!(encrypted.to_string_lossy().ends_with(".tar.gz.enc"));
     }
 
     #[test]

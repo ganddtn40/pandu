@@ -87,6 +87,14 @@ The default output is
 - `settings.json` — non-secret settings
 - `pandu.db` — a consistent copy made with the SQLite backup API
 
+The database holds your flight history: prompts, responses, tool output, and
+code snapshots. It is not a metadata-only export. Treat every archive as
+private even though secret settings and remote tokens are filtered out.
+
+The host UI can create the same unencrypted archive from Settings → Backup and
+restore, and can open the data or backup folder. Those actions exist only on the
+host listener and require the CSRF token; a paired device cannot call them.
+
 Settings whose names look like tokens, passwords, credentials, API keys,
 private keys, pairing codes, or PIN hashes are always excluded. Remote device
 tokens are excluded by default. To include them:
@@ -97,6 +105,33 @@ pandu backup --include-remote
 
 Pandu warns you when you do this. The archive then contains pairing material;
 keep it private and delete it when you no longer need it.
+
+Pandu creates every archive readable only by your user account: mode `0600` on
+Unix and an owner-only ACL on Windows. On Windows the ACL is set with `icacls`;
+if it cannot be applied, Pandu deletes the archive and reports the failure.
+
+### Encrypting a backup
+
+Pass `--encrypt` to protect the archive with a passphrase:
+
+```powershell
+pandu backup --encrypt
+```
+
+Pandu prompts for the passphrase twice. For scripts, set
+`PANDU_BACKUP_PASSPHRASE` instead; the value never appears in argv or logs. The
+archive is encrypted with XChaCha20-Poly1305 (streaming AEAD) and a 32-byte key
+derived with Argon2id (64 MiB memory, 3 iterations, 1 lane). The header stores
+only the KDF parameters, a random salt, and a random nonce. The file name ends
+in `.tar.gz.enc`.
+
+```powershell
+pandu restore .\backups\pandu-backup-20261111T090000Z.tar.gz.enc
+```
+
+Restore prompts for the passphrase when the archive is encrypted. A wrong
+passphrase fails authentication before any database file is replaced. Keep the
+passphrase somewhere safe: there is no recovery key.
 
 Backups do not include `snapshots/`, `adapters/`, `remote-tls/`, or installed
 market entries. Copy those separately if you need them.

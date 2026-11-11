@@ -308,16 +308,29 @@ const en = {
   'settings.updates': 'Updates',
   'settings.updatesNote': 'Signed updates from GitHub Releases. Checked at most once a day, never installed silently.',
   'settings.backupTitle': 'Backup and restore',
-  'settings.backupNote': 'One archive for your database and settings. Never secrets.',
+  'settings.backupNote':
+    'The archive contains your flight history: prompts, responses, tool output, and code snapshots. Treat it as private.',
   'settings.backupData': 'Data location',
+  'settings.backupDataFolder': 'Data folder',
+  'settings.backupBackupFolder': 'Backup folder',
   'settings.backupInclude': 'Included',
-  'settings.backupIncluded': 'Flights, settings, themes, market manifests, and model overrides.',
-  'settings.backupCommand': 'Create a backup',
+  'settings.backupIncluded':
+    'Flights with prompts, responses, tool output, and code snapshots, plus settings, themes, market manifests, and model overrides.',
+  'settings.backupCommand': 'Create a backup in the terminal',
   'settings.backupRestoreCommand': 'Restore a backup',
   'settings.backupExcluded': 'Remote device tokens and secret-looking settings are excluded by default.',
   'settings.backupRemote': 'Use --include-remote only when you need paired devices back. That archive becomes sensitive.',
   'settings.backupRestoreNote': 'Restoring stops the daemon, saves a pre-restore snapshot, and turns remote access off.',
   'settings.backupUninstall': 'Uninstalling Pandu never deletes this data. Deleting it is a separate, explicit choice.',
+  'settings.backupWarning': 'Backups are not encrypted unless you pass --encrypt. Keep the file somewhere only you can read it.',
+  'settings.backupEncryptHint': 'Use pandu backup --encrypt to protect the archive with a passphrase (XChaCha20-Poly1305 and Argon2id).',
+  'settings.backupPermissions': 'Backups are created readable only by your user account.',
+  'settings.backupCreate': 'Create backup now',
+  'settings.backupCreating': 'Creating backup…',
+  'settings.backupCreated': 'Backup created at {path}',
+  'settings.backupCreateFailed': 'Could not create the backup.',
+  'settings.backupOpenFolder': 'Open folder',
+  'settings.backupOpenFailed': 'Could not open the folder.',
   'settings.backupDocs': 'Read the data safety guide',
   'settings.settingsMap': 'Daemon settings',
   'settings.settingsMapNote': 'Read-only values stored by the daemon.',
@@ -1386,16 +1399,31 @@ const id: Catalog = {
   'settings.updates': 'Pembaruan',
   'settings.updatesNote': 'Pembaruan bertanda tangan dari GitHub Releases. Diperiksa paling sering sekali sehari, tidak pernah dipasang diam-diam.',
   'settings.backupTitle': 'Cadangkan dan pulihkan',
-  'settings.backupNote': 'Satu arsip untuk basis data dan pengaturan. Tidak pernah berisi rahasia.',
+  'settings.backupNote':
+    'Arsip berisi riwayat penerbangan Anda: prompt, respons, keluaran alat, dan cuplikan kode. Perlakukan sebagai rahasia pribadi.',
   'settings.backupData': 'Lokasi data',
+  'settings.backupDataFolder': 'Folder data',
+  'settings.backupBackupFolder': 'Folder cadangan',
   'settings.backupInclude': 'Termasuk',
-  'settings.backupIncluded': 'Penerbangan, pengaturan, tema, manifes pasar, dan penggantian model.',
-  'settings.backupCommand': 'Buat cadangan',
+  'settings.backupIncluded':
+    'Penerbangan dengan prompt, respons, keluaran alat, dan cuplikan kode, plus pengaturan, tema, manifes pasar, dan penggantian model.',
+  'settings.backupCommand': 'Buat cadangan di terminal',
   'settings.backupRestoreCommand': 'Pulihkan cadangan',
   'settings.backupExcluded': 'Token perangkat remote dan pengaturan yang tampak rahasia dikecualikan secara bawaan.',
   'settings.backupRemote': 'Gunakan --include-remote hanya bila Anda perlu memulihkan perangkat terpasang. Arsip itu menjadi sensitif.',
   'settings.backupRestoreNote': 'Pemulihan menghentikan daemon, menyimpan snapshot pra-pemulihan, dan mematikan akses remote.',
   'settings.backupUninstall': 'Menghapus Pandu tidak pernah menghapus data ini. Penghapusan adalah pilihan tegas terpisah.',
+  'settings.backupWarning':
+    'Cadangan tidak dienkripsi kecuali Anda memakai --encrypt. Simpan file di tempat yang hanya bisa Anda baca.',
+  'settings.backupEncryptHint':
+    'Gunakan pandu backup --encrypt untuk melindungi arsip dengan frasa sandi (XChaCha20-Poly1305 dan Argon2id).',
+  'settings.backupPermissions': 'Cadangan dibuat hanya dapat dibaca oleh akun pengguna Anda.',
+  'settings.backupCreate': 'Buat cadangan sekarang',
+  'settings.backupCreating': 'Membuat cadangan…',
+  'settings.backupCreated': 'Cadangan dibuat di {path}',
+  'settings.backupCreateFailed': 'Tidak dapat membuat cadangan.',
+  'settings.backupOpenFolder': 'Buka folder',
+  'settings.backupOpenFailed': 'Tidak dapat membuka folder.',
   'settings.backupDocs': 'Baca panduan keamanan data',
   'update.availableBadge': 'Pembaruan tersedia',
   'update.availableTitle': 'Versi {version} sudah siap',
@@ -1485,12 +1513,15 @@ const es: Catalog = {
   'settings.updatesNote':
     'Actualizaciones firmadas desde GitHub Releases. Se comprueban como máximo una vez al día y nunca se instalan en silencio.',
   'settings.backupTitle': 'Copia de seguridad y restauración',
-  'settings.backupNote': 'Un archivo para tu base de datos y ajustes. Nunca secretos.',
+  'settings.backupNote':
+    'El archivo contiene tu historial de vuelos: prompts, respuestas, salida de herramientas y capturas de código. Trátalo como privado.',
   'settings.backupData': 'Ubicación de los datos',
+  'settings.backupDataFolder': 'Carpeta de datos',
+  'settings.backupBackupFolder': 'Carpeta de copias',
   'settings.backupInclude': 'Incluye',
   'settings.backupIncluded':
-    'Vuelos, ajustes, temas, manifiestos del mercado y cambios de modelo.',
-  'settings.backupCommand': 'Crear copia',
+    'Vuelos con prompts, respuestas, salida de herramientas y capturas de código, además de ajustes, temas, manifiestos del mercado y cambios de modelo.',
+  'settings.backupCommand': 'Crear copia en la terminal',
   'settings.backupRestoreCommand': 'Restaurar copia',
   'settings.backupExcluded':
     'Los tokens de dispositivos remotos y los ajustes que parecen secretos se excluyen por defecto.',
@@ -1500,6 +1531,18 @@ const es: Catalog = {
     'Restaurar detiene el daemon, guarda una instantánea previa y desactiva el acceso remoto.',
   'settings.backupUninstall':
     'Desinstalar Pandu nunca borra estos datos. Borrarlos es una decisión aparte y explícita.',
+  'settings.backupWarning':
+    'Las copias no se cifran salvo que uses --encrypt. Guarda el archivo donde solo tú puedas leerlo.',
+  'settings.backupEncryptHint':
+    'Usa pandu backup --encrypt para proteger la copia con una frase de contraseña (XChaCha20-Poly1305 y Argon2id).',
+  'settings.backupPermissions':
+    'Las copias se crean para que solo tu cuenta de usuario pueda leerlas.',
+  'settings.backupCreate': 'Crear copia ahora',
+  'settings.backupCreating': 'Creando copia…',
+  'settings.backupCreated': 'Copia creada en {path}',
+  'settings.backupCreateFailed': 'No se pudo crear la copia.',
+  'settings.backupOpenFolder': 'Abrir carpeta',
+  'settings.backupOpenFailed': 'No se pudo abrir la carpeta.',
   'settings.backupDocs': 'Leer la guía de seguridad de datos',
   'update.availableBadge': 'Actualización disponible',
   'update.availableTitle': 'La versión {version} está lista',
@@ -1593,12 +1636,15 @@ const fr: Catalog = {
   'settings.updatesNote':
     'Mises à jour signées depuis GitHub Releases. Vérifiées au plus une fois par jour, jamais installées en silence.',
   'settings.backupTitle': 'Sauvegarde et restauration',
-  'settings.backupNote': 'Une archive pour votre base de données et vos réglages. Jamais de secrets.',
+  'settings.backupNote':
+    'L’archive contient votre historique de vols : prompts, réponses, sorties d’outils et captures de code. Traitez-la comme privée.',
   'settings.backupData': 'Emplacement des données',
+  'settings.backupDataFolder': 'Dossier des données',
+  'settings.backupBackupFolder': 'Dossier des sauvegardes',
   'settings.backupInclude': 'Contenu',
   'settings.backupIncluded':
-    'Vols, réglages, thèmes, manifestes du marché et remplacements de modèles.',
-  'settings.backupCommand': 'Créer une sauvegarde',
+    'Vols avec prompts, réponses, sorties d’outils et captures de code, plus réglages, thèmes, manifestes du marché et remplacements de modèles.',
+  'settings.backupCommand': 'Créer une sauvegarde dans le terminal',
   'settings.backupRestoreCommand': 'Restaurer une sauvegarde',
   'settings.backupExcluded':
     'Les jetons d’appareils distants et les réglages ressemblant à des secrets sont exclus par défaut.',
@@ -1608,6 +1654,18 @@ const fr: Catalog = {
     'La restauration arrête le daemon, enregistre un instantané préalable et désactive l’accès distant.',
   'settings.backupUninstall':
     'Désinstaller Pandu ne supprime jamais ces données. Les effacer est un choix distinct et explicite.',
+  'settings.backupWarning':
+    'Les sauvegardes ne sont pas chiffrées sauf si vous utilisez --encrypt. Gardez le fichier là où vous seul pouvez le lire.',
+  'settings.backupEncryptHint':
+    'Utilisez pandu backup --encrypt pour protéger l’archive avec une phrase secrète (XChaCha20-Poly1305 et Argon2id).',
+  'settings.backupPermissions':
+    'Les sauvegardes sont créées en lecture seule pour votre compte utilisateur.',
+  'settings.backupCreate': 'Créer une sauvegarde',
+  'settings.backupCreating': 'Création de la sauvegarde…',
+  'settings.backupCreated': 'Sauvegarde créée dans {path}',
+  'settings.backupCreateFailed': 'Impossible de créer la sauvegarde.',
+  'settings.backupOpenFolder': 'Ouvrir le dossier',
+  'settings.backupOpenFailed': 'Impossible d’ouvrir le dossier.',
   'settings.backupDocs': 'Lire le guide de sécurité des données',
   'update.availableBadge': 'Mise à jour disponible',
   'update.availableTitle': 'La version {version} est prête',
@@ -1701,12 +1759,15 @@ const de: Catalog = {
   'settings.updatesNote':
     'Signierte Updates von GitHub Releases. Höchstens einmal täglich geprüft, nie still installiert.',
   'settings.backupTitle': 'Sichern und wiederherstellen',
-  'settings.backupNote': 'Ein Archiv für Datenbank und Einstellungen. Niemals Geheimnisse.',
+  'settings.backupNote':
+    'Das Archiv enthält deinen Flugverlauf: Prompts, Antworten, Tool-Ausgaben und Code-Snapshots. Behandle es vertraulich.',
   'settings.backupData': 'Datenablage',
+  'settings.backupDataFolder': 'Datenordner',
+  'settings.backupBackupFolder': 'Sicherungsordner',
   'settings.backupInclude': 'Enthalten',
   'settings.backupIncluded':
-    'Flüge, Einstellungen, Themes, Markt-Manifeste und Modell-Überschreibungen.',
-  'settings.backupCommand': 'Sicherung erstellen',
+    'Flüge mit Prompts, Antworten, Tool-Ausgaben und Code-Snapshots sowie Einstellungen, Themes, Marktmanifeste und Modellüberschreibungen.',
+  'settings.backupCommand': 'Sicherung im Terminal erstellen',
   'settings.backupRestoreCommand': 'Sicherung wiederherstellen',
   'settings.backupExcluded':
     'Tokens entfernter Geräte und geheimnisartige Einstellungen sind standardmäßig ausgeschlossen.',
@@ -1716,6 +1777,18 @@ const de: Catalog = {
     'Wiederherstellen stoppt den Daemon, legt einen Schnappschuss an und schaltet den Fernzugriff aus.',
   'settings.backupUninstall':
     'Das Deinstallieren von Pandu löscht diese Daten nie. Löschen ist eine separate, ausdrückliche Wahl.',
+  'settings.backupWarning':
+    'Sicherungen sind unverschlüsselt, sofern du nicht --encrypt verwendest. Bewahre die Datei so auf, dass nur du sie lesen kannst.',
+  'settings.backupEncryptHint':
+    'Nutze pandu backup --encrypt, um das Archiv mit einer Passphrase zu schützen (XChaCha20-Poly1305 und Argon2id).',
+  'settings.backupPermissions':
+    'Sicherungen werden nur für dein Benutzerkonto lesbar erstellt.',
+  'settings.backupCreate': 'Jetzt sichern',
+  'settings.backupCreating': 'Sicherung wird erstellt…',
+  'settings.backupCreated': 'Sicherung erstellt unter {path}',
+  'settings.backupCreateFailed': 'Die Sicherung konnte nicht erstellt werden.',
+  'settings.backupOpenFolder': 'Ordner öffnen',
+  'settings.backupOpenFailed': 'Der Ordner konnte nicht geöffnet werden.',
   'settings.backupDocs': 'Leitfaden zur Datensicherheit lesen',
   'update.availableBadge': 'Update verfügbar',
   'update.availableTitle': 'Version {version} ist bereit',
@@ -1809,11 +1882,15 @@ const ja: Catalog = {
   'settings.updatesNote':
     'GitHub Releases からの署名済みアップデート。確認は 1 日 1 回まで、自動ではインストールしません。',
   'settings.backupTitle': 'バックアップと復元',
-  'settings.backupNote': 'データベースと設定を 1 つのアーカイブに。秘密情報は含めません。',
+  'settings.backupNote':
+    'アーカイブにはフライト履歴（プロンプト、応答、ツール出力、コードのスナップショット）が含まれます。私的なものとして扱ってください。',
   'settings.backupData': 'データの場所',
+  'settings.backupDataFolder': 'データフォルダー',
+  'settings.backupBackupFolder': 'バックアップフォルダー',
   'settings.backupInclude': '含まれるもの',
-  'settings.backupIncluded': 'フライト、設定、テーマ、マーケットのマニフェスト、モデルの上書き。',
-  'settings.backupCommand': 'バックアップを作成',
+  'settings.backupIncluded':
+    'プロンプト、応答、ツール出力、コードのスナップショットを含むフライト、および設定、テーマ、マーケットのマニフェスト、モデルの上書き。',
+  'settings.backupCommand': 'ターミナルでバックアップを作成',
   'settings.backupRestoreCommand': 'バックアップを復元',
   'settings.backupExcluded':
     'リモート端末のトークンと秘密情報らしい設定は既定で除外されます。',
@@ -1823,6 +1900,18 @@ const ja: Catalog = {
     '復元はデーモンを停止し、復元前のスナップショットを保存して、リモートアクセスをオフにします。',
   'settings.backupUninstall':
     'Pandu をアンインストールしてもこのデータは削除されません。削除は別の明示的な選択です。',
+  'settings.backupWarning':
+    '--encrypt を指定しない限りバックアップは暗号化されません。自分だけが読める場所に保存してください。',
+  'settings.backupEncryptHint':
+    'pandu backup --encrypt を使うと、パスフレーズでアーカイブを保護できます（XChaCha20-Poly1305 と Argon2id）。',
+  'settings.backupPermissions':
+    'バックアップは現在のユーザーアカウントだけが読めるように作成されます。',
+  'settings.backupCreate': '今すぐバックアップ',
+  'settings.backupCreating': 'バックアップを作成中…',
+  'settings.backupCreated': 'バックアップを作成しました: {path}',
+  'settings.backupCreateFailed': 'バックアップを作成できませんでした。',
+  'settings.backupOpenFolder': 'フォルダーを開く',
+  'settings.backupOpenFailed': 'フォルダーを開けませんでした。',
   'settings.backupDocs': 'データ安全ガイドを読む',
   'update.availableBadge': 'アップデートあり',
   'update.availableTitle': 'バージョン {version} を利用できます',
@@ -1915,16 +2004,29 @@ const zh: Catalog = {
   'settings.updates': '更新',
   'settings.updatesNote': '来自 GitHub Releases 的已签名更新。每天最多检查一次，绝不静默安装。',
   'settings.backupTitle': '备份与恢复',
-  'settings.backupNote': '一个包含数据库和设置的归档。绝不含密钥。',
+  'settings.backupNote': '归档包含你的飞行历史：提示词、响应、工具输出和代码快照。请按私密内容保管。',
   'settings.backupData': '数据位置',
+  'settings.backupDataFolder': '数据文件夹',
+  'settings.backupBackupFolder': '备份文件夹',
   'settings.backupInclude': '包含内容',
-  'settings.backupIncluded': '飞行、设置、主题、市场清单和模型覆盖。',
-  'settings.backupCommand': '创建备份',
+  'settings.backupIncluded':
+    '包含提示词、响应、工具输出和代码快照的飞行，以及设置、主题、市场清单和模型覆盖。',
+  'settings.backupCommand': '在终端创建备份',
   'settings.backupRestoreCommand': '恢复备份',
   'settings.backupExcluded': '远程设备令牌和看似密钥的设置默认排除。',
   'settings.backupRemote': '仅当你需要恢复已配对设备时才使用 --include-remote。该归档会变得敏感。',
   'settings.backupRestoreNote': '恢复会停止守护进程、保存恢复前快照，并关闭远程访问。',
   'settings.backupUninstall': '卸载 Pandu 绝不会删除这些数据。删除是单独的明确选择。',
+  'settings.backupWarning': '除非使用 --encrypt，否则备份不会加密。请把文件保存在只有你能读取的位置。',
+  'settings.backupEncryptHint':
+    '使用 pandu backup --encrypt 以口令保护归档（XChaCha20-Poly1305 与 Argon2id）。',
+  'settings.backupPermissions': '备份创建后仅你的用户账户可读。',
+  'settings.backupCreate': '立即创建备份',
+  'settings.backupCreating': '正在创建备份…',
+  'settings.backupCreated': '备份已创建：{path}',
+  'settings.backupCreateFailed': '无法创建备份。',
+  'settings.backupOpenFolder': '打开文件夹',
+  'settings.backupOpenFailed': '无法打开文件夹。',
   'settings.backupDocs': '阅读数据安全指南',
   'update.availableBadge': '有可用更新',
   'update.availableTitle': '版本 {version} 已就绪',

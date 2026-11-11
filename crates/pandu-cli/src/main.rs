@@ -329,6 +329,11 @@ struct BackupArgs {
     /// Write the archive here. Defaults to <home>/backups/<name>-backup-<time>.tar.gz.
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
+    /// Encrypt the archive with XChaCha20-Poly1305 and an Argon2id key.
+    /// Reads the passphrase from a terminal prompt, or from
+    /// PANDU_BACKUP_PASSPHRASE for non-interactive use.
+    #[arg(long)]
+    encrypt: bool,
     /// Include remote device tokens in the archive. The archive becomes
     /// sensitive; keep it private.
     #[arg(long = "include-remote")]
@@ -672,6 +677,7 @@ fn run_backup(mut config: Config, args: BackupArgs) -> anyhow::Result<()> {
         home,
         database,
         output,
+        encrypt,
         include_remote,
         json: as_json,
     } = args;
@@ -680,15 +686,30 @@ fn run_backup(mut config: Config, args: BackupArgs) -> anyhow::Result<()> {
         config.home = home;
     }
     let database = database.unwrap_or_else(|| config.database_path.clone());
-    let output = output.unwrap_or_else(|| default_backup_path(&config.home));
+    let passphrase = if encrypt {
+        Some(read_backup_passphrase(true)?)
+    } else {
+        None
+    };
+    let output =
+        output.unwrap_or_else(|| pandu_daemon::backup::default_backup_path(&config.home, encrypt));
     if include_remote {
         eprintln!(
             "warning: this backup includes remote device tokens and pairing data. \
              Keep the archive private."
         );
     }
-    let summary = pandu_daemon::backup::create_backup(&database, &output, include_remote)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    eprintln!(
+        "note: the archive contains flight history: prompts, responses, tool output, \
+         and code snapshots."
+    );
+    let summary = pandu_daemon::backup::create_backup(
+        &database,
+        &output,
+        include_remote,
+        passphrase.as_deref(),
+    )
+    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
     } else {
@@ -699,13 +720,45 @@ fn run_backup(mut config: Config, args: BackupArgs) -> anyhow::Result<()> {
             summary.database_schema,
             summary.bytes as f64 / (1024.0 * 1024.0)
         );
+        if summary.encrypted {
+            println!("The archive is encrypted. Keep the passphrase safe.");
+        }
         if summary.include_remote {
             println!("Remote device tokens are included. Keep this archive private.");
         } else {
             println!("Remote device tokens and secret settings are not included.");
         }
+        println!("The archive is readable only by your user account.");
     }
     Ok(())
+}
+
+/// Read a backup passphrase from the environment or an interactive terminal.
+/// The passphrase is never placed in argv and never logged.
+fn read_backup_passphrase(confirm: bool) -> anyhow::Result<String> {
+    let env_name = brand::env_name("BACKUP_PASSPHRASE");
+    if let Ok(value) = std::env::var(&env_name) {
+        if value.is_empty() {
+            bail!("{env_name} is set but empty.");
+        }
+        return Ok(value);
+    }
+    let passphrase = rpassword::prompt_password("Backup passphrase: ").map_err(|error| {
+        anyhow::anyhow!(
+            "could not read a passphrase from the terminal: {error}. \
+             Set {env_name} for non-interactive use."
+        )
+    })?;
+    if passphrase.is_empty() {
+        bail!("the passphrase is empty.");
+    }
+    if confirm {
+        let repeated = rpassword::prompt_password("Repeat passphrase: ")?;
+        if repeated != passphrase {
+            bail!("the passphrases do not match.");
+        }
+    }
+    Ok(passphrase)
 }
 
 async fn run_restore(mut config: Config, args: RestoreArgs) -> anyhow::Result<()> {
@@ -726,7 +779,15 @@ async fn run_restore(mut config: Config, args: RestoreArgs) -> anyhow::Result<()
             brand::PRODUCT_NAME
         );
     }
-    let summary = pandu_daemon::backup::restore_backup(&archive, &database)
+    let passphrase = if archive.exists()
+        && pandu_daemon::backup::is_encrypted_archive(&archive)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?
+    {
+        Some(read_backup_passphrase(false)?)
+    } else {
+        None
+    };
+    let summary = pandu_daemon::backup::restore_backup(&archive, &database, passphrase.as_deref())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
@@ -742,12 +803,6 @@ async fn run_restore(mut config: Config, args: RestoreArgs) -> anyhow::Result<()
         println!("Remote access is off. Pair your phone again if you need it.");
     }
     Ok(())
-}
-
-fn default_backup_path(home: &Path) -> PathBuf {
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    home.join("backups")
-        .join(format!("{}-backup-{stamp}.tar.gz", brand::SLUG))
 }
 
 async fn daemon_is_running(config: &Config) -> bool {

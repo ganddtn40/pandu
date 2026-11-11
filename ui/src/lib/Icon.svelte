@@ -74,6 +74,7 @@ const paths: Record<string, string[]> = {
   'arrow-up': ['M12 19V5', 'm6 11 6-6 6 6'],
   'arrow-down': ['M12 5v14', 'm6 13 6 6 6-6'],
   image: ['M4 5h16v14H4z', 'M8.5 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z', 'm4 16 5-5 4 4 3-3 4 4'],
+  folder: ['M3 6h6l2 2h10v11H3z'],
   download: ['M12 4v10', 'm8 10 4 4 4-4', 'M5 20h14'],
   upload: ['M12 20V10', 'm8 14 4-4 4 4', 'M5 4h14'],
   rotate: ['M3 12a9 9 0 1 0 3-6.7', 'M3 4v5h5'],

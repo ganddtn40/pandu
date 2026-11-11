@@ -5154,10 +5154,64 @@ pre {
   gap: 8px;
 }
 
+.backup-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--warn, #d9a441) 40%, var(--hairline));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn, #d9a441) 9%, transparent);
+  color: var(--text-soft);
+  font-size: max(var(--text-min), calc(12.5px * var(--font-scale)));
+  line-height: 1.5;
+}
+
+.backup-warning strong {
+  display: block;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.backup-warning span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-faint);
+}
+
+.backup-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.backup-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: max(var(--text-min), calc(12px * var(--font-scale)));
+}
+
+.backup-result code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 [data-backup-card] .summary-list dd code {
   min-width: 0;
   overflow-wrap: anywhere;
   text-align: right;
+}
+
+[data-backup-card] .summary-list dd.backup-path {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .backup-command {

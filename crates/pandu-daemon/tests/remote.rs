@@ -580,6 +580,33 @@ async fn remote_listener_never_mounts_proxy_routes_or_host_management() {
         );
     }
 
+    // Updates and backups are host-only, including the state-changing routes.
+    // A paired device gets the same 404 as an unknown path.
+    for (method, path) in [
+        ("GET", "/api/update"),
+        ("POST", "/api/update/check"),
+        ("POST", "/api/update/apply"),
+        ("POST", "/api/update/rollback"),
+        ("POST", "/api/backup"),
+        ("POST", "/api/reveal"),
+    ] {
+        let response = send_remote(
+            &client,
+            method,
+            &format!("{remote}{path}"),
+            Some(&device.token),
+            Some(&json!({})),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{method} {path} must not exist on the remote listener"
+        );
+        let payload: Value = response.json().await.unwrap();
+        assert_eq!(payload["error"]["code"], "not_found");
+    }
+
     daemon.shutdown().await.unwrap();
 }
 

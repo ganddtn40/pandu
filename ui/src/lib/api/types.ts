@@ -299,8 +299,23 @@ export interface Health {
   version: string;
   database: string;
   databasePath?: string;
+  dataDir?: string;
+  backupsDir?: string;
   uptimeMs: number;
   demoMode: boolean;
+}
+
+export interface BackupCreated {
+  path: string;
+  bytes: number;
+  settingsCount: number;
+  databaseSchema: number;
+  encrypted: boolean;
+  includeRemote: boolean;
+}
+
+export interface RevealResult {
+  path: string;
 }
 
 export interface OverviewStats {

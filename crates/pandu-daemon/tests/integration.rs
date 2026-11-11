@@ -1492,6 +1492,68 @@ parser = "generic-jsonl"
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn backup_api_is_csrf_protected_and_reports_real_paths() {
+    let mock = MockUpstream::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let daemon = start_daemon(home.path(), mock.addr).await;
+    let client = reqwest::Client::new();
+
+    let health: Value = client
+        .get(format!("http://{}/api/health", daemon.addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(health["dataDir"], home.path().display().to_string());
+    assert_eq!(
+        health["backupsDir"],
+        home.path().join("backups").display().to_string()
+    );
+
+    let denied = client
+        .post(format!("http://{}/api/backup", daemon.addr))
+        .header(reqwest::header::ORIGIN, format!("http://{}", daemon.addr))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    let response = client
+        .post(format!("http://{}/api/backup", daemon.addr))
+        .headers(host_headers(&daemon))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let created: Value = response.json().await.unwrap();
+    let path = created["path"].as_str().expect("backup path");
+    let archive = std::path::Path::new(path);
+    assert!(archive.is_file(), "{path}");
+    assert_eq!(
+        archive.parent(),
+        Some(home.path().join("backups").as_path())
+    );
+    assert_eq!(created["encrypted"], false);
+    assert_eq!(created["includeRemote"], false);
+
+    // The reveal endpoint accepts only a closed set of folder names, never a
+    // client-supplied path.
+    let bad = client
+        .post(format!("http://{}/api/reveal", daemon.addr))
+        .headers(host_headers(&daemon))
+        .json(&json!({ "target": "C:\\Windows" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+
+    daemon.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_seeds_demo_flights_and_serves_settings() {
     let mock = MockUpstream::start().await;
     let home = tempfile::tempdir().unwrap();

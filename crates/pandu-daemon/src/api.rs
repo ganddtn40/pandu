@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::{Path as FsPath, PathBuf};
 
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 
@@ -95,11 +96,101 @@ pub async fn health(State(state): State<AppState>) -> Response {
             "version": pandu_core::VERSION,
             "database": if database_ok { "ok" } else { "unavailable" },
             "databasePath": state.config.database_path.display().to_string(),
+            "dataDir": state.config.home.display().to_string(),
+            "backupsDir": backups_directory(&state).display().to_string(),
             "uptimeMs": state.started_at.elapsed().as_millis() as u64,
             "demoMode": state.config.demo_mode,
         })),
     )
         .into_response()
+}
+
+fn backups_directory(state: &AppState) -> PathBuf {
+    state.config.home.join("backups")
+}
+
+/// Create one host-only backup archive. The archive holds flight history:
+/// prompts, responses, tool output, and code snapshots. Remote tokens and
+/// secret-looking settings stay out. The file is owner-only.
+pub async fn create_backup(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let database = state.config.database_path.clone();
+    let home = state.config.home.clone();
+    let summary = tokio::task::spawn_blocking(move || {
+        let output = crate::backup::default_backup_path(&home, false);
+        crate::backup::create_backup(&database, &output, false, None)
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "the backup task failed");
+        ApiError::internal("Pandu could not create the backup.")
+    })?
+    .map_err(|error| {
+        tracing::error!(%error, "the backup failed");
+        ApiError::internal("Pandu could not create the backup.")
+    })?;
+    Ok(Json(json!({
+        "path": summary.path,
+        "bytes": summary.bytes,
+        "settingsCount": summary.settings_count,
+        "databaseSchema": summary.database_schema,
+        "encrypted": summary.encrypted,
+        "includeRemote": summary.include_remote,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RevealBody {
+    /// A closed set of folders. The client never supplies a path.
+    pub target: String,
+}
+
+/// Open the data or backup folder in the platform file manager. Host-only and
+/// CSRF-protected; the target is an enum, not a path.
+pub async fn reveal(
+    State(state): State<AppState>,
+    Json(body): Json<RevealBody>,
+) -> Result<Json<Value>, ApiError> {
+    let directory = match body.target.as_str() {
+        "data" => state.config.home.clone(),
+        "backups" => backups_directory(&state),
+        _ => return Err(ApiError::bad_request("Unknown folder target.")),
+    };
+    std::fs::create_dir_all(&directory).map_err(|error| {
+        tracing::error!(%error, "could not create the folder to reveal");
+        ApiError::internal("Pandu could not open that folder.")
+    })?;
+    open_folder(&directory).map_err(|error| {
+        tracing::error!(%error, "could not open the folder");
+        ApiError::internal("Pandu could not open that folder.")
+    })?;
+    Ok(Json(json!({ "path": directory.display().to_string() })))
+}
+
+fn open_folder(path: &FsPath) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(path)
+            .spawn()?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()?;
+        Ok(())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
+        Ok(())
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = path;
+        Err(std::io::Error::other(
+            "opening a folder is not supported on this platform",
+        ))
+    }
 }
 
 pub async fn overview(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {

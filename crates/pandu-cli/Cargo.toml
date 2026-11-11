@@ -28,6 +28,7 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 portable-pty = "0.9"
 crossterm = "0.29"
+rpassword = { workspace = true }
 
 [dev-dependencies]
 pandu-core = { path = "../pandu-core", features = ["test-signing"] }

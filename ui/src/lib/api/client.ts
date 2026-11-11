@@ -4,6 +4,7 @@ import type {
   AgentOutput,
   AgentSession,
   ApprovalDecision,
+  BackupCreated,
   CatalogResponse,
   DemoSeedResponse,
   GuardEvent,
@@ -37,6 +38,7 @@ import type {
   RemoteStatus,
   RemoteTools,
   ReplayResponse,
+  RevealResult,
   Session,
   SessionList,
   SessionModelState,
@@ -285,6 +287,12 @@ export async function detectRemoteListener(): Promise<boolean> {
 
 export const daemonApi = {
   health: () => request<Health>('/health'),
+  createBackup: () => request<BackupCreated>('/backup', { method: 'POST' }),
+  reveal: (target: 'data' | 'backups') =>
+    request<RevealResult>('/reveal', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    }),
   overview: () => request<Overview>('/overview'),
   sessions: (limit = 50) => request<SessionList>(`/sessions?limit=${limit}`),
   session: (id: string) => request<Session>(`/sessions/${encodeURIComponent(id)}`),
