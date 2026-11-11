@@ -200,14 +200,13 @@ impl SessionManager {
     ) -> Result<Session> {
         {
             let ambient = self.ambient.lock().expect("session map lock");
-            if let Some(existing) = ambient.get(&protocol) {
-                if let Some(session) = self.store.get_session(&existing.session_id)? {
-                    if session.status == SessionStatus::Active {
-                        drop(ambient);
-                        self.mark_used(&session.id);
-                        return Ok(session);
-                    }
-                }
+            if let Some(existing) = ambient.get(&protocol)
+                && let Some(session) = self.store.get_session(&existing.session_id)?
+                && session.status == SessionStatus::Active
+            {
+                drop(ambient);
+                self.mark_used(&session.id);
+                return Ok(session);
             }
         }
 
@@ -389,19 +388,19 @@ impl SessionManager {
 
         // A model switch cannot shrink the prompt. Block before installing an
         // override that the provider would reject on the very next request.
-        if let Some(window) = pricing.context_window {
-            if let Some(context) = self.store.latest_context(session_id)? {
-                let tokens = context
-                    .get("tokens")
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or(0);
-                if tokens > window {
-                    return Err(ModelOverrideError::ContextWindowExceeded {
-                        model: pricing.model.clone(),
-                        tokens,
-                        window,
-                    });
-                }
+        if let Some(window) = pricing.context_window
+            && let Some(context) = self.store.latest_context(session_id)?
+        {
+            let tokens = context
+                .get("tokens")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            if tokens > window {
+                return Err(ModelOverrideError::ContextWindowExceeded {
+                    model: pricing.model.clone(),
+                    tokens,
+                    window,
+                });
             }
         }
 

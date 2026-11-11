@@ -456,11 +456,11 @@ async fn list_sessions(
     Query(query): Query<loopback::SessionQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let Json(mut payload) = loopback::list_sessions(State(state.clone()), Query(query)).await?;
-    if !principal.allows(Scope::ViewContent) {
-        if let Some(sessions) = payload.get_mut("sessions").and_then(Value::as_array_mut) {
-            for session in sessions {
-                *session = status_session_value(&state, session);
-            }
+    if !principal.allows(Scope::ViewContent)
+        && let Some(sessions) = payload.get_mut("sessions").and_then(Value::as_array_mut)
+    {
+        for session in sessions {
+            *session = status_session_value(&state, session);
         }
     }
     Ok(Json(payload))
@@ -512,11 +512,11 @@ async fn list_agents(
     Extension(principal): Extension<RemotePrincipal>,
 ) -> Result<Json<Value>, ApiError> {
     let Json(mut payload) = loopback::list_agents(State(state)).await?;
-    if !principal.allows(Scope::ViewContent) {
-        if let Some(sessions) = payload.get_mut("sessions").and_then(Value::as_array_mut) {
-            for session in sessions {
-                strip_agent_status_fields(session);
-            }
+    if !principal.allows(Scope::ViewContent)
+        && let Some(sessions) = payload.get_mut("sessions").and_then(Value::as_array_mut)
+    {
+        for session in sessions {
+            strip_agent_status_fields(session);
         }
     }
     Ok(Json(payload))
@@ -542,11 +542,11 @@ async fn list_agent_events(
     Query(query): Query<loopback::AgentEventQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let Json(mut payload) = loopback::list_agent_events(State(state), Query(query)).await?;
-    if !principal.allows(Scope::ViewContent) {
-        if let Some(events) = payload.get_mut("events").and_then(Value::as_array_mut) {
-            for event in events {
-                strip_agent_event_status_fields(event);
-            }
+    if !principal.allows(Scope::ViewContent)
+        && let Some(events) = payload.get_mut("events").and_then(Value::as_array_mut)
+    {
+        for event in events {
+            strip_agent_event_status_fields(event);
         }
     }
     Ok(Json(payload))
@@ -590,10 +590,10 @@ fn status_session_value(state: &AppState, session: &Value) -> Value {
     }
     // The remote status view gets the context percentage only — never the
     // token counts, the model window, or the system/tools/history breakdown.
-    if let Ok(Some(context)) = state.store.latest_context(id) {
-        if let Some(percent) = context.get("percent").and_then(Value::as_f64) {
-            value.insert("contextPercent".to_string(), json!(percent));
-        }
+    if let Ok(Some(context)) = state.store.latest_context(id)
+        && let Some(percent) = context.get("percent").and_then(Value::as_f64)
+    {
+        value.insert("contextPercent".to_string(), json!(percent));
     }
     Value::Object(value)
 }
@@ -665,10 +665,10 @@ fn guard_rule_name(kind: &str) -> &'static str {
 fn redacted_guard_event(event: &Value, include_nonce: bool) -> Value {
     let mut collector = RedactionCollector::new();
     let mut value = redact_json(event, &mut collector, CaptureLocation::RequestBody);
-    if let Some(object) = value.as_object_mut() {
-        if !include_nonce {
-            object.remove("approvalNonce");
-        }
+    if let Some(object) = value.as_object_mut()
+        && !include_nonce
+    {
+        object.remove("approvalNonce");
     }
     value
 }
@@ -1306,10 +1306,10 @@ async fn authenticate(
             let rotated = state.remote.rotate_token_on_use(&principal.device_id);
             request.extensions_mut().insert(principal);
             let mut response = next.run(request).await;
-            if let Some(token) = rotated {
-                if let Ok(value) = HeaderValue::from_str(&token) {
-                    response.headers_mut().insert(TOKEN_HEADER, value);
-                }
+            if let Some(token) = rotated
+                && let Ok(value) = HeaderValue::from_str(&token)
+            {
+                response.headers_mut().insert(TOKEN_HEADER, value);
             }
             response
         }
@@ -1418,14 +1418,13 @@ async fn check_host_and_origin(
         .headers()
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
+        && !origin_allowed(&state, origin, host)
     {
-        if !origin_allowed(&state, origin, host) {
-            return api_error(
-                StatusCode::FORBIDDEN,
-                "forbidden_origin",
-                "Cross-origin requests are not allowed.",
-            );
-        }
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "forbidden_origin",
+            "Cross-origin requests are not allowed.",
+        );
     }
     next.run(request).await
 }
@@ -1501,10 +1500,11 @@ fn host_without_port(value: &str) -> String {
     if let Some(rest) = value.strip_prefix('[') {
         return rest.split(']').next().unwrap_or(rest).to_string();
     }
-    if let Some((host, port)) = value.rsplit_once(':') {
-        if !port.is_empty() && port.chars().all(|character| character.is_ascii_digit()) {
-            return host.to_string();
-        }
+    if let Some((host, port)) = value.rsplit_once(':')
+        && !port.is_empty()
+        && port.chars().all(|character| character.is_ascii_digit())
+    {
+        return host.to_string();
     }
     value.to_string()
 }

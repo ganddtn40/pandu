@@ -287,38 +287,37 @@ fn parse_claude_code(contents: &str) -> ParsedBatch {
                 if let Some(existing) = message_key
                     .as_ref()
                     .and_then(|key| message_indexes.get(key).copied())
+                    && let Some(ParsedRecord::Model(existing)) = batch.records.get_mut(existing)
                 {
-                    if let Some(ParsedRecord::Model(existing)) = batch.records.get_mut(existing) {
-                        if !response_text.is_empty() {
-                            match &mut existing.response_text {
-                                Some(text) => {
-                                    text.push('\n');
-                                    text.push_str(&response_text);
-                                }
-                                None => existing.response_text = Some(response_text),
+                    if !response_text.is_empty() {
+                        match &mut existing.response_text {
+                            Some(text) => {
+                                text.push('\n');
+                                text.push_str(&response_text);
                             }
+                            None => existing.response_text = Some(response_text),
                         }
-                        if !thinking.is_empty() {
-                            match &mut existing.thinking {
-                                Some(text) => {
-                                    text.push('\n');
-                                    text.push_str(&thinking);
-                                }
-                                None => existing.thinking = Some(thinking),
-                            }
-                        }
-                        existing.tool_calls.extend(tool_calls);
-                        if model.is_some() {
-                            existing.model = model;
-                        }
-                        existing.usage = normalize_usage(
-                            message.get("usage").unwrap_or(&Value::Null),
-                            Some(ProviderProtocol::Anthropic),
-                        );
-                        existing.ended_at = Some(started_at);
-                        existing.closed = existing.closed || stop_reason.is_some();
-                        continue;
                     }
+                    if !thinking.is_empty() {
+                        match &mut existing.thinking {
+                            Some(text) => {
+                                text.push('\n');
+                                text.push_str(&thinking);
+                            }
+                            None => existing.thinking = Some(thinking),
+                        }
+                    }
+                    existing.tool_calls.extend(tool_calls);
+                    if model.is_some() {
+                        existing.model = model;
+                    }
+                    existing.usage = normalize_usage(
+                        message.get("usage").unwrap_or(&Value::Null),
+                        Some(ProviderProtocol::Anthropic),
+                    );
+                    existing.ended_at = Some(started_at);
+                    existing.closed = existing.closed || stop_reason.is_some();
+                    continue;
                 }
 
                 let finish_reason = stop_reason.and_then(finish_reason);
@@ -512,14 +511,14 @@ fn parse_codex(contents: &str) -> ParsedBatch {
                             first_prompt.get_or_insert_with(|| text.clone());
                             last_prompt = Some(text);
                         }
-                    } else if role == "assistant" {
-                        if let Some(text) = text {
-                            if !turn.text.is_empty() {
-                                turn.text.push('\n');
-                            }
-                            turn.text.push_str(&text);
-                            turn.started_at.get_or_insert(at);
+                    } else if role == "assistant"
+                        && let Some(text) = text
+                    {
+                        if !turn.text.is_empty() {
+                            turn.text.push('\n');
                         }
+                        turn.text.push_str(&text);
+                        turn.started_at.get_or_insert(at);
                     }
                 }
                 Some("function_call") => {
@@ -1217,10 +1216,10 @@ fn user_prompt_text(content: &Value) -> Option<String> {
         Value::Array(items) => {
             let mut parts = Vec::new();
             for item in items {
-                if item.get("type").and_then(Value::as_str) == Some("text") {
-                    if let Some(text) = item.get("text").and_then(Value::as_str) {
-                        parts.push(text.to_string());
-                    }
+                if item.get("type").and_then(Value::as_str) == Some("text")
+                    && let Some(text) = item.get("text").and_then(Value::as_str)
+                {
+                    parts.push(text.to_string());
                 }
             }
             non_empty(parts.join("\n"))

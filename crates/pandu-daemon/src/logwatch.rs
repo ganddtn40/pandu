@@ -269,11 +269,11 @@ impl LogWatcher {
             .as_ref()
             .map(|cursor| cursor.session_id.clone())
             .filter(|id| !id.is_empty());
-        if let Some(id) = &session_id {
-            if self.store.get_session(id)?.is_none() {
-                session_id = None;
-                imported.clear();
-            }
+        if let Some(id) = &session_id
+            && self.store.get_session(id)?.is_none()
+        {
+            session_id = None;
+            imported.clear();
         }
 
         let contents = read_text(
@@ -370,24 +370,25 @@ impl LogWatcher {
             }
         }
 
-        if let Some(id) = &session_id {
-            if created_steps > 0 {
-                if previous.as_ref().is_some_and(|cursor| cursor.completed) {
-                    self.store.mark_observed_active(id)?;
-                }
-                let mut collector = RedactionCollector::new();
-                let title =
-                    batch.session.title.as_deref().map(|title| {
-                        redact_text(title, &mut collector, CaptureLocation::RequestBody)
-                    });
-                self.store.update_observed_session(
-                    id,
-                    title.as_deref(),
-                    batch.session.workspace_path.as_deref(),
-                    batch.session.git_branch.as_deref(),
-                    batch.session.model.as_deref(),
-                )?;
+        if let Some(id) = &session_id
+            && created_steps > 0
+        {
+            if previous.as_ref().is_some_and(|cursor| cursor.completed) {
+                self.store.mark_observed_active(id)?;
             }
+            let mut collector = RedactionCollector::new();
+            let title = batch
+                .session
+                .title
+                .as_deref()
+                .map(|title| redact_text(title, &mut collector, CaptureLocation::RequestBody));
+            self.store.update_observed_session(
+                id,
+                title.as_deref(),
+                batch.session.workspace_path.as_deref(),
+                batch.session.git_branch.as_deref(),
+                batch.session.model.as_deref(),
+            )?;
         }
 
         let completed =

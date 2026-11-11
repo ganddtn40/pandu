@@ -228,10 +228,10 @@ async fn check_entry_network(
         if let Err(error) = check_link(client, &entry.source.repo).await {
             report.warning(format!("{}: source link: {error}", entry.id));
         }
-        if let Some(homepage) = &entry.homepage {
-            if let Err(error) = check_link(client, homepage).await {
-                report.warning(format!("{}: homepage link: {error}", entry.id));
-            }
+        if let Some(homepage) = &entry.homepage
+            && let Err(error) = check_link(client, homepage).await
+        {
+            report.warning(format!("{}: homepage link: {error}", entry.id));
         }
     }
     if entry.example {
@@ -448,13 +448,13 @@ pub async fn fetch_tree(
             entry.source.commit
         )));
     }
-    if let Some(length) = response.content_length() {
-        if length > MAX_ARCHIVE_BYTES {
-            return Err(MarketError::Network(format!(
-                "{} is larger than the archive limit.",
-                entry.name
-            )));
-        }
+    if let Some(length) = response.content_length()
+        && length > MAX_ARCHIVE_BYTES
+    {
+        return Err(MarketError::Network(format!(
+            "{} is larger than the archive limit.",
+            entry.name
+        )));
     }
     use futures_util::StreamExt as _;
     let mut bytes = Vec::new();

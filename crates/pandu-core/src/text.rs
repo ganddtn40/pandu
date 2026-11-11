@@ -103,12 +103,11 @@ fn collect_paths(value: &Value, paths: &mut Vec<String>, depth: usize) {
                 if matches!(
                     normalized.as_str(),
                     "path" | "file" | "filepath" | "filename" | "notebookpath" | "cwd"
-                ) {
-                    if let Some(path) = child.as_str() {
-                        let path = path.trim();
-                        if !path.is_empty() && path.len() <= 4096 {
-                            paths.push(path.to_string());
-                        }
+                ) && let Some(path) = child.as_str()
+                {
+                    let path = path.trim();
+                    if !path.is_empty() && path.len() <= 4096 {
+                        paths.push(path.to_string());
                     }
                 }
                 collect_paths(child, paths, depth + 1);

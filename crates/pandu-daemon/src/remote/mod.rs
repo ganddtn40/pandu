@@ -259,7 +259,7 @@ pub enum RemoteServerHandle {
         task: tokio::task::JoinHandle<()>,
     },
     Tls {
-        handle: axum_server::Handle,
+        handle: axum_server::Handle<std::net::SocketAddr>,
         task: tokio::task::JoinHandle<()>,
     },
 }
@@ -896,10 +896,10 @@ impl RemoteAccess {
     pub async fn tools(&self, port: u16) -> RemoteTools {
         {
             let cache = self.tools_cache.lock().await;
-            if let Some((at, tools)) = cache.as_ref() {
-                if at.elapsed() < Duration::from_secs(30) {
-                    return tools.clone();
-                }
+            if let Some((at, tools)) = cache.as_ref()
+                && at.elapsed() < Duration::from_secs(30)
+            {
+                return tools.clone();
             }
         }
         let tools = detect_tools(port).await;
@@ -1037,15 +1037,15 @@ async fn detect_tools(port: u16) -> RemoteTools {
                 .output(),
         )
         .await;
-        if let Ok(Ok(output)) = status {
-            if output.status.success() {
-                let value: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
-                tailscale_dns_name = value
-                    .pointer("/Self/DNSName")
-                    .and_then(Value::as_str)
-                    .map(|name| name.trim_end_matches('.').to_ascii_lowercase())
-                    .filter(|name| !name.is_empty());
-            }
+        if let Ok(Ok(output)) = status
+            && output.status.success()
+        {
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+            tailscale_dns_name = value
+                .pointer("/Self/DNSName")
+                .and_then(Value::as_str)
+                .map(|name| name.trim_end_matches('.').to_ascii_lowercase())
+                .filter(|name| !name.is_empty());
         }
     }
 
@@ -1132,12 +1132,12 @@ pub fn default_ui_dir() -> std::path::PathBuf {
     if candidate.is_dir() {
         return candidate;
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(directory) = exe.parent() {
-            let beside = directory.join("ui").join("dist");
-            if beside.is_dir() {
-                return beside;
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(directory) = exe.parent()
+    {
+        let beside = directory.join("ui").join("dist");
+        if beside.is_dir() {
+            return beside;
         }
     }
     candidate

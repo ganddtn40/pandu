@@ -551,13 +551,13 @@ impl Recorder {
         {
             tracing::warn!(%error, "could not record the context.high event");
         }
-        if let Some(remote) = &self.remote {
-            if tokio::runtime::Handle::try_current().is_ok() {
-                let remote = remote.clone();
-                tokio::spawn(async move {
-                    remote.send_notification("context").await;
-                });
-            }
+        if let Some(remote) = &self.remote
+            && tokio::runtime::Handle::try_current().is_ok()
+        {
+            let remote = remote.clone();
+            tokio::spawn(async move {
+                remote.send_notification("context").await;
+            });
         }
     }
 

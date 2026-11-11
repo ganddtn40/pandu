@@ -312,10 +312,10 @@ async fn download(client: &reqwest::Client, url: &str, max_bytes: u64) -> anyhow
         bail!("The download returned HTTP {status}. Nothing was installed.");
     }
     safe_https_url(response.url().as_str()).map_err(|error| anyhow::anyhow!(error))?;
-    if let Some(length) = response.content_length() {
-        if length > max_bytes {
-            bail!("The download is larger than expected ({length} bytes). Nothing was installed.");
-        }
+    if let Some(length) = response.content_length()
+        && length > max_bytes
+    {
+        bail!("The download is larger than expected ({length} bytes). Nothing was installed.");
     }
     let mut response = response;
     let mut bytes = Vec::new();

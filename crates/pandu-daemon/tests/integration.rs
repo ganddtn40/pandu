@@ -250,10 +250,10 @@ async fn wait_for_step(client: &reqwest::Client, daemon: &ServerHandle, session_
             .await
             .expect("steps request");
         let payload: Value = response.json().await.expect("steps JSON");
-        if let Some(step) = payload["steps"].as_array().and_then(|steps| steps.first()) {
-            if step["status"] != "running" {
-                return step.clone();
-            }
+        if let Some(step) = payload["steps"].as_array().and_then(|steps| steps.first())
+            && step["status"] != "running"
+        {
+            return step.clone();
         }
         assert!(
             Instant::now() < deadline,
@@ -282,10 +282,10 @@ async fn wait_for_step_number(
             .expect("steps request");
         let payload: Value = response.json().await.expect("steps JSON");
         let steps = payload["steps"].as_array().cloned().unwrap_or_default();
-        if let Some(step) = steps.get(number.saturating_sub(1)) {
-            if step["status"] != "running" {
-                return step.clone();
-            }
+        if let Some(step) = steps.get(number.saturating_sub(1))
+            && step["status"] != "running"
+        {
+            return step.clone();
         }
         assert!(
             Instant::now() < deadline,

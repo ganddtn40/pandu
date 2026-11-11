@@ -407,13 +407,15 @@ impl MarketService {
         }
 
         let settings = self.settings();
-        if allow_network && !self.forced_offline && settings.auto_refresh && refresh_due(&settings)
+        if allow_network
+            && !self.forced_offline
+            && settings.auto_refresh
+            && refresh_due(&settings)
+            && let Err(error) = self.refresh_inner().await
         {
-            if let Err(error) = self.refresh_inner().await {
-                let mut state = self.state.lock().expect("market state");
-                state.last_error = Some(error.to_string());
-                state.offline = true;
-            }
+            let mut state = self.state.lock().expect("market state");
+            state.last_error = Some(error.to_string());
+            state.offline = true;
         }
 
         let (registry, source, warnings) = self.load_best_registry()?;
@@ -445,15 +447,15 @@ impl MarketService {
             let registry = load_registry_dir(&cache, self.include_examples)?;
             return Ok((Arc::new(registry), RegistrySource::Cache, Vec::new()));
         }
-        if cfg!(debug_assertions) {
-            if let Some(dir) = repo_registry_dir() {
-                let registry = load_registry_dir(&dir, self.include_examples)?;
-                return Ok((
-                    Arc::new(registry),
-                    RegistrySource::Repo,
-                    vec!["Using the development registry bundled with this build.".into()],
-                ));
-            }
+        if cfg!(debug_assertions)
+            && let Some(dir) = repo_registry_dir()
+        {
+            let registry = load_registry_dir(&dir, self.include_examples)?;
+            return Ok((
+                Arc::new(registry),
+                RegistrySource::Repo,
+                vec!["Using the development registry bundled with this build.".into()],
+            ));
         }
         let registry = parse_registry(
             BUNDLED_INDEX.as_bytes(),
@@ -483,10 +485,10 @@ impl MarketService {
         if source != RegistrySource::Cache {
             return None;
         }
-        if let Some(last) = last_refresh {
-            if DateTime::parse_from_rfc3339(last).is_ok() {
-                return Some(last.to_string());
-            }
+        if let Some(last) = last_refresh
+            && DateTime::parse_from_rfc3339(last).is_ok()
+        {
+            return Some(last.to_string());
         }
         let index = self
             .home
@@ -1074,12 +1076,12 @@ async fn fetch_limited(
     if !response.status().is_success() {
         return Err(registry_http_error(response.status(), url));
     }
-    if let Some(length) = response.content_length() {
-        if length as usize > limit {
-            return Err(MarketError::Network(format!(
-                "The registry response from {url} is larger than the limit."
-            )));
-        }
+    if let Some(length) = response.content_length()
+        && length as usize > limit
+    {
+        return Err(MarketError::Network(format!(
+            "The registry response from {url} is larger than the limit."
+        )));
     }
     use futures_util::StreamExt as _;
     let mut bytes = Vec::new();

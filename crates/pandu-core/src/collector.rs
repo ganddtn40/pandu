@@ -631,28 +631,28 @@ impl ProtocolCollector {
         }
 
         if event_type == Some("response.output_item.added") {
-            if let Some(item) = payload.get("item").and_then(Value::as_object) {
-                if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                    let key = payload
-                        .get("item_id")
-                        .or_else(|| item.get("call_id"))
-                        .or_else(|| payload.get("output_index"))
-                        .map(Value::to_string)
-                        .unwrap_or_else(|| "0".to_string());
-                    let accumulator = self.tool_accumulator(&key);
-                    if let Some(id) = item.get("call_id").and_then(Value::as_str) {
-                        accumulator.id = Some(id.to_string());
-                    }
-                    if let Some(name) = item.get("name").and_then(Value::as_str) {
-                        accumulator.name = name.to_string();
-                    }
-                    if let Some(arguments) = item.get("arguments").and_then(Value::as_str) {
-                        if !arguments.is_empty() {
-                            accumulator.initial_input = parse_json_value(arguments);
-                        }
-                    }
-                    return IngestedEvent::tool_call();
+            if let Some(item) = payload.get("item").and_then(Value::as_object)
+                && item.get("type").and_then(Value::as_str) == Some("function_call")
+            {
+                let key = payload
+                    .get("item_id")
+                    .or_else(|| item.get("call_id"))
+                    .or_else(|| payload.get("output_index"))
+                    .map(Value::to_string)
+                    .unwrap_or_else(|| "0".to_string());
+                let accumulator = self.tool_accumulator(&key);
+                if let Some(id) = item.get("call_id").and_then(Value::as_str) {
+                    accumulator.id = Some(id.to_string());
                 }
+                if let Some(name) = item.get("name").and_then(Value::as_str) {
+                    accumulator.name = name.to_string();
+                }
+                if let Some(arguments) = item.get("arguments").and_then(Value::as_str)
+                    && !arguments.is_empty()
+                {
+                    accumulator.initial_input = parse_json_value(arguments);
+                }
+                return IngestedEvent::tool_call();
             }
             return IngestedEvent::event();
         }
@@ -684,35 +684,35 @@ impl ProtocolCollector {
         }
 
         if event_type == Some("response.output_item.done") {
-            if let Some(item) = payload.get("item").and_then(Value::as_object) {
-                if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                    let key = item
-                        .get("call_id")
-                        .or_else(|| payload.get("item_id"))
-                        .or_else(|| payload.get("output_index"))
-                        .map(Value::to_string)
-                        .unwrap_or_else(|| "0".to_string());
-                    let accumulator = self.tool_accumulator(&key);
-                    if let Some(id) = item.get("call_id").and_then(Value::as_str) {
-                        accumulator.id = Some(id.to_string());
-                    }
-                    if let Some(name) = item.get("name").and_then(Value::as_str) {
-                        accumulator.name = name.to_string();
-                    }
-                    if let Some(arguments) = item.get("arguments").and_then(Value::as_str) {
-                        accumulator.arguments_text = arguments.to_string();
-                    }
-                    return IngestedEvent::tool_call();
+            if let Some(item) = payload.get("item").and_then(Value::as_object)
+                && item.get("type").and_then(Value::as_str) == Some("function_call")
+            {
+                let key = item
+                    .get("call_id")
+                    .or_else(|| payload.get("item_id"))
+                    .or_else(|| payload.get("output_index"))
+                    .map(Value::to_string)
+                    .unwrap_or_else(|| "0".to_string());
+                let accumulator = self.tool_accumulator(&key);
+                if let Some(id) = item.get("call_id").and_then(Value::as_str) {
+                    accumulator.id = Some(id.to_string());
                 }
+                if let Some(name) = item.get("name").and_then(Value::as_str) {
+                    accumulator.name = name.to_string();
+                }
+                if let Some(arguments) = item.get("arguments").and_then(Value::as_str) {
+                    accumulator.arguments_text = arguments.to_string();
+                }
+                return IngestedEvent::tool_call();
             }
             return IngestedEvent::event();
         }
 
         if event_type == Some("response.output_text.done") {
-            if let Some(text) = payload.get("text").and_then(Value::as_str) {
-                if self.text.is_empty() {
-                    self.fallback_text = text.to_string();
-                }
+            if let Some(text) = payload.get("text").and_then(Value::as_str)
+                && self.text.is_empty()
+            {
+                self.fallback_text = text.to_string();
             }
             return IngestedEvent::event();
         }
@@ -828,20 +828,20 @@ impl ProtocolCollector {
                     IngestedEvent::tool_call()
                 }
                 Some("text") => {
-                    if let Some(text) = block.get("text").and_then(Value::as_str) {
-                        if !text.is_empty() {
-                            append_limited(&mut self.text, text, MAX_RESPONSE_CHARS);
-                            return IngestedEvent::text(text.to_string());
-                        }
+                    if let Some(text) = block.get("text").and_then(Value::as_str)
+                        && !text.is_empty()
+                    {
+                        append_limited(&mut self.text, text, MAX_RESPONSE_CHARS);
+                        return IngestedEvent::text(text.to_string());
                     }
                     IngestedEvent::event()
                 }
                 Some("thinking") => {
-                    if let Some(thinking) = block.get("thinking").and_then(Value::as_str) {
-                        if !thinking.is_empty() {
-                            append_limited(&mut self.thinking, thinking, MAX_THINKING_CHARS);
-                            return IngestedEvent::thinking(thinking.to_string());
-                        }
+                    if let Some(thinking) = block.get("thinking").and_then(Value::as_str)
+                        && !thinking.is_empty()
+                    {
+                        append_limited(&mut self.thinking, thinking, MAX_THINKING_CHARS);
+                        return IngestedEvent::thinking(thinking.to_string());
                     }
                     IngestedEvent::event()
                 }
@@ -885,10 +885,10 @@ impl ProtocolCollector {
         } else if event_type == "content_block_stop" {
             IngestedEvent::event()
         } else if event_type == "message_delta" {
-            if let Some(delta) = payload.get("delta").and_then(Value::as_object) {
-                if let Some(reason) = delta.get("stop_reason").and_then(Value::as_str) {
-                    self.finish_reason = map_anthropic_finish_reason(Some(reason));
-                }
+            if let Some(delta) = payload.get("delta").and_then(Value::as_object)
+                && let Some(reason) = delta.get("stop_reason").and_then(Value::as_str)
+            {
+                self.finish_reason = map_anthropic_finish_reason(Some(reason));
             }
             if let Some(usage) = payload.get("usage") {
                 self.record_usage(usage);
@@ -950,13 +950,13 @@ impl ProtocolCollector {
                             continue;
                         };
 
-                        if let Some(text) = part.get("text").and_then(Value::as_str) {
-                            if !text.is_empty() {
-                                if part.get("thought").and_then(Value::as_bool) == Some(true) {
-                                    append_limited(&mut thinking_delta, text, MAX_THINKING_CHARS);
-                                } else {
-                                    append_limited(&mut text_delta, text, MAX_RESPONSE_CHARS);
-                                }
+                        if let Some(text) = part.get("text").and_then(Value::as_str)
+                            && !text.is_empty()
+                        {
+                            if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                                append_limited(&mut thinking_delta, text, MAX_THINKING_CHARS);
+                            } else {
+                                append_limited(&mut text_delta, text, MAX_RESPONSE_CHARS);
                             }
                         }
 
@@ -1072,25 +1072,25 @@ fn collect_openai_chat_response(body: &Map<String, Value>) -> CollectedResponse 
         Some(ProviderProtocol::Openai),
     );
 
-    if let Some(Value::Array(choices)) = body.get("choices") {
-        if let Some(choice) = choices.first().and_then(Value::as_object) {
-            let message = choice
-                .get("message")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            result.text = content_part_text(message.get("content").unwrap_or(&Value::Null));
-            if let Some(reasoning) = message
-                .get("reasoning_content")
-                .or_else(|| message.get("reasoning"))
-                .and_then(Value::as_str)
-            {
-                result.thinking = reasoning.to_string();
-            }
-            result.tool_calls = tool_calls_from_openai_message(&message);
-            result.finish_reason =
-                map_openai_finish_reason(choice.get("finish_reason").and_then(Value::as_str));
+    if let Some(Value::Array(choices)) = body.get("choices")
+        && let Some(choice) = choices.first().and_then(Value::as_object)
+    {
+        let message = choice
+            .get("message")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        result.text = content_part_text(message.get("content").unwrap_or(&Value::Null));
+        if let Some(reasoning) = message
+            .get("reasoning_content")
+            .or_else(|| message.get("reasoning"))
+            .and_then(Value::as_str)
+        {
+            result.thinking = reasoning.to_string();
         }
+        result.tool_calls = tool_calls_from_openai_message(&message);
+        result.finish_reason =
+            map_openai_finish_reason(choice.get("finish_reason").and_then(Value::as_str));
     }
 
     result
@@ -1118,10 +1118,10 @@ fn collect_openai_responses_response(body: &Map<String, Value>) -> CollectedResp
 
     let output = body.get("output");
     result.text = output_text_from_openai_output(output);
-    if result.text.is_empty() {
-        if let Some(text) = body.get("output_text").and_then(Value::as_str) {
-            result.text = text.to_string();
-        }
+    if result.text.is_empty()
+        && let Some(text) = body.get("output_text").and_then(Value::as_str)
+    {
+        result.text = text.to_string();
     }
     result.thinking = reasoning_from_openai_output(output);
     result.tool_calls = tool_calls_from_openai_output(output);
@@ -1220,49 +1220,47 @@ fn collect_gemini_response(body: &Map<String, Value>) -> CollectedResponse {
         result.finish_reason = Some(FinishReason::ContentFilter);
     }
 
-    if let Some(Value::Array(candidates)) = body.get("candidates") {
-        if let Some(candidate) = candidates.first().and_then(Value::as_object) {
-            if let Some(Value::Array(parts)) = candidate
-                .get("content")
-                .and_then(Value::as_object)
-                .and_then(|content| content.get("parts"))
-            {
-                let mut text_pieces = Vec::new();
-                let mut thinking_pieces = Vec::new();
-                for part in parts {
-                    let Some(part) = part.as_object() else {
-                        continue;
-                    };
-                    if let Some(text) = part.get("text").and_then(Value::as_str) {
-                        if part.get("thought").and_then(Value::as_bool) == Some(true) {
-                            thinking_pieces.push(text.to_string());
-                        } else {
-                            text_pieces.push(text.to_string());
-                        }
-                    }
-                    if let Some(function_call) = part.get("functionCall").and_then(Value::as_object)
-                    {
-                        if let Some(name) = function_call.get("name").and_then(Value::as_str) {
-                            if !name.is_empty() {
-                                result.tool_calls.push(ParsedToolCall {
-                                    provider_tool_call_id: function_call
-                                        .get("id")
-                                        .and_then(Value::as_str)
-                                        .map(str::to_string),
-                                    name: name.to_string(),
-                                    input: function_call.get("args").cloned(),
-                                });
-                            }
-                        }
+    if let Some(Value::Array(candidates)) = body.get("candidates")
+        && let Some(candidate) = candidates.first().and_then(Value::as_object)
+    {
+        if let Some(Value::Array(parts)) = candidate
+            .get("content")
+            .and_then(Value::as_object)
+            .and_then(|content| content.get("parts"))
+        {
+            let mut text_pieces = Vec::new();
+            let mut thinking_pieces = Vec::new();
+            for part in parts {
+                let Some(part) = part.as_object() else {
+                    continue;
+                };
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                        thinking_pieces.push(text.to_string());
+                    } else {
+                        text_pieces.push(text.to_string());
                     }
                 }
-                result.text = text_pieces.join("");
-                result.thinking = thinking_pieces.join("");
+                if let Some(function_call) = part.get("functionCall").and_then(Value::as_object)
+                    && let Some(name) = function_call.get("name").and_then(Value::as_str)
+                    && !name.is_empty()
+                {
+                    result.tool_calls.push(ParsedToolCall {
+                        provider_tool_call_id: function_call
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        name: name.to_string(),
+                        input: function_call.get("args").cloned(),
+                    });
+                }
             }
-
-            result.finish_reason =
-                map_gemini_finish_reason(candidate.get("finishReason").and_then(Value::as_str));
+            result.text = text_pieces.join("");
+            result.thinking = thinking_pieces.join("");
         }
+
+        result.finish_reason =
+            map_gemini_finish_reason(candidate.get("finishReason").and_then(Value::as_str));
     }
 
     result

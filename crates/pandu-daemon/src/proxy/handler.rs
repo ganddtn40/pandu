@@ -116,14 +116,13 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
 
     if let Some(session) = &session {
         state.sessions.mark_used(&session.id);
-        if recordable {
-            if let Err(error) =
+        if recordable
+            && let Err(error) =
                 state
                     .store
                     .touch_session(&session.id, agent.as_ref(), Some(provider.as_str()))
-            {
-                tracing::warn!(%error, "could not update the session agent");
-            }
+        {
+            tracing::warn!(%error, "could not update the session agent");
         }
     }
 
@@ -131,15 +130,14 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
         .get("content-length")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok())
+        && declared > state.config.max_body_bytes as u64
     {
-        if declared > state.config.max_body_bytes as u64 {
-            return proxy_error_response(
-                route.protocol,
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "The request body is larger than Pandu allows.",
-                None,
-            );
-        }
+        return proxy_error_response(
+            route.protocol,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "The request body is larger than Pandu allows.",
+            None,
+        );
     }
 
     let body_bytes = match to_bytes(request.into_body(), state.config.max_body_bytes).await {
@@ -155,69 +153,70 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
     };
     let body_text = String::from_utf8_lossy(&body_bytes).to_string();
 
-    if let Some(session) = &session {
-        if recordable {
-            // Budgets run first: a blocked budget must not spend time on the
-            // guard detectors or on a git snapshot.
-            match state.budgets.check(&session.id).await {
-                Ok(result) => {
-                    if let Some(blocked) = result.blocked {
-                        let message = format!(
-                            "Pandu blocked this request: the \"{}\" budget is exhausted ({:.4} USD of {:.4} USD).",
-                            blocked.policy.name, blocked.status.spent_usd, blocked.status.limit_usd
-                        );
-                        return proxy_error_response(
-                            route.protocol,
-                            StatusCode::PAYMENT_REQUIRED,
-                            &message,
-                            Some("budget_exceeded"),
-                        );
-                    }
-                }
-                Err(error) => {
-                    // Fail open: a budget lookup failure must never break the
-                    // proxy, and the request is still recorded and guarded.
-                    tracing::warn!(%error, "Pandu budget evaluation failed");
+    if let Some(session) = &session
+        && recordable
+    {
+        // Budgets run first: a blocked budget must not spend time on the
+        // guard detectors or on a git snapshot.
+        match state.budgets.check(&session.id).await {
+            Ok(result) => {
+                if let Some(blocked) = result.blocked {
+                    let message = format!(
+                        "Pandu blocked this request: the \"{}\" budget is exhausted ({:.4} USD of {:.4} USD).",
+                        blocked.policy.name, blocked.status.spent_usd, blocked.status.limit_usd
+                    );
+                    return proxy_error_response(
+                        route.protocol,
+                        StatusCode::PAYMENT_REQUIRED,
+                        &message,
+                        Some("budget_exceeded"),
+                    );
                 }
             }
+            Err(error) => {
+                // Fail open: a budget lookup failure must never break the
+                // proxy, and the request is still recorded and guarded.
+                tracing::warn!(%error, "Pandu budget evaluation failed");
+            }
+        }
 
-            let guard_input = crate::guards::GuardRequestInput {
-                session_id: session.id.clone(),
-                protocol: route.protocol,
-                path: route.upstream_path.clone(),
-                headers: collect_header_map(&headers),
-                body_text: body_text.clone(),
-            };
-            match state.guards.evaluate_request(guard_input).await {
-                Ok(result) => {
-                    if !result.allowed {
-                        let status = result
-                            .status
-                            .and_then(|value| StatusCode::from_u16(value).ok())
-                            .unwrap_or(StatusCode::FORBIDDEN);
-                        return proxy_error_response(
-                            route.protocol,
-                            status,
-                            result.message.as_deref().unwrap_or(
-                                "Pandu blocked this request because a guard rule matched.",
-                            ),
-                            result.code.as_deref().or(Some("guard_blocked")),
-                        );
-                    }
-                }
-                Err(error) => {
-                    // Guard evaluation fails open by design. The recorder
-                    // still redacts secrets and stores every step.
-                    tracing::warn!(%error, "Pandu guard evaluation failed");
+        let guard_input = crate::guards::GuardRequestInput {
+            session_id: session.id.clone(),
+            protocol: route.protocol,
+            path: route.upstream_path.clone(),
+            headers: collect_header_map(&headers),
+            body_text: body_text.clone(),
+        };
+        match state.guards.evaluate_request(guard_input).await {
+            Ok(result) => {
+                if !result.allowed {
+                    let status = result
+                        .status
+                        .and_then(|value| StatusCode::from_u16(value).ok())
+                        .unwrap_or(StatusCode::FORBIDDEN);
+                    return proxy_error_response(
+                        route.protocol,
+                        status,
+                        result
+                            .message
+                            .as_deref()
+                            .unwrap_or("Pandu blocked this request because a guard rule matched."),
+                        result.code.as_deref().or(Some("guard_blocked")),
+                    );
                 }
             }
+            Err(error) => {
+                // Guard evaluation fails open by design. The recorder
+                // still redacts secrets and stores every step.
+                tracing::warn!(%error, "Pandu guard evaluation failed");
+            }
+        }
 
-            if let Err(error) = state.snapshots.ensure_baseline(session).await {
-                tracing::warn!(%error, session_id = session.id, "could not capture a baseline snapshot");
-            }
-            if let Err(error) = state.snapshots.settle_pending_step(&session.id).await {
-                tracing::warn!(%error, session_id = session.id, "could not settle a pending snapshot");
-            }
+        if let Err(error) = state.snapshots.ensure_baseline(session).await {
+            tracing::warn!(%error, session_id = session.id, "could not capture a baseline snapshot");
+        }
+        if let Err(error) = state.snapshots.settle_pending_step(&session.id).await {
+            tracing::warn!(%error, session_id = session.id, "could not settle a pending snapshot");
         }
     }
 
@@ -319,24 +318,22 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
     // target model rejected the rewritten request. Revert once, flag this
     // step, and forward the provider response untouched. Pandu never retries
     // the request, so the next request uses the agent's original model.
-    if upstream_status.is_client_error() {
-        if let (Some(active), Some(info)) = (&model_override, override_info.as_mut()) {
-            if info
-                .get("applied")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                let reverted = state.sessions.revert_model_override(
-                    &active.session_id,
-                    "provider_rejected",
-                    Some(upstream_status.as_u16()),
-                );
-                info["providerRejected"] = json!(true);
-                info["reverted"] = json!(reverted.is_some());
-                info["revertReason"] = json!("provider_rejected");
-                info["providerStatus"] = json!(upstream_status.as_u16());
-            }
-        }
+    if upstream_status.is_client_error()
+        && let (Some(active), Some(info)) = (&model_override, override_info.as_mut())
+        && info
+            .get("applied")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        let reverted = state.sessions.revert_model_override(
+            &active.session_id,
+            "provider_rejected",
+            Some(upstream_status.as_u16()),
+        );
+        info["providerRejected"] = json!(true);
+        info["reverted"] = json!(reverted.is_some());
+        info["revertReason"] = json!("provider_rejected");
+        info["providerStatus"] = json!(upstream_status.as_u16());
     }
 
     let is_event_stream = upstream
@@ -474,14 +471,13 @@ pub async fn proxy_handler(State(state): State<AppState>, request: Request) -> R
     };
 
     let response_text = String::from_utf8_lossy(&response_body).to_string();
-    if let Some(info) = override_info.as_mut() {
-        if info
+    if let Some(info) = override_info.as_mut()
+        && info
             .get("providerRejected")
             .and_then(Value::as_bool)
             .unwrap_or(false)
-        {
-            info["providerError"] = json!(truncate_text(&response_text, 2_000));
-        }
+    {
+        info["providerError"] = json!(truncate_text(&response_text, 2_000));
     }
     let parsed = parse_json_body(&response_text);
     let collected = parsed

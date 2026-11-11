@@ -1329,7 +1329,7 @@ where
 /// tests apply exactly the same bomb guard and schema checks as the loader.
 pub fn parse_entry_text(path: &str, text: &str) -> Result<MarketEntry, MarketError> {
     reject_yaml_bomb(text)?;
-    let entry: MarketEntry = serde_yaml::from_str(text).map_err(|error| {
+    let entry: MarketEntry = serde_saphyr::from_str(text).map_err(|error| {
         MarketError::Entry(format!("Registry entry `{path}` is invalid YAML: {error}"))
     })?;
     entry.validate()?;

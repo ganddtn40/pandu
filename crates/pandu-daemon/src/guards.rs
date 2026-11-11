@@ -144,10 +144,10 @@ impl ApprovalBroker {
         }
         // Keep only a bounded number of early decisions; an unanswered event
         // that is never waited on must not grow this map forever.
-        if state.resolved.len() >= 256 {
-            if let Some(oldest) = state.resolved.keys().next().cloned() {
-                state.resolved.remove(&oldest);
-            }
+        if state.resolved.len() >= 256
+            && let Some(oldest) = state.resolved.keys().next().cloned()
+        {
+            state.resolved.remove(&oldest);
         }
         state.resolved.insert(event_id.to_string(), outcome);
         false
@@ -383,10 +383,10 @@ fn latest_user_from_prompt_text(prompt_text: &str) -> String {
         if block.is_empty() {
             continue;
         }
-        if let Some(captures) = pattern.captures(block) {
-            if let Some(value) = captures.get(1) {
-                return value.as_str().trim().to_string();
-            }
+        if let Some(captures) = pattern.captures(block)
+            && let Some(value) = captures.get(1)
+        {
+            return value.as_str().trim().to_string();
         }
     }
     prompt_text.trim().to_string()
@@ -1122,16 +1122,16 @@ impl GuardService {
             kind: Some(GuardRuleKind::Secret),
             limit: 500,
         })? {
-            if let Some(metadata) = event.metadata {
-                if let (Some(secret_type), Some(location)) = (
+            if let Some(metadata) = event.metadata
+                && let (Some(secret_type), Some(location)) = (
                     metadata.get("secretType").and_then(Value::as_str),
                     metadata.get("location").and_then(Value::as_str),
-                ) {
-                    surfaced.insert(format!(
-                        "{}\u{0}{secret_type}\u{0}{location}",
-                        event.step_id.as_deref().unwrap_or("request")
-                    ));
-                }
+                )
+            {
+                surfaced.insert(format!(
+                    "{}\u{0}{secret_type}\u{0}{location}",
+                    event.step_id.as_deref().unwrap_or("request")
+                ));
             }
         }
 

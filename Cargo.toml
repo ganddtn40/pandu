@@ -11,7 +11,7 @@ exclude = ["legacy"]
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/ganddtn40/pandu"
 homepage = "https://github.com/ganddtn40/pandu"
@@ -51,12 +51,12 @@ minisign-verify = "0.3"
 blake2 = "0.10"
 
 # Storage
-rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
 
 # Serialization and data
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+serde-saphyr = "2"
 toml = "0.8"
 toml_edit = "0.22"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
@@ -88,7 +88,7 @@ rust-embed = { version = "8", features = ["include-exclude"] }
 # Remote access: pairing QR, LAN TLS
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 rcgen = "0.13"
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.9", features = ["tls-rustls"] }
 tokio-tungstenite = "0.26"
 
 # The Windows PTY needs two changes upstream does not make: the child must be

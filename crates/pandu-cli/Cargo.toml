@@ -14,8 +14,8 @@ name = "pandu"
 path = "src/main.rs"
 
 [dependencies]
-pandu-core = { path = "../pandu-core" }
-pandu-daemon = { path = "../pandu-daemon" }
+pandu-core = { path = "../pandu-core", version = "0.2.0" }
+pandu-daemon = { path = "../pandu-daemon", version = "0.2.0" }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
@@ -31,6 +31,6 @@ crossterm = "0.29"
 rpassword = { workspace = true }
 
 [dev-dependencies]
-pandu-core = { path = "../pandu-core", features = ["test-signing"] }
+pandu-core = { path = "../pandu-core", version = "0.2.0", features = ["test-signing"] }
 tempfile = { workspace = true }
 rusqlite = { workspace = true }

@@ -1039,12 +1039,11 @@ impl Store {
 
     fn open_inner(path: &Path, fail_after_columns: bool) -> Result<Self> {
         let is_memory = path == Path::new(":memory:");
-        if !is_memory {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)?;
-                }
-            }
+        if !is_memory
+            && let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
 
         let mut connection = Connection::open(path)?;
@@ -1060,10 +1059,10 @@ impl Store {
         // `CREATE TABLE IF NOT EXISTS` is idempotent, but a migration that adds
         // a column is not, and a crash halfway through must be recoverable.
         let existing_before = database_version(&connection)?;
-        if let Some(version) = existing_before {
-            if version > SCHEMA_VERSION {
-                return Err(newer_schema_error(version));
-            }
+        if let Some(version) = existing_before
+            && version > SCHEMA_VERSION
+        {
+            return Err(newer_schema_error(version));
         }
         if !is_memory {
             integrity_check(&connection)?;
@@ -3329,7 +3328,7 @@ impl Store {
                 row.device_name,
                 row.ip,
                 row.detail,
-                row.size_bytes,
+                row.size_bytes.map(|value| value as i64),
                 row.content_hash,
                 previous,
                 entry_hash,

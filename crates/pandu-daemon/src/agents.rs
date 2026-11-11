@@ -779,14 +779,13 @@ impl AgentControl {
         if input.message.trim().is_empty() {
             input.message = default_message(input.event_type).to_string();
         }
-        if let Some(metadata) = &input.metadata {
-            if serde_json::to_string(metadata)
+        if let Some(metadata) = &input.metadata
+            && serde_json::to_string(metadata)
                 .map(|value| value.len())
                 .unwrap_or(0)
                 > 8_192
-            {
-                input.metadata = None;
-            }
+        {
+            input.metadata = None;
         }
         let event = self
             .store

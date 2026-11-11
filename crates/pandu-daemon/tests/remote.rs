@@ -208,15 +208,13 @@ async fn start_remote_daemon(home: &Path, upstream: SocketAddr) -> (ServerHandle
             .get(format!("{public_url}/"))
             .send()
             .await
-        {
-            if response
+            && response
                 .headers()
                 .get(REMOTE_HEADER)
                 .and_then(|value| value.to_str().ok())
                 == Some("1")
-            {
-                break;
-            }
+        {
+            break;
         }
         assert!(
             Instant::now() < deadline,
@@ -890,10 +888,10 @@ async fn live_events_hide_content_from_status_only_devices() {
         .to_string();
     let saw_started = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(Ok(frame)) = socket.next().await {
-            if let Message::Text(text) = frame {
-                if text.contains("agent.started") {
-                    return true;
-                }
+            if let Message::Text(text) = frame
+                && text.contains("agent.started")
+            {
+                return true;
             }
         }
         false
@@ -907,10 +905,10 @@ async fn live_events_hide_content_from_status_only_devices() {
     append_agent_output(&client, &daemon, &session_id, "terminal-secret-value").await;
     let leaked = tokio::time::timeout(Duration::from_millis(1200), async {
         while let Some(Ok(frame)) = socket.next().await {
-            if let Message::Text(text) = frame {
-                if text.contains("agent.output") || text.contains("terminal-secret-value") {
-                    return true;
-                }
+            if let Message::Text(text) = frame
+                && (text.contains("agent.output") || text.contains("terminal-secret-value"))
+            {
+                return true;
             }
         }
         false
@@ -927,10 +925,11 @@ async fn live_events_hide_content_from_status_only_devices() {
     append_agent_output(&client, &daemon, &session_id, "visible-now").await;
     let saw_output = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(Ok(frame)) = socket.next().await {
-            if let Message::Text(text) = frame {
-                if text.contains("agent.output") && text.contains("visible-now") {
-                    return true;
-                }
+            if let Message::Text(text) = frame
+                && text.contains("agent.output")
+                && text.contains("visible-now")
+            {
+                return true;
             }
         }
         false

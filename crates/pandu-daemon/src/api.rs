@@ -903,12 +903,12 @@ pub async fn update_budget(
     Path(id): Path<String>,
     Json(patch): Json<pandu_core::guard::BudgetPolicyPatch>,
 ) -> Result<Json<Value>, ApiError> {
-    if let Some(limit) = patch.limit_usd {
-        if !limit.is_finite() || limit < 0.0 {
-            return Err(ApiError::bad_request(
-                "The budget limit must be a non-negative number.",
-            ));
-        }
+    if let Some(limit) = patch.limit_usd
+        && (!limit.is_finite() || limit < 0.0)
+    {
+        return Err(ApiError::bad_request(
+            "The budget limit must be a non-negative number.",
+        ));
     }
     let policy = state
         .store

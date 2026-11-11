@@ -223,13 +223,13 @@ impl Adapter {
             )));
         }
         validate_id(&self.id)?;
-        if let Some(expected) = expected_id {
-            if self.id != expected {
-                return Err(AdapterError::new(format!(
-                    "adapter file {expected}.toml declares id \"{}\"; the filename and id must match",
-                    self.id
-                )));
-            }
+        if let Some(expected) = expected_id
+            && self.id != expected
+        {
+            return Err(AdapterError::new(format!(
+                "adapter file {expected}.toml declares id \"{}\"; the filename and id must match",
+                self.id
+            )));
         }
         if self.name.trim().is_empty() || self.name.len() > 80 || self.name.contains('\n') {
             return Err(AdapterError::new(

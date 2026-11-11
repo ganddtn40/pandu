@@ -335,14 +335,14 @@ pub fn require_new_sequence(
             "The update manifest has no sequence number. Refusing to install it.".into(),
         ));
     }
-    if let Some(last) = last_accepted {
-        if manifest.sequence <= last {
-            return Err(UpdateError::Replay(format!(
-                "The update manifest sequence {} is not newer than the last accepted sequence {last}. \
+    if let Some(last) = last_accepted
+        && manifest.sequence <= last
+    {
+        return Err(UpdateError::Replay(format!(
+            "The update manifest sequence {} is not newer than the last accepted sequence {last}. \
                  Refusing to replay an old release.",
-                manifest.sequence
-            )));
-        }
+            manifest.sequence
+        )));
     }
     Ok(())
 }
@@ -732,7 +732,7 @@ pub mod test_signing {
     }
 
     fn hex_bytes(value: &str) -> Option<Vec<u8>> {
-        if value.len() % 2 != 0 {
+        if !value.len().is_multiple_of(2) {
             return None;
         }
         (0..value.len())

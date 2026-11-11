@@ -333,17 +333,16 @@ pub fn extract_latest_user_message(
             if let Some(message) = last_user_message(body.get("messages")) {
                 return Some(message);
             }
-            if path.contains("/responses")
-                || body.get("object").and_then(Value::as_str) == Some("response")
+            if (path.contains("/responses")
+                || body.get("object").and_then(Value::as_str) == Some("response"))
+                && let Some(input) = body.get("input")
             {
-                if let Some(input) = body.get("input") {
-                    if let Some(text) = input.as_str() {
-                        if !text.trim().is_empty() {
-                            return Some(truncate_text(text, MAX_PROMPT_CHARS));
-                        }
-                    }
-                    return last_user_message(Some(input));
+                if let Some(text) = input.as_str()
+                    && !text.trim().is_empty()
+                {
+                    return Some(truncate_text(text, MAX_PROMPT_CHARS));
                 }
+                return last_user_message(Some(input));
             }
             None
         }

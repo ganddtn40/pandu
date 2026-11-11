@@ -1249,13 +1249,13 @@ pub fn uninstall(
             MarketError::Install(format!("Could not remove {}: {error}", file.display_path))
         })?;
     }
-    if config_action == "remove" {
-        if let Some(config) = &manifest.config {
-            let path = PathBuf::from(&config.path);
-            let contents = read_config(&path)?.unwrap_or_default();
-            let edited = config_edit::remove_change(&contents, config.format, &config.key_path)?;
-            atomic_write(&path, edited.as_bytes(), &roots)?;
-        }
+    if config_action == "remove"
+        && let Some(config) = &manifest.config
+    {
+        let path = PathBuf::from(&config.path);
+        let contents = read_config(&path)?.unwrap_or_default();
+        let edited = config_edit::remove_change(&contents, config.format, &config.key_path)?;
+        atomic_write(&path, edited.as_bytes(), &roots)?;
     }
     remove_empty_parents(manifest, &roots);
 
@@ -1469,20 +1469,18 @@ pub fn summarize(
     if edited > 0 {
         attention.push(format!("{edited} file(s) changed on disk"));
     }
-    if let Some(config) = &manifest.config {
-        if let Ok(Some(current)) =
+    if let Some(config) = &manifest.config
+        && let Ok(Some(current)) =
             read_config(Path::new(&config.path)).and_then(|contents| match contents {
                 Some(contents) => {
                     config_edit::read_value(&contents, config.format, &config.key_path)
                 }
                 None => Ok(None),
             })
-        {
-            if !value_matches(&current, &config.value, &config.secret_names, None) {
-                config_changed = true;
-                attention.push("Configuration changed on disk".into());
-            }
-        }
+        && !value_matches(&current, &config.value, &config.secret_names, None)
+    {
+        config_changed = true;
+        attention.push("Configuration changed on disk".into());
     }
     if revoked {
         attention.push("Revoked by the registry".into());

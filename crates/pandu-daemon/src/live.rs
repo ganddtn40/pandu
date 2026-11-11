@@ -76,10 +76,8 @@ impl LiveBus {
             payload,
         };
 
-        if persist {
-            if let Err(error) = self.store.insert_live_event(&event) {
-                tracing::warn!(%error, "could not persist a live event");
-            }
+        if persist && let Err(error) = self.store.insert_live_event(&event) {
+            tracing::warn!(%error, "could not persist a live event");
         }
         // A missing receiver is normal: nobody has the UI open.
         let _ = self.sender.send(event.clone());

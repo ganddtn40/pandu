@@ -68,10 +68,8 @@ impl Config {
         let config = Self::from_env(vars)?;
         // Only the default location is migrated: an explicit home override is
         // the user's choice and must be used exactly as given.
-        if !home_override {
-            if let Err(error) = crate::migrate::migrate_default_home() {
-                tracing::warn!(%error, "could not copy the old data directory");
-            }
+        if !home_override && let Err(error) = crate::migrate::migrate_default_home() {
+            tracing::warn!(%error, "could not copy the old data directory");
         }
         Ok(config)
     }
