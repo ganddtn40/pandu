@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 
 use base64::Engine;
+use chrono::{DateTime, Utc};
 use minisign_verify::{PublicKey, Signature};
 use regex::Regex;
 use semver::Version;
@@ -21,7 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::brand;
 
-pub const UPDATE_MANIFEST_SCHEMA: u32 = 1;
+pub const UPDATE_MANIFEST_SCHEMA: u32 = 2;
 pub const MAX_MANIFEST_BYTES: usize = 512 * 1024;
 pub const MAX_NOTES_CHARS: usize = 12_000;
 pub const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
@@ -155,6 +156,8 @@ pub enum UpdateError {
     UnsafeUrl(String),
     Version(String),
     Trust(String),
+    Expired(String),
+    Replay(String),
     TooLarge(String),
     Io(String),
 }
@@ -168,6 +171,8 @@ impl std::fmt::Display for UpdateError {
             | Self::UnsafeUrl(message)
             | Self::Version(message)
             | Self::Trust(message)
+            | Self::Expired(message)
+            | Self::Replay(message)
             | Self::TooLarge(message)
             | Self::Io(message) => formatter.write_str(message),
         }
@@ -200,6 +205,15 @@ pub struct ReleaseManifest {
     pub notes: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published_at: Option<String>,
+    /// RFC 3339 time after which this manifest must not be installed. A replayed
+    /// manifest eventually stops working even if the sequence is not checked.
+    #[serde(default)]
+    pub expires: String,
+    /// Strictly increasing release sequence. The updater refuses a manifest
+    /// that is not newer than the last sequence it accepted, which blocks a
+    /// replay of an old signed release.
+    #[serde(default)]
+    pub sequence: u64,
     #[serde(default)]
     pub artifacts: BTreeMap<String, ReleaseArtifact>,
     /// Minisign signature over the canonical payload without this field.
@@ -222,6 +236,8 @@ struct ManifestPayload<'a> {
     notes: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     published_at: Option<&'a str>,
+    expires: &'a str,
+    sequence: u64,
     artifacts: &'a BTreeMap<String, ReleaseArtifact>,
 }
 
@@ -233,6 +249,8 @@ pub fn manifest_signing_payload(manifest: &ReleaseManifest) -> Vec<u8> {
         key_id: &manifest.key_id,
         notes: &manifest.notes,
         published_at: manifest.published_at.as_deref(),
+        expires: &manifest.expires,
+        sequence: manifest.sequence,
         artifacts: &manifest.artifacts,
     })
     .expect("a release manifest always serializes")
@@ -242,10 +260,22 @@ pub fn manifest_signing_payload(manifest: &ReleaseManifest) -> Vec<u8> {
 ///
 /// The returned manifest has sanitized notes. Verification happens before
 /// sanitizing so the signature covers exactly the bytes the publisher signed.
+/// An expired manifest is refused after its signature is verified, so a forged
+/// expiry cannot be used to probe the updater.
 pub fn parse_manifest(
     bytes: &[u8],
     public_key_base64: &str,
     expected_key_id: &str,
+) -> Result<ReleaseManifest, UpdateError> {
+    parse_manifest_at(bytes, public_key_base64, expected_key_id, Utc::now())
+}
+
+/// Deterministic form of [`parse_manifest`] for tests.
+pub fn parse_manifest_at(
+    bytes: &[u8],
+    public_key_base64: &str,
+    expected_key_id: &str,
+    now: DateTime<Utc>,
 ) -> Result<ReleaseManifest, UpdateError> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(UpdateError::TooLarge(format!(
@@ -264,8 +294,57 @@ pub fn parse_manifest(
     }
     let payload = manifest_signing_payload(&manifest);
     verify_minisign(&payload, &manifest.signature, public_key_base64)?;
+    let expires = manifest_expiry(&manifest)?;
+    if expires <= now {
+        return Err(UpdateError::Expired(format!(
+            "The update manifest expired at {}. Refusing to install a stale release.",
+            manifest.expires.trim()
+        )));
+    }
     manifest.notes = sanitize_release_notes(&manifest.notes);
     Ok(manifest)
+}
+
+fn manifest_expiry(manifest: &ReleaseManifest) -> Result<DateTime<Utc>, UpdateError> {
+    let raw = manifest.expires.trim();
+    if raw.is_empty() {
+        return Err(UpdateError::Manifest(
+            "The update manifest has no expiry. Refusing to install it.".into(),
+        ));
+    }
+    let parsed = DateTime::parse_from_rfc3339(raw).map_err(|_| {
+        UpdateError::Manifest(format!(
+            "The update manifest expiry `{raw}` is not an RFC 3339 timestamp."
+        ))
+    })?;
+    Ok(parsed.with_timezone(&Utc))
+}
+
+/// Refuse a manifest whose sequence is not strictly newer than the last one
+/// this installation accepted.
+///
+/// The version check blocks an old version. This check blocks a replay of an
+/// older signed manifest whose version may still be newer than the running
+/// build, for example after a rollback.
+pub fn require_new_sequence(
+    manifest: &ReleaseManifest,
+    last_accepted: Option<u64>,
+) -> Result<(), UpdateError> {
+    if manifest.sequence == 0 {
+        return Err(UpdateError::Manifest(
+            "The update manifest has no sequence number. Refusing to install it.".into(),
+        ));
+    }
+    if let Some(last) = last_accepted {
+        if manifest.sequence <= last {
+            return Err(UpdateError::Replay(format!(
+                "The update manifest sequence {} is not newer than the last accepted sequence {last}. \
+                 Refusing to replay an old release.",
+                manifest.sequence
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_manifest(manifest: &ReleaseManifest, expected_key_id: &str) -> Result<(), UpdateError> {
@@ -289,6 +368,11 @@ fn validate_manifest(manifest: &ReleaseManifest, expected_key_id: &str) -> Resul
         )));
     }
     parse_version(&manifest.version)?;
+    if manifest.sequence == 0 {
+        return Err(UpdateError::Manifest(
+            "The update manifest has no sequence number. Refusing to install it.".into(),
+        ));
+    }
     if manifest.artifacts.is_empty() {
         return Err(UpdateError::Manifest(
             "The update manifest lists no artifacts.".into(),
@@ -591,6 +675,7 @@ pub mod test_signing {
 
     pub const TEST_SEED_HEX: &str =
         "f242edc50e8f8918d4867651ce1137c36abee7ac50307e29e092b45b6588552c";
+    pub const TEST_MANIFEST_EXPIRES: &str = "2099-01-01T00:00:00Z";
 
     pub fn seed() -> [u8; 32] {
         let bytes = hex_bytes(TEST_SEED_HEX).expect("the test seed is valid hex");
@@ -617,6 +702,15 @@ pub mod test_signing {
     }
 
     pub fn manifest(version: &str, bytes: &[u8]) -> ReleaseManifest {
+        manifest_with(version, bytes, 1, TEST_MANIFEST_EXPIRES)
+    }
+
+    pub fn manifest_with(
+        version: &str,
+        bytes: &[u8],
+        sequence: u64,
+        expires: &str,
+    ) -> ReleaseManifest {
         let target = current_target();
         let mut artifacts = BTreeMap::new();
         artifacts.insert(target, artifact(bytes, "https://example.com/pandu.zip"));
@@ -627,6 +721,8 @@ pub mod test_signing {
             key_id: TEST_UPDATER_KEY_ID.to_string(),
             notes: "A test release.".to_string(),
             published_at: Some("2026-01-01T00:00:00Z".to_string()),
+            expires: expires.to_string(),
+            sequence,
             artifacts,
             signature: String::new(),
         };
@@ -854,5 +950,126 @@ mod tests {
         assert!(
             parse_manifest(&json, TEST_UPDATER_PUBLIC_KEY_BASE64, TEST_UPDATER_KEY_ID).is_err()
         );
+    }
+
+    #[test]
+    fn an_expired_manifest_is_refused() {
+        let manifest =
+            test_signing::manifest_with("0.3.1", b"the artifact", 2, "2000-01-01T00:00:00Z");
+        let json = serde_json::to_vec(&manifest).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-11-11T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let error = parse_manifest_at(
+            &json,
+            TEST_UPDATER_PUBLIC_KEY_BASE64,
+            TEST_UPDATER_KEY_ID,
+            now,
+        )
+        .unwrap_err();
+        assert!(matches!(error, UpdateError::Expired(_)), "{error}");
+    }
+
+    #[test]
+    fn a_manifest_that_has_not_expired_is_accepted() {
+        let manifest =
+            test_signing::manifest_with("0.3.1", b"the artifact", 2, "2026-11-12T00:00:00Z");
+        let json = serde_json::to_vec(&manifest).unwrap();
+        let now = DateTime::parse_from_rfc3339("2026-11-11T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(
+            parse_manifest_at(
+                &json,
+                TEST_UPDATER_PUBLIC_KEY_BASE64,
+                TEST_UPDATER_KEY_ID,
+                now
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_manifest_without_an_expiry_or_sequence_is_refused() {
+        let mut manifest = test_signing::manifest("0.3.1", b"the artifact");
+        manifest.expires.clear();
+        let payload = manifest_signing_payload(&manifest);
+        manifest.signature = test_signing::sign(&payload, "timestamp:0\tfile:manifest\tprehashed");
+        let json = serde_json::to_vec(&manifest).unwrap();
+        assert!(matches!(
+            parse_manifest(&json, TEST_UPDATER_PUBLIC_KEY_BASE64, TEST_UPDATER_KEY_ID),
+            Err(UpdateError::Manifest(_))
+        ));
+
+        let mut manifest = test_signing::manifest("0.3.1", b"the artifact");
+        manifest.sequence = 0;
+        let payload = manifest_signing_payload(&manifest);
+        manifest.signature = test_signing::sign(&payload, "timestamp:0\tfile:manifest\tprehashed");
+        let json = serde_json::to_vec(&manifest).unwrap();
+        assert!(matches!(
+            parse_manifest(&json, TEST_UPDATER_PUBLIC_KEY_BASE64, TEST_UPDATER_KEY_ID),
+            Err(UpdateError::Manifest(_))
+        ));
+    }
+
+    #[test]
+    fn a_replayed_sequence_is_refused() {
+        let manifest = test_signing::manifest_with(
+            "0.3.2",
+            b"the artifact",
+            4,
+            test_signing::TEST_MANIFEST_EXPIRES,
+        );
+        assert!(require_new_sequence(&manifest, None).is_ok());
+        assert!(require_new_sequence(&manifest, Some(3)).is_ok());
+        assert!(matches!(
+            require_new_sequence(&manifest, Some(4)),
+            Err(UpdateError::Replay(_))
+        ));
+        assert!(matches!(
+            require_new_sequence(&manifest, Some(9)),
+            Err(UpdateError::Replay(_))
+        ));
+    }
+
+    #[test]
+    fn a_tampered_artifact_is_refused() {
+        let bytes = b"the artifact";
+        let artifact = test_signing::artifact(bytes, "https://example.com/a.zip");
+        let mut changed = bytes.to_vec();
+        changed[0] ^= 1;
+        assert!(matches!(
+            verify_artifact(&changed, &artifact, TEST_UPDATER_PUBLIC_KEY_BASE64),
+            Err(UpdateError::Checksum(_))
+        ));
+    }
+
+    #[test]
+    fn a_matching_digest_with_a_bad_signature_is_refused() {
+        let bytes = b"the artifact";
+        let mut artifact = test_signing::artifact(bytes, "https://example.com/a.zip");
+        let other = test_signing::artifact(b"another artifact", "https://example.com/b.zip");
+        assert_eq!(artifact.sha256, sha256_hex(bytes));
+        // The digest still matches the bytes, but the signature belongs to a
+        // different file. A checksum alone is not enough.
+        artifact.signature = other.signature;
+        assert!(matches!(
+            verify_artifact(bytes, &artifact, TEST_UPDATER_PUBLIC_KEY_BASE64),
+            Err(UpdateError::Signature(_))
+        ));
+    }
+
+    #[test]
+    fn a_valid_manifest_with_a_swapped_artifact_is_refused() {
+        let manifest = test_signing::manifest("0.3.1", b"the signed artifact");
+        let target = current_target();
+        let artifact = manifest.artifacts.get(&target).unwrap();
+        let error = verify_artifact(
+            b"an artifact from another release",
+            artifact,
+            TEST_UPDATER_PUBLIC_KEY_BASE64,
+        )
+        .unwrap_err();
+        assert!(matches!(error, UpdateError::Checksum(_)), "{error}");
     }
 }

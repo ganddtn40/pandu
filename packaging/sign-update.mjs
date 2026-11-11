@@ -8,6 +8,7 @@
 //   node packaging/sign-update.mjs --version 0.3.0 --notes dist/notes.md \
 //     --artifact windows-x86_64=dist/pandu.exe \
 //     --artifact linux-x86_64=dist/pandu \
+//     --expires 2026-12-01T00:00:00Z --sequence 42 \
 //     --key /secure/pandu-updater.key --out dist/pandu-update.json
 //
 // `--artifact` may be repeated. The target is the value `pandu update` looks
@@ -45,6 +46,8 @@ function usage() {
   --channel <name>         Channel (default: ${brand.update.channel})
   --key-id <id>            Manifest key id (default: ${brand.update.keyId})
   --published-at <rfc3339> Optional publication timestamp
+  --expires <rfc3339>      Manifest expiry. Required; keep it short.
+  --sequence <number>      Monotonic release sequence. Required; must increase.
   --base-url <url>         Override the release download base URL
   --minisign <file>        Minisign binary (default: minisign)
   --help                   Show this help
@@ -93,6 +96,12 @@ function parseArgs(argv) {
         break;
       case '--published-at':
         options.publishedAt = next();
+        break;
+      case '--expires':
+        options.expires = next();
+        break;
+      case '--sequence':
+        options.sequence = next();
         break;
       case '--base-url':
         options.baseUrl = next();
@@ -182,6 +191,8 @@ export function canonicalPayload(manifest) {
     notes: manifest.notes,
   };
   if (manifest.publishedAt) payload.publishedAt = manifest.publishedAt;
+  payload.expires = manifest.expires;
+  payload.sequence = manifest.sequence;
   payload.artifacts = artifacts;
   return Buffer.from(JSON.stringify(payload), 'utf8');
 }
@@ -192,11 +203,24 @@ function main() {
   if (!options.notesFile) fail('--notes is required.');
   if (!options.key) fail('--key is required. The private key never belongs in the repository.');
   if (options.artifacts.length === 0) fail('At least one --artifact is required.');
+  if (!options.expires) fail('--expires is required.');
+  if (!options.sequence) fail('--sequence is required.');
   if (!fs.existsSync(options.notesFile)) {
     fail(`The notes file does not exist: ${options.notesFile}`);
   }
 
   const version = normalizeVersion(options.version);
+  const expires = String(options.expires).trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(expires)) {
+    fail(`\`${options.expires}\` is not an RFC 3339 timestamp such as 2026-12-01T00:00:00Z.`);
+  }
+  if (Date.parse(expires) <= Date.now()) {
+    fail('--expires must be in the future.');
+  }
+  const sequence = Number(options.sequence);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    fail('--sequence must be a positive integer.');
+  }
   const notes = fs.readFileSync(options.notesFile, 'utf8').trimEnd();
   if ([...notes].length > 12_000) {
     fail('The release notes must be 12,000 characters or fewer.');
@@ -221,12 +245,14 @@ function main() {
     }
 
     const manifest = {
-      schema: 1,
+      schema: 2,
       channel: options.channel,
       version,
       keyId: options.keyId,
       notes,
       ...(options.publishedAt ? { publishedAt: options.publishedAt } : {}),
+      expires,
+      sequence,
       artifacts,
       signature: '',
     };
@@ -243,6 +269,7 @@ function main() {
       .digest('hex');
     console.log(`Wrote ${options.out}`);
     console.log(`Channel ${manifest.channel}, version ${manifest.version}, key ${manifest.keyId}`);
+    console.log(`Sequence ${manifest.sequence}, expires ${manifest.expires}`);
     console.log(`SHA-256 ${digest}`);
     console.log(`Upload this file as the release asset named ${path.basename(options.out)}.`);
   } finally {

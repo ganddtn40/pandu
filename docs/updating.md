@@ -61,12 +61,20 @@ Pandu verifies all of the following before it touches the binary:
 2. The release has a signed `pandu-update.json` manifest.
 3. The manifest is signed by the updater key compiled into your build.
 4. The manifest is for the `stable` channel and the same key id.
-5. The artifact's SHA-256 matches the manifest.
-6. The artifact's Minisign signature matches the manifest.
-7. The new version is newer than the version you are running.
+5. The manifest has not expired.
+6. The manifest's sequence is newer than the last update you installed.
+7. The artifact's SHA-256 matches the manifest.
+8. The artifact's Minisign signature matches the manifest.
+9. The new version is newer than the version you are running.
 
 If any check fails, Pandu stops and installs nothing. It also refuses to
-downgrade, even if a release feed points at an older tag.
+downgrade, even if a release feed points at an older tag. The expiry and
+sequence checks stop an attacker from replaying an old signed release, for
+example after you roll back to a previous version.
+
+The sequence is recorded in `pandu-update-state.json` in your Pandu home only
+after a verified update is installed. If that file is damaged, the updater
+fails closed instead of silently accepting a replayed manifest.
 
 The previous binary is kept next to the new one for one version. If the new
 build does not start, run:
@@ -144,6 +152,17 @@ prerelease or a mistaken tag. Stay on your current version.
 **"This release has no signed update manifest."**
 The release is missing `pandu-update.json`. Ask the maintainer to sign and
 upload it.
+
+**"The update manifest expired."**
+The signed manifest is past its `expires` time. This is normal for an old
+release. Ask the maintainer for a freshly signed manifest; do not bypass the
+check.
+
+**"Refusing to replay an old release."**
+The manifest sequence is not newer than the last update this installation
+accepted. Either the release feed is serving an old manifest, or someone is
+replaying one. If you rolled back on purpose, the next update must carry a
+higher sequence than the one you installed before.
 
 **Permission denied while replacing the binary.**
 Stop every Pandu process, then run the command again. On Windows, an open

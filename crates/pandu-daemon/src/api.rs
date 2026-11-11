@@ -1935,6 +1935,9 @@ mod tests {
             std::path::Path::new(&shown).is_absolute(),
             "health must report an absolute path, got {shown}"
         );
-        assert!(!shown.starts_with("ui"), "the relative form leaked: {shown}");
+        assert!(
+            !shown.starts_with("ui"),
+            "the relative form leaked: {shown}"
+        );
     }
 }

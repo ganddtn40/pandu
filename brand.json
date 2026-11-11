@@ -31,6 +31,7 @@
     "keyId": "pandu-updater-2026",
     "testKeyId": "pandu-updater-test-2026",
     "manifestAsset": "pandu-update.json",
+    "stateFile": "pandu-update-state.json",
     "intervalHours": 24
   },
   "themeSchema": "pandu.theme",

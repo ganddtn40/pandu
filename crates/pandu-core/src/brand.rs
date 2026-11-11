@@ -61,6 +61,8 @@ pub const UPDATE_KEY_ID: &str = env!("PANDU_BRAND_UPDATE_KEY_ID");
 pub const UPDATE_TEST_KEY_ID: &str = env!("PANDU_BRAND_UPDATE_TEST_KEY_ID");
 /// Release asset that carries the signed update manifest.
 pub const UPDATE_MANIFEST_ASSET: &str = env!("PANDU_BRAND_UPDATE_MANIFEST_ASSET");
+/// File that records the last accepted update sequence for replay protection.
+pub const UPDATE_STATE_FILE: &str = env!("PANDU_BRAND_UPDATE_STATE_FILE");
 /// Default interval between automatic update checks, in hours.
 pub fn update_interval_hours() -> u64 {
     env!("PANDU_BRAND_UPDATE_INTERVAL_HOURS")
@@ -161,6 +163,7 @@ mod tests {
             ("update key id", UPDATE_KEY_ID),
             ("update test key id", UPDATE_TEST_KEY_ID),
             ("update manifest asset", UPDATE_MANIFEST_ASSET),
+            ("update state file", UPDATE_STATE_FILE),
             ("theme schema", THEME_SCHEMA),
             ("storage prefix", STORAGE_PREFIX),
             ("window title", WINDOW_TITLE),
@@ -202,6 +205,7 @@ mod tests {
         assert!(UPDATE_API_URL.contains(&format!("/{SLUG}/")));
         assert!(UPDATE_RELEASES_URL.contains(&format!("/{SLUG}/")));
         assert_eq!(UPDATE_CHANNEL, "stable");
+        assert!(UPDATE_STATE_FILE.starts_with(SLUG));
         assert!(update_interval_hours() >= 1);
     }
 

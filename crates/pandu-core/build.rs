@@ -73,6 +73,7 @@ fn main() {
             "UPDATE_MANIFEST_ASSET",
             string(&["update", "manifestAsset"]),
         ),
+        ("UPDATE_STATE_FILE", string(&["update", "stateFile"])),
         (
             "UPDATE_INTERVAL_HOURS",
             number(&["update", "intervalHours"]),

@@ -267,6 +267,8 @@ node packaging/sign-update.mjs `
   --artifact windows-x86_64=dist/pandu.exe `
   --artifact linux-x86_64=dist/pandu `
   --artifact macos-aarch64=dist/pandu `
+  --expires 2026-12-01T00:00:00Z `
+  --sequence 42 `
   --key E:\secure\pandu-updater-2026.key `
   --out dist/pandu-update.json
 ```
@@ -275,8 +277,26 @@ The output is one JSON asset. Upload it to the GitHub release with the exact
 name in `brand.json` (`pandu-update.json`), next to the artifacts. The manifest
 carries a SHA-256 and a Minisign signature per artifact, plus a self-signature
 over the canonical JSON. `pandu update` refuses a manifest with the wrong
-channel, the wrong key id, a missing signature, a bad digest, or a version that
-is not newer than the running build.
+channel, the wrong key id, a missing signature, a bad digest, an expired
+`expires`, a `sequence` that is not newer than the last one the installation
+accepted, or a version that is not newer than the running build.
+
+The manifest is schema 2. Both `--expires` and `--sequence` are required:
+
+- `--expires` is an RFC 3339 timestamp in the future. Keep it short, for
+  example a few weeks after the release. A replayed manifest stops working when
+  it expires even if the sequence check is somehow bypassed.
+- `--sequence` is a positive integer that must strictly increase with every
+  release on the channel. The canonical signed payload includes both fields, so
+  neither can be changed without the private key. Record the sequence in the
+  release notes or a release ledger so the next one is always higher. Never
+  reuse or lower a sequence: installations that accepted the higher value will
+  refuse the release.
+
+The CLI records the accepted sequence in `pandu-update-state.json` in the Pandu
+home only after a verified install. A damaged state file fails closed. If a
+maintainer needs to republish the same version, sign it with a new, higher
+sequence and a new expiry; do not reuse the previous manifest.
 
 ### Tauri and Android
 

@@ -552,7 +552,7 @@ async fn run_update(config: Config, args: UpdateArgs) -> anyhow::Result<()> {
     if !args.check {
         confirm_running_sessions(&config, args.yes).await?;
     }
-    let outcome = updater::run(args.check).await?;
+    let outcome = updater::run(args.check, &config.home).await?;
     if args.json {
         println!(
             "{}",

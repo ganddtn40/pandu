@@ -10,18 +10,36 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use chrono::{SecondsFormat, Utc};
 use pandu_core::brand;
 use pandu_core::update::{
-    MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES, UpdateTrustRoot, active_update_key_id,
+    MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES, ReleaseManifest, UpdateTrustRoot, active_update_key_id,
     active_update_public_key, compare_versions, current_target, notes_summary, parse_manifest,
-    parse_version, require_upgrade, resolve_update_trust_root, safe_https_url, select_artifact,
-    verify_artifact,
+    parse_version, require_new_sequence, require_upgrade, resolve_update_trust_root,
+    safe_https_url, select_artifact, verify_artifact,
 };
 use pandu_daemon::update::GitHubRelease;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The highest manifest sequence this installation has accepted.
+///
+/// It is written after a verified install and read before the next one, so a
+/// replayed signed manifest is refused even when its version is still newer
+/// than the running binary (for example after a rollback).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateState {
+    #[serde(default)]
+    last_accepted_sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_accepted_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_accepted_at: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct UpdateOutcome {
@@ -38,7 +56,7 @@ pub struct UpdateOutcome {
 }
 
 /// Check the pinned GitHub release feed and install a verified update.
-pub async fn run(check_only: bool) -> anyhow::Result<UpdateOutcome> {
+pub async fn run(check_only: bool, home: &Path) -> anyhow::Result<UpdateOutcome> {
     let trust = resolve_update_trust_root(
         cfg!(debug_assertions),
         pandu_core::update::PRODUCTION_UPDATER_PUBLIC_KEY_BASE64,
@@ -118,6 +136,10 @@ pub async fn run(check_only: bool) -> anyhow::Result<UpdateOutcome> {
         );
     }
     require_upgrade(pandu_core::VERSION, &manifest.version)?;
+    let state = read_update_state(home)?;
+    require_new_sequence(&manifest, Some(state.last_accepted_sequence)).map_err(|error| {
+        anyhow::anyhow!("The update manifest failed replay protection: {error}")
+    })?;
 
     let release_url = release
         .html_url
@@ -151,9 +173,16 @@ pub async fn run(check_only: bool) -> anyhow::Result<UpdateOutcome> {
         .map_err(|error| anyhow::anyhow!("The update failed verification: {error}"))?;
 
     let current = std::env::current_exe().context("could not locate the running binary")?;
+    recover_interrupted_install(&current)?;
     let staged = staged_path(&current);
     write_staged(&staged, &bytes)?;
     let previous = install_binary(&staged, &current)?;
+    record_accepted_manifest(home, &manifest).with_context(|| {
+        format!(
+            "the update was installed, but the replay-protection state could not be saved at {}",
+            update_state_path(home).display()
+        )
+    })?;
 
     Ok(UpdateOutcome {
         status: "installed".to_string(),
@@ -319,6 +348,148 @@ fn with_suffix(current: &Path, suffix: &str) -> PathBuf {
     current.with_file_name(format!("{name}.{suffix}"))
 }
 
+fn update_state_path(home: &Path) -> PathBuf {
+    home.join(brand::UPDATE_STATE_FILE)
+}
+
+/// Read the last accepted sequence. A missing file means this installation has
+/// not installed an update yet. A damaged file fails closed: silently starting
+/// from zero would disable replay protection.
+fn read_update_state(home: &Path) -> anyhow::Result<UpdateState> {
+    let path = update_state_path(home);
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("could not read the update state at {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(UpdateState::default()),
+        Err(error) => Err(error)
+            .with_context(|| format!("could not read the update state at {}", path.display())),
+    }
+}
+
+/// Remember the sequence of a manifest that was actually installed.
+fn record_accepted_manifest(home: &Path, manifest: &ReleaseManifest) -> anyhow::Result<()> {
+    std::fs::create_dir_all(home)
+        .with_context(|| format!("could not create {}", home.display()))?;
+    let state = UpdateState {
+        last_accepted_sequence: manifest.sequence,
+        last_accepted_version: Some(manifest.version.clone()),
+        last_accepted_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
+    };
+    let path = update_state_path(home);
+    let temporary = with_suffix(&path, "tmp");
+    let bytes = serde_json::to_vec_pretty(&state).context("could not encode the update state")?;
+    let result = (|| -> anyhow::Result<()> {
+        std::fs::write(&temporary, bytes)
+            .with_context(|| format!("could not write {}", temporary.display()))?;
+        std::fs::rename(&temporary, &path)
+            .with_context(|| format!("could not replace {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// What [`recover_interrupted_install`] found and repaired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recovery {
+    /// There was nothing to repair.
+    None,
+    /// An interrupted install left no runnable binary; the old one is back.
+    RestoredInstall,
+    /// An interrupted rollback was completed. The old binary is current and
+    /// the newer binary is in `.previous`.
+    CompletedRollback,
+}
+
+/// Repair the files an interrupted install or rollback left behind.
+///
+/// An install moves the current binary to `.previous`, then the verified
+/// download from `.pending` into place. A crash between the two used to leave
+/// no runnable binary. Recovery restores the old binary first, so the next
+/// command always has something to run, and clears a staged download that was
+/// never installed.
+pub fn recover_interrupted_install(current: &Path) -> anyhow::Result<Recovery> {
+    let staged = staged_path(current);
+    let previous = previous_path(current);
+    let rollback = with_suffix(current, "rollback");
+
+    if !current.exists() {
+        // An interrupted rollback left the newer binary in `.rollback` and the
+        // old binary in `.previous`. Finish the rollback.
+        if rollback.exists() && previous.exists() {
+            std::fs::rename(&previous, current).with_context(|| {
+                format!(
+                    "could not restore the previous binary at {}",
+                    current.display()
+                )
+            })?;
+            std::fs::rename(&rollback, &previous).with_context(|| {
+                format!("could not keep the newer binary at {}", previous.display())
+            })?;
+            let _ = std::fs::remove_file(&staged);
+            return Ok(Recovery::CompletedRollback);
+        }
+        // An interrupted install left the old binary in `.previous`.
+        if previous.exists() {
+            std::fs::rename(&previous, current).with_context(|| {
+                format!(
+                    "could not restore the previous binary at {}",
+                    current.display()
+                )
+            })?;
+            let _ = std::fs::remove_file(&staged);
+            return Ok(Recovery::RestoredInstall);
+        }
+        // Nothing was moved aside. The staged download is the only copy.
+        if staged.exists() {
+            std::fs::rename(&staged, current).with_context(|| {
+                format!(
+                    "could not install the staged binary at {}",
+                    current.display()
+                )
+            })?;
+            return Ok(Recovery::RestoredInstall);
+        }
+        if rollback.exists() {
+            std::fs::rename(&rollback, current).with_context(|| {
+                format!("could not restore the binary at {}", current.display())
+            })?;
+            return Ok(Recovery::RestoredInstall);
+        }
+        return Ok(Recovery::None);
+    }
+
+    // The current binary exists. Finish rollback bookkeeping, then drop a
+    // staged download that was never installed.
+    let mut recovery = Recovery::None;
+    if rollback.exists() {
+        if previous.exists() {
+            std::fs::remove_file(&rollback).with_context(|| {
+                format!(
+                    "could not remove the stale rollback copy at {}",
+                    rollback.display()
+                )
+            })?;
+        } else {
+            std::fs::rename(&rollback, &previous).with_context(|| {
+                format!("could not keep the newer binary at {}", previous.display())
+            })?;
+            recovery = Recovery::CompletedRollback;
+        }
+    }
+    if staged.exists() {
+        std::fs::remove_file(&staged).with_context(|| {
+            format!(
+                "could not remove the stale staged update at {}",
+                staged.display()
+            )
+        })?;
+    }
+    Ok(recovery)
+}
+
 fn write_staged(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -340,6 +511,20 @@ fn write_staged(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 pub fn install_binary(staged: &Path, current: &Path) -> anyhow::Result<PathBuf> {
     if !staged.exists() {
         bail!("the staged update {} does not exist", staged.display());
+    }
+    // A previous attempt may have stopped after moving the old binary aside.
+    // Restore it so the normal two-step replacement can run again.
+    if !current.exists() {
+        let previous = previous_path(current);
+        if previous.exists() {
+            std::fs::rename(&previous, current).with_context(|| {
+                format!(
+                    "could not restore the previous binary at {}. Close every {} process and try again.",
+                    current.display(),
+                    brand::PRODUCT_NAME
+                )
+            })?;
+        }
     }
     let previous = previous_path(current);
     if previous.exists() {
@@ -369,6 +554,11 @@ pub fn install_binary(staged: &Path, current: &Path) -> anyhow::Result<PathBuf> 
 
 /// Swap the current binary with the one kept by the last update.
 pub fn rollback_binary(current: &Path) -> anyhow::Result<PathBuf> {
+    if recover_interrupted_install(current)? == Recovery::CompletedRollback {
+        // The interrupted rollback is now finished. Rolling back again would
+        // put the newer binary back, which is not what the user asked for.
+        return Ok(previous_path(current));
+    }
     let previous = previous_path(current);
     if !previous.exists() {
         bail!(
@@ -557,11 +747,146 @@ mod tests {
         let first = manifest_signing_payload(&manifest);
         let second = manifest_signing_payload(&manifest);
         assert_eq!(first, second);
-        assert!(
-            String::from_utf8(first)
-                .unwrap()
-                .contains("\"version\":\"1.2.3\"")
+        let payload = String::from_utf8(first).unwrap();
+        assert!(payload.contains("\"version\":\"1.2.3\""));
+        assert!(payload.contains("\"expires\":\"2099-01-01T00:00:00Z\""));
+        assert!(payload.contains("\"sequence\":1"));
+    }
+
+    #[test]
+    fn a_replayed_manifest_is_refused_after_an_install() {
+        let directory = tempfile::tempdir().unwrap();
+        let accepted = test_signing::manifest_with(
+            "9.9.9",
+            b"new binary",
+            7,
+            test_signing::TEST_MANIFEST_EXPIRES,
         );
+        record_accepted_manifest(directory.path(), &accepted).unwrap();
+        let state = read_update_state(directory.path()).unwrap();
+        assert_eq!(state.last_accepted_sequence, 7);
+        assert_eq!(state.last_accepted_version.as_deref(), Some("9.9.9"));
+
+        let replay = test_signing::manifest_with(
+            "9.9.9",
+            b"new binary",
+            7,
+            test_signing::TEST_MANIFEST_EXPIRES,
+        );
+        assert!(matches!(
+            require_new_sequence(&replay, Some(state.last_accepted_sequence)),
+            Err(UpdateError::Replay(_))
+        ));
+
+        let older = test_signing::manifest_with(
+            "9.9.8",
+            b"older binary",
+            6,
+            test_signing::TEST_MANIFEST_EXPIRES,
+        );
+        assert!(require_new_sequence(&older, Some(state.last_accepted_sequence)).is_err());
+
+        let newer = test_signing::manifest_with(
+            "9.9.10",
+            b"newer binary",
+            8,
+            test_signing::TEST_MANIFEST_EXPIRES,
+        );
+        assert!(require_new_sequence(&newer, Some(state.last_accepted_sequence)).is_ok());
+    }
+
+    #[test]
+    fn a_damaged_update_state_fails_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(update_state_path(directory.path()), b"not json").unwrap();
+        let error = read_update_state(directory.path()).unwrap_err().to_string();
+        assert!(error.contains("update state"), "{error}");
+    }
+
+    #[test]
+    fn an_interrupted_install_is_recovered() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory
+            .path()
+            .join(if cfg!(windows) { "pandu.exe" } else { "pandu" });
+        let staged = staged_path(&current);
+        let previous = previous_path(&current);
+        std::fs::write(&previous, b"old binary").unwrap();
+        std::fs::write(&staged, b"new binary").unwrap();
+
+        assert_eq!(
+            recover_interrupted_install(&current).unwrap(),
+            Recovery::RestoredInstall
+        );
+        assert_eq!(std::fs::read(&current).unwrap(), b"old binary");
+        assert!(!staged.exists());
+        assert!(!previous.exists());
+    }
+
+    #[test]
+    fn an_interrupted_rollback_is_completed() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("pandu");
+        let previous = previous_path(&current);
+        let rollback = with_suffix(&current, "rollback");
+        std::fs::write(&previous, b"old binary").unwrap();
+        std::fs::write(&rollback, b"new binary").unwrap();
+
+        assert_eq!(
+            recover_interrupted_install(&current).unwrap(),
+            Recovery::CompletedRollback
+        );
+        assert_eq!(std::fs::read(&current).unwrap(), b"old binary");
+        assert_eq!(std::fs::read(&previous).unwrap(), b"new binary");
+        assert!(!rollback.exists());
+    }
+
+    #[test]
+    fn rollback_finishes_an_interrupted_rollback_without_rolling_forward() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("pandu");
+        let previous = previous_path(&current);
+        let rollback = with_suffix(&current, "rollback");
+        std::fs::write(&current, b"old binary").unwrap();
+        std::fs::write(&rollback, b"new binary").unwrap();
+
+        let returned = rollback_binary(&current).unwrap();
+        assert_eq!(returned, previous);
+        assert_eq!(std::fs::read(&current).unwrap(), b"old binary");
+        assert_eq!(std::fs::read(&previous).unwrap(), b"new binary");
+        assert!(!rollback.exists());
+    }
+
+    #[test]
+    fn a_stale_staged_download_is_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("pandu");
+        let staged = staged_path(&current);
+        std::fs::write(&current, b"current binary").unwrap();
+        std::fs::write(&staged, b"never installed").unwrap();
+
+        assert_eq!(
+            recover_interrupted_install(&current).unwrap(),
+            Recovery::None
+        );
+        assert_eq!(std::fs::read(&current).unwrap(), b"current binary");
+        assert!(!staged.exists());
+    }
+
+    #[test]
+    fn install_restores_a_missing_current_binary_before_replacing_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("pandu");
+        let staged = staged_path(&current);
+        let previous = previous_path(&current);
+        std::fs::write(&previous, b"old binary").unwrap();
+        std::fs::write(&staged, b"new binary").unwrap();
+
+        let returned = install_binary(&staged, &current).unwrap();
+        assert_eq!(returned, previous);
+        assert_eq!(std::fs::read(&current).unwrap(), b"new binary");
+        assert_eq!(std::fs::read(&previous).unwrap(), b"old binary");
+        assert!(!staged.exists());
     }
 
     #[test]
