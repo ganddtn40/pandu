@@ -1,0 +1,10 @@
+{
+  "tag_name": "v0.3.0",
+  "name": "Pandu 0.3.0",
+  "body": "Backup and restore, safer migrations, and update checks that never install silently.\n\n## Highlights\n\n- `pandu backup` writes one archive of your database and settings\n- A failed migration restores its timestamped backup automatically\n- Release notes are sanitized before they reach the UI\n\n<img src=\"https://example.com/tracker.png\" alt=\"tracker\">\n\nRead the [updating guide](https://github.com/ganddtn40/pandu/blob/main/docs/updating.md).",
+  "html_url": "https://github.com/ganddtn40/pandu/releases/tag/v0.3.0",
+  "published_at": "2026-11-01T09:00:00Z",
+  "draft": false,
+  "prerelease": false,
+  "assets": []
+}

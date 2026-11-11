@@ -29,11 +29,22 @@ mkdirSync(home, { recursive: true });
 
 const isMarket =
   mode === 'market' || mode === 'market-offline' || mode === 'market-state';
+const isUpdate = mode === 'update';
+const isMigrate = mode === 'migrate';
 const userHome = path.join(home, 'user');
 const workspace = path.join(home, 'workspace');
 if (isMarket) {
   mkdirSync(userHome, { recursive: true });
   mkdirSync(workspace, { recursive: true });
+}
+
+if (isMigrate) {
+  // Start from the last released schema so the daemon migrates on open and
+  // the UI can show the one-time backup notice.
+  cpSync(
+    path.join(root, 'crates', 'pandu-daemon', 'tests', 'fixtures', 'schema', 'v4.db'),
+    path.join(home, 'pandu.db'),
+  );
 }
 
 if (mode === 'market-offline') {
@@ -55,12 +66,28 @@ const child = spawn(binary, ['serve'], {
   cwd: root,
   env: {
     ...process.env,
-    PANDU_HOME: home,
+    // The update and migration fixtures use a repository-relative home so the
+    // committed screenshots do not contain a developer's absolute user path.
+    PANDU_HOME: isUpdate || isMigrate ? path.relative(root, home) : home,
     PANDU_HOST: '127.0.0.1',
     PANDU_PORT: port,
     PANDU_LOG_WATCH: '0',
     PANDU_NOTIFICATIONS: '0',
-    PANDU_DEMO: mode === 'demo' ? '1' : '0',
+    PANDU_DEMO: mode === 'demo' || isUpdate || isMigrate ? '1' : '0',
+    ...(isUpdate
+      ? {
+          // Debug-only override: read a fixed release document instead of
+          // calling GitHub, so the screenshot test is deterministic and offline.
+          PANDU_UPDATE_FIXTURE: path.join(
+            root,
+            'ui',
+            'tests',
+            'e2e',
+            'fixtures',
+            'update-release.json',
+          ),
+        }
+      : {}),
     ...(isMarket
       ? {
           // Debug-only overrides: the market daemon reads its registry from the

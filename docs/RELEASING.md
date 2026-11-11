@@ -75,9 +75,10 @@ While the repository is absent or private:
   registry stays in use;
 - a release build with no production key shows **Registry is being prepared.**
   and exposes no entries;
-- update checks are not implemented in this build, and the Settings screen says
-  so. Do not add a background ping or an unauthenticated GitHub API call to work
-  around the missing repository.
+- update checks reach the GitHub Releases API for the repository in
+  `brand.json`. While that repository is absent or private, the check reports
+  that updates are unavailable, stays silent offline, and never falls back to
+  an unsigned download. The daemon sends no token and no identifier.
 
 ## 1. Confirm the name is available
 
@@ -134,7 +135,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo check --release -p pandu-daemon
 cargo test --release -p pandu-daemon --lib "market::"
+cargo test --release -p pandu-core --lib update::tests::
 cargo run -p pandu-cli -- models audit
+node --check packaging/sign-update.mjs
 ```
 
 UI:
@@ -153,10 +156,13 @@ Build the CLI before Playwright:
 cargo build -p pandu-cli
 ```
 
-The tag workflow adds a release gate that is not part of the local loop. It
-runs the ignored production-key test and `pandu market check --dir registry`
-with a release binary. The publish job has `needs: registry-gate`, so a failed
-gate stops the release before any artifact is published.
+The tag workflow adds release gates that are not part of the local loop. The
+registry gate runs the ignored production-key test and
+`pandu market check --dir registry` with a release binary. The update gate
+checks `packaging/sign-update.mjs` and runs the updater tests in release mode,
+where the test key is compiled out and the build must fail closed. The publish
+job has `needs: [registry-gate, update-gate]`, so a failed gate stops the
+release before any artifact is published.
 
 ## 3. Registry and trust root
 
@@ -199,19 +205,102 @@ The test key only signs the `.test.json` fixtures. Never use it for a published
 registry, never copy it into a release configuration, and never let a release
 build fall back to it.
 
-## 4. Version and artifacts
+## 4. Updater trust root and key ceremony
+
+The updater key is separate from the registry key and from the Android signing
+key. It signs `pandu-update.json` and every artifact it lists. The private key
+never enters the repository, CI, a chat, or an agent session.
+
+The production updater trust root is currently empty.
+`PRODUCTION_UPDATER_PUBLIC_KEY_BASE64` is `None`, so a release build fails
+closed with **Updates are not available in this build because no production
+updater key is embedded.** It never falls back to the test key. The test key
+only signs fixtures and debug builds.
+
+### Create the key offline
+
+Do this once, on a machine that does not run an AI agent, with the network
+disconnected if your policy allows it:
+
+```powershell
+minisign -G -p pandu-updater-2026.pub -s pandu-updater-2026.key
+```
+
+- Store the `.key` file on encrypted offline media. Keep two copies in separate
+  physical locations.
+- Record the key id printed by `minisign -G`; it must equal `update.keyId` in
+  `brand.json` (`pandu-updater-2026`).
+- Never commit either file. `packaging/sign-update.mjs` reads the secret key
+  only through the `minisign` binary and never prints it.
+
+### Embed the public key
+
+1. Paste the public key contents (the base64 text on the second line of the
+   `.pub` file, without the `untrusted comment:` line) into
+   `PRODUCTION_UPDATER_PUBLIC_KEY_BASE64` in
+   `crates/pandu-core/src/update.rs`.
+2. Confirm `PRODUCTION_UPDATER_KEY_ID` still resolves to `update.keyId` in
+   `brand.json`.
+3. Run the release-mode trust-root tests. With the key embedded, a release
+   build is `Ready`; with the test key embedded, it is `Refused`:
+
+   ```powershell
+   cargo test --release -p pandu-core --lib update::tests::
+   ```
+
+4. Rebuild the release CLI and confirm `pandu update --check` reports a signed
+   update or that none is published. It must never install without a verified
+   manifest.
+
+If the private key is lost, generate a new key pair, bump `update.keyId` in
+`brand.json`, embed the new public key, and ship one release through the old
+channel path. Treat every artifact signed by the lost key as untrusted.
+
+### Sign a release manifest
+
+Build the artifacts from the tagged commit, then sign them offline:
+
+```powershell
+node packaging/sign-update.mjs `
+  --version 0.3.0 `
+  --notes dist/notes.md `
+  --artifact windows-x86_64=dist/pandu.exe `
+  --artifact linux-x86_64=dist/pandu `
+  --artifact macos-aarch64=dist/pandu `
+  --key E:\secure\pandu-updater-2026.key `
+  --out dist/pandu-update.json
+```
+
+The output is one JSON asset. Upload it to the GitHub release with the exact
+name in `brand.json` (`pandu-update.json`), next to the artifacts. The manifest
+carries a SHA-256 and a Minisign signature per artifact, plus a self-signature
+over the canonical JSON. `pandu update` refuses a manifest with the wrong
+channel, the wrong key id, a missing signature, a bad digest, or a version that
+is not newer than the running build.
+
+### Tauri and Android
+
+The desktop Tauri shell does not exist yet. When it lands, configure its updater
+with the same production public key and the same manifest asset; do not give it
+a second trust root. The Android shell also does not exist yet: when it lands,
+verify the APK SHA-256 and signer certificate before handing the file to the
+system installer. Pandu never installs silently on Android. Document Obtainium
+for users who prefer it; Obtainium follows the GitHub release assets and does
+its own verification.
+
+## 5. Version and artifacts
 
 1. Update the version in `Cargo.toml` (`workspace.package.version`) and
    `ui/package.json`.
 2. Update `packaging/manifest.json` if artifact names or channels changed.
 3. Build from the tagged commit, never from a developer working tree.
-4. Publish checksums next to every artifact.
+4. Sign `pandu-update.json` and publish checksums next to every artifact.
 5. Confirm the npm wrapper verifies the downloaded binary checksum before
    running it.
 6. Android signing keys come from the release environment; never commit a
-   keystore or password.
+   keystore or password. Keep the APK signing key separate from the updater key.
 
-## 5. Post-release checks
+## 6. Post-release checks
 
 ```powershell
 pandu --version

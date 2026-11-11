@@ -24,6 +24,15 @@
     "keyId": "pandu-market-2026",
     "testKeyId": "pandu-market-test-2026"
   },
+  "update": {
+    "apiUrl": "https://api.github.com/repos/ganddtn40/pandu/releases",
+    "releasesUrl": "https://github.com/ganddtn40/pandu/releases",
+    "channel": "stable",
+    "keyId": "pandu-updater-2026",
+    "testKeyId": "pandu-updater-test-2026",
+    "manifestAsset": "pandu-update.json",
+    "intervalHours": 24
+  },
   "themeSchema": "pandu.theme",
   "storagePrefix": "pandu.",
   "windowTitle": "Pandu",

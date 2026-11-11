@@ -48,10 +48,36 @@ jobs:
           cargo run --release --locked -p pandu-cli -- market check \
             --dir registry --online --links
 
+  update-gate:
+    name: Verify updater trust root and signing tool
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check updater tooling syntax
+        run: node --check packaging/sign-update.mjs
+
+      # Release builds embed only a production updater key. These tests run in
+      # release mode so the test key is compiled out and the build is forced to
+      # fail closed instead of silently trusting a test signature.
+      - name: Verify the updater trust root
+        run: |
+          cargo test --release --locked -p pandu-core --lib update::tests::
+          cargo test --release --locked -p pandu-daemon --lib \
+            update::service::tests::status_reports_the_build_trust_root_honestly
+
   publish:
     name: Publish release
-    needs: registry-gate
-    if: ${{ needs.registry-gate.result == 'success' }}
+    needs: [registry-gate, update-gate]
+    if: ${{ needs.registry-gate.result == 'success' && needs.update-gate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

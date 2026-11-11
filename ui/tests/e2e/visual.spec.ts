@@ -773,7 +773,7 @@ test.describe('desktop shell', () => {
     await expect(page.getByText('macOS', { exact: true })).toBeVisible();
     await expect(page.getByText('iOS', { exact: true })).toBeVisible();
     await expect(page.getByText('Linux', { exact: true })).toBeVisible();
-    await expect(page.getByText('Update checks are not available in this build.')).toBeVisible();
+    await expect(page.getByText('Signed updates ready')).toBeVisible();
     await expectNoDevelopmentCopy(page);
     await screenshot(page, 'desktop-settings-demo.png');
   });

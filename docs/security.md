@@ -782,8 +782,11 @@ listed so a reviewer can decide whether a later phase must close them.
    public ntfy.sh is a third party that sees the random topic and timing. Use a
    self-hosted ntfy server if that metadata matters.
 8. **No Android or push notifications.** The companion app is Phase 11. There is
-   no FCM/APNs path, no cloud relay, and no background update ping. ntfy is a
-   user-configured third-party notification path, not a companion app.
+   no FCM/APNs path, no cloud relay, and no telemetry. The update check is one
+   HTTPS `GET` to the GitHub Releases API at most once every 24 hours; it sends
+   no token or machine identifier, can be disabled, and never installs without
+   an explicit user action. ntfy is a user-configured third-party notification
+   path, not a companion app.
 9. **Installed market entries are third-party code.** Pandu verifies the
    registry signature, the pinned commit, and the content hash, and it shows a
    preview before writing. It does not sandbox the skill or the MCP server. A

@@ -22,16 +22,11 @@ pub mod routing;
 pub mod similarity;
 pub mod sse;
 pub mod text;
+pub mod update;
 pub mod usage;
 
 /// The Pandu version compiled into this crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// The schema version of the local database.
-///
-/// The value changes whenever a migration is added. The daemon refuses to open
-/// a database written by a newer schema than it understands.
-pub const SCHEMA_VERSION: u32 = 2;
 
 #[cfg(test)]
 mod tests {
@@ -40,10 +35,5 @@ mod tests {
     #[test]
     fn version_is_not_empty() {
         assert!(!VERSION.is_empty());
-    }
-
-    #[test]
-    fn schema_version_tracks_migrations() {
-        assert_eq!(SCHEMA_VERSION, 2);
     }
 }

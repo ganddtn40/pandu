@@ -2,6 +2,8 @@
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
   import ContextMeter from './ContextMeter.svelte';
+  import MigrationNotice from './MigrationNotice.svelte';
+  import UpdateCard from './UpdateCard.svelte';
   import { activeSessions, daemonState, pendingGuards, refreshDaemon, seedDemoData } from './api/daemon.svelte';
   import type { Session } from './api/types';
   import { openAddAgent } from './add-agent.svelte';
@@ -303,6 +305,9 @@
       </button>
     </div>
   {/if}
+
+  <UpdateCard />
+  <MigrationNotice />
 
   <div class="bento" class:is-editing={editing} role="region" aria-label={t('home.title')}>
     {#each widgets as id (id)}

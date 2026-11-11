@@ -182,6 +182,55 @@ export interface LiveEvent {
   payload: Record<string, unknown>;
 }
 
+export type UpdateState =
+  | 'idle'
+  | 'up-to-date'
+  | 'available'
+  | 'snoozed'
+  | 'skipped'
+  | 'offline'
+  | 'rate-limited'
+  | 'unavailable'
+  | 'error';
+
+export type UpdateTrust = 'ready' | 'preparing' | 'refused';
+
+/** The daemon's update view. Rendered directly; never recomputed in the UI. */
+export interface UpdateStatus {
+  enabled: boolean;
+  channel: string;
+  currentVersion: string;
+  state: UpdateState;
+  latestVersion?: string | null;
+  releaseName?: string | null;
+  notes?: string | null;
+  notesSummary?: string | null;
+  releaseUrl?: string | null;
+  publishedAt?: string | null;
+  lastCheckedAt?: string | null;
+  nextCheckAt?: string | null;
+  snoozedUntil?: string | null;
+  skippedVersion?: string | null;
+  trust: UpdateTrust;
+  message?: string | null;
+  canInstall: boolean;
+  installCommand: string;
+  checking: boolean;
+}
+
+/** The most recent schema migration, shown once as a backup notice. */
+export interface MigrationRecord {
+  at: string;
+  fromVersion: number;
+  toVersion: number;
+  backupPath?: string | null;
+  outcome: string;
+}
+
+export interface MigrationsResponse {
+  migration: MigrationRecord | null;
+}
+
 export interface GuardEvidence {
   field?: string;
   excerpt?: string;
@@ -249,6 +298,7 @@ export interface Health {
   ok: boolean;
   version: string;
   database: string;
+  databasePath?: string;
   uptimeMs: number;
   demoMode: boolean;
 }

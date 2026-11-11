@@ -44,6 +44,7 @@ regex = { workspace = true }
 qrcode = { workspace = true }
 rcgen = { workspace = true }
 axum-server = { workspace = true }
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8"

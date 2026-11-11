@@ -31,6 +31,19 @@ fn main() {
             .to_string()
     };
 
+    let number = |path: &[&str]| -> String {
+        let mut value = &brand;
+        for key in path {
+            value = value
+                .get(key)
+                .unwrap_or_else(|| panic!("brand.json is missing `{}`", path.join(".")));
+        }
+        value
+            .as_u64()
+            .unwrap_or_else(|| panic!("brand.json `{}` must be a number", path.join(".")))
+            .to_string()
+    };
+
     for (key, value) in [
         ("NAME", string(&["name"])),
         ("SLUG", string(&["slug"])),
@@ -51,6 +64,19 @@ fn main() {
         ("REGISTRY_URL", string(&["registry", "url"])),
         ("MARKET_KEY_ID", string(&["registry", "keyId"])),
         ("MARKET_TEST_KEY_ID", string(&["registry", "testKeyId"])),
+        ("UPDATE_API_URL", string(&["update", "apiUrl"])),
+        ("UPDATE_RELEASES_URL", string(&["update", "releasesUrl"])),
+        ("UPDATE_CHANNEL", string(&["update", "channel"])),
+        ("UPDATE_KEY_ID", string(&["update", "keyId"])),
+        ("UPDATE_TEST_KEY_ID", string(&["update", "testKeyId"])),
+        (
+            "UPDATE_MANIFEST_ASSET",
+            string(&["update", "manifestAsset"]),
+        ),
+        (
+            "UPDATE_INTERVAL_HOURS",
+            number(&["update", "intervalHours"]),
+        ),
         ("THEME_SCHEMA", string(&["themeSchema"])),
         ("STORAGE_PREFIX", string(&["storagePrefix"])),
         ("WINDOW_TITLE", string(&["windowTitle"])),

@@ -94,6 +94,7 @@ pub async fn health(State(state): State<AppState>) -> Response {
             "ok": database_ok,
             "version": pandu_core::VERSION,
             "database": if database_ok { "ok" } else { "unavailable" },
+            "databasePath": state.config.database_path.display().to_string(),
             "uptimeMs": state.started_at.elapsed().as_millis() as u64,
             "demoMode": state.config.demo_mode,
         })),

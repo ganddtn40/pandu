@@ -49,6 +49,25 @@ pub const MARKET_KEY_ID: &str = env!("PANDU_BRAND_MARKET_KEY_ID");
 /// Test registry signing key id.
 pub const MARKET_TEST_KEY_ID: &str = env!("PANDU_BRAND_MARKET_TEST_KEY_ID");
 
+/// GitHub Releases API endpoint used for update checks.
+pub const UPDATE_API_URL: &str = env!("PANDU_BRAND_UPDATE_API_URL");
+/// Human-facing releases page.
+pub const UPDATE_RELEASES_URL: &str = env!("PANDU_BRAND_UPDATE_RELEASES_URL");
+/// Release channel. Only the stable channel is published for now.
+pub const UPDATE_CHANNEL: &str = env!("PANDU_BRAND_UPDATE_CHANNEL");
+/// Production updater signing key id.
+pub const UPDATE_KEY_ID: &str = env!("PANDU_BRAND_UPDATE_KEY_ID");
+/// Test updater signing key id.
+pub const UPDATE_TEST_KEY_ID: &str = env!("PANDU_BRAND_UPDATE_TEST_KEY_ID");
+/// Release asset that carries the signed update manifest.
+pub const UPDATE_MANIFEST_ASSET: &str = env!("PANDU_BRAND_UPDATE_MANIFEST_ASSET");
+/// Default interval between automatic update checks, in hours.
+pub fn update_interval_hours() -> u64 {
+    env!("PANDU_BRAND_UPDATE_INTERVAL_HOURS")
+        .parse::<u64>()
+        .expect("update interval must be a number")
+}
+
 /// Versioned theme JSON schema name.
 pub const THEME_SCHEMA: &str = env!("PANDU_BRAND_THEME_SCHEMA");
 /// Prefix for every browser storage key, including the trailing dot.
@@ -136,6 +155,12 @@ mod tests {
             ("registry url", REGISTRY_URL),
             ("market key id", MARKET_KEY_ID),
             ("market test key id", MARKET_TEST_KEY_ID),
+            ("update api url", UPDATE_API_URL),
+            ("update releases url", UPDATE_RELEASES_URL),
+            ("update channel", UPDATE_CHANNEL),
+            ("update key id", UPDATE_KEY_ID),
+            ("update test key id", UPDATE_TEST_KEY_ID),
+            ("update manifest asset", UPDATE_MANIFEST_ASSET),
             ("theme schema", THEME_SCHEMA),
             ("storage prefix", STORAGE_PREFIX),
             ("window title", WINDOW_TITLE),
@@ -174,6 +199,10 @@ mod tests {
         assert_eq!(LOGO_ARIA_LABEL, PRODUCT_NAME);
         assert!(REGISTRY_URL.contains(&format!("/{SLUG}/")));
         assert!(REPOSITORY.ends_with(&format!("/{SLUG}")));
+        assert!(UPDATE_API_URL.contains(&format!("/{SLUG}/")));
+        assert!(UPDATE_RELEASES_URL.contains(&format!("/{SLUG}/")));
+        assert_eq!(UPDATE_CHANNEL, "stable");
+        assert!(update_interval_hours() >= 1);
     }
 
     #[test]
@@ -186,6 +215,11 @@ mod tests {
         assert!(MARKET_KEY_ID.starts_with(SLUG));
         assert!(MARKET_TEST_KEY_ID.starts_with(SLUG));
         assert_ne!(MARKET_KEY_ID, MARKET_TEST_KEY_ID);
+        assert!(UPDATE_KEY_ID.starts_with(SLUG));
+        assert!(UPDATE_TEST_KEY_ID.starts_with(SLUG));
+        assert_ne!(UPDATE_KEY_ID, UPDATE_TEST_KEY_ID);
+        assert_ne!(UPDATE_KEY_ID, MARKET_KEY_ID);
+        assert_ne!(UPDATE_TEST_KEY_ID, MARKET_TEST_KEY_ID);
     }
 
     #[test]

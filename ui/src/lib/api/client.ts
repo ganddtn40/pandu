@@ -17,6 +17,7 @@ import type {
   MarketKind,
   MarketSettings,
   MarketStatus,
+  MigrationsResponse,
   ModelPreview,
   ModelPricingRow,
   ModelSwitchResult,
@@ -46,6 +47,7 @@ import type {
   UndoOutcome,
   UninstallOutcome,
   UninstallPreview,
+  UpdateStatus,
 } from './types';
 import {
   CLI_COMMAND,
@@ -390,6 +392,27 @@ export const marketApi = {
       body: JSON.stringify({ autoRefresh }),
     }),
   status: () => request<MarketStatus>('/market/status'),
+};
+
+/**
+ * Host-only update state and the one-time migration notice. The daemon checks
+ * GitHub at most once per interval, never uploads identifiers, and never
+ * installs anything. Installing stays an explicit CLI action.
+ */
+export const updateApi = {
+  status: () => request<UpdateStatus>('/update'),
+  check: () => request<UpdateStatus>('/update/check', { method: 'POST' }),
+  snooze: (choice: 'tomorrow' | 'week' | 'version') =>
+    request<UpdateStatus>('/update/snooze', {
+      method: 'POST',
+      body: JSON.stringify({ choice }),
+    }),
+  setEnabled: (enabled: boolean) =>
+    request<UpdateStatus>('/update/settings', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  migrations: () => request<MigrationsResponse>('/migrations'),
 };
 
 /**

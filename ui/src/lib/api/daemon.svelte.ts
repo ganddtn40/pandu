@@ -1,4 +1,4 @@
-import { daemonApi, DaemonError, liveSocketUrl } from './client';
+import { daemonApi, DaemonError, liveSocketUrl, updateApi } from './client';
 import { PRODUCT_NAME } from '../brand';
 import type {
   AdapterStatus,
@@ -9,11 +9,13 @@ import type {
   GuardRule,
   Health,
   LiveEvent,
+  MigrationRecord,
   Overview,
   Session,
+  UpdateStatus,
 } from './types';
 import { agentEventIsAttention } from '../agent-events';
-import { notifyAgentEvent } from '../notify.svelte';
+import { notifyAgentEvent, notifyUpdateAvailable } from '../notify.svelte';
 
 export type DaemonStatus = 'connecting' | 'online' | 'offline';
 
@@ -29,6 +31,8 @@ export const daemonState = $state<{
   agentEvents: AgentEvent[];
   agentOpenCount: number;
   liveEvents: LiveEvent[];
+  update: UpdateStatus | null;
+  migration: MigrationRecord | null;
   status: DaemonStatus;
   liveConnected: boolean;
   loading: boolean;
@@ -46,6 +50,8 @@ export const daemonState = $state<{
   agentEvents: [],
   agentOpenCount: 0,
   liveEvents: [],
+  update: null,
+  migration: null,
   status: 'connecting',
   liveConnected: false,
   loading: false,
@@ -60,6 +66,10 @@ let socket: WebSocket | null = null;
 let reconnectTimer: number | undefined;
 let refreshTimer: number | undefined;
 let refreshDebounce: number | undefined;
+// A user action (snooze, skip, toggle, check now) wins over a status request
+// that started before it. Without this, an in-flight page refresh could put a
+// skipped update back on screen until the next poll.
+let updateRevision = 0;
 let reconnectDelay = 800;
 let started = false;
 let refreshing = false;
@@ -97,6 +107,12 @@ function trackAgentEvents(events: AgentEvent[]): void {
   }
 }
 
+/** Apply a status returned by a user action and invalidate older polls. */
+export function applyUpdateStatus(status: UpdateStatus): void {
+  updateRevision += 1;
+  daemonState.update = status;
+}
+
 /** Pull every screen's data in one pass. Individual endpoints may fail. */
 export async function refreshDaemon(): Promise<void> {
   if (refreshing) {
@@ -111,17 +127,30 @@ export async function refreshDaemon(): Promise<void> {
     daemonState.status = health.ok ? 'online' : 'offline';
     daemonState.error = health.ok ? null : 'The daemon database is unavailable.';
 
-    const [overview, sessions, guards, rules, adapters, settings, agents, agentEvents] =
-      await Promise.allSettled([
-        daemonApi.overview(),
-        daemonApi.sessions(100),
-        daemonApi.guards(),
-        daemonApi.rules(),
-        daemonApi.adapters(),
-        daemonApi.settings(),
-        daemonApi.agents(),
-        daemonApi.agentEvents(),
-      ]);
+    const updateRevisionAtStart = updateRevision;
+    const [
+      overview,
+      sessions,
+      guards,
+      rules,
+      adapters,
+      settings,
+      agents,
+      agentEvents,
+      update,
+      migrations,
+    ] = await Promise.allSettled([
+      daemonApi.overview(),
+      daemonApi.sessions(100),
+      daemonApi.guards(),
+      daemonApi.rules(),
+      daemonApi.adapters(),
+      daemonApi.settings(),
+      daemonApi.agents(),
+      daemonApi.agentEvents(),
+      updateApi.status(),
+      updateApi.migrations(),
+    ]);
 
     if (overview.status === 'fulfilled') daemonState.overview = overview.value;
     if (sessions.status === 'fulfilled') daemonState.sessions = sessions.value.sessions;
@@ -135,6 +164,10 @@ export async function refreshDaemon(): Promise<void> {
       daemonState.agentEvents = agentEvents.value.events;
       daemonState.agentOpenCount = agentEvents.value.openCount;
     }
+    if (update.status === 'fulfilled' && updateRevisionAtStart === updateRevision) {
+      daemonState.update = update.value;
+    }
+    if (migrations.status === 'fulfilled') daemonState.migration = migrations.value.migration;
     daemonState.lastSyncedAt = Date.now();
   } catch (error) {
     daemonState.status = 'offline';
@@ -168,7 +201,30 @@ function rememberEvent(event: LiveEvent): void {
 function handleLiveEvent(event: LiveEvent): void {
   rememberEvent(event);
   if (event.type === 'stream.chunk') return;
+  if (event.type === 'update.available') {
+    // The daemon emits this once per version. A reconnect can replay it, so
+    // the notification layer dedupes by version on this device.
+    const version = typeof event.payload.version === 'string' ? event.payload.version : '';
+    if (version) {
+      notifyUpdateAvailable({
+        version,
+        notesSummary:
+          typeof event.payload.notesSummary === 'string' ? event.payload.notesSummary : '',
+      });
+    }
+  }
   scheduleRefresh();
+}
+
+/** Refresh only the update status, without pulling every screen. */
+export async function refreshUpdate(): Promise<void> {
+  const revision = updateRevision;
+  try {
+    const next = await updateApi.status();
+    if (revision === updateRevision) daemonState.update = next;
+  } catch {
+    // Keep the last known status; the next poll recovers.
+  }
 }
 
 function scheduleReconnect(): void {

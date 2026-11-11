@@ -53,5 +53,17 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
     },
+    {
+      command: 'node tests/e2e/daemon-server.mjs update 4326',
+      url: 'http://127.0.0.1:4326/api/health',
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command: 'node tests/e2e/daemon-server.mjs migrate 4327',
+      url: 'http://127.0.0.1:4327/api/health',
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
   ],
 });

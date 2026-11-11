@@ -10,6 +10,7 @@
 pub mod adapters;
 pub mod agents;
 pub mod api;
+pub mod backup;
 pub mod budget;
 pub mod config;
 pub mod error;
@@ -28,6 +29,7 @@ pub mod snapshots;
 pub mod state;
 pub mod store;
 pub mod ui;
+pub mod update;
 
 pub use config::Config;
 pub use error::{DaemonError, Result};

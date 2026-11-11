@@ -3,10 +3,11 @@ import { agentEventKey } from './agent-events';
 import { t } from './i18n/i18n.svelte';
 import { toast } from './toast-store.svelte';
 
-import { storageKey } from './brand';
+import { SLUG, storageKey } from './brand';
 
 const IN_APP_KEY = storageKey('notify.inApp');
 const WEB_KEY = storageKey('notify.web');
+const UPDATE_NOTIFIED_KEY = storageKey('update.notified');
 
 export type WebPermission = NotificationPermission | 'unsupported';
 
@@ -84,6 +85,56 @@ export function refreshWebPermission(): void {
   if (notifyState.webPermission !== 'granted' && notifyState.web) {
     notifyState.web = false;
     writeFlag(WEB_KEY, false);
+  }
+}
+
+function updateAlreadyNotified(version: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(UPDATE_NOTIFIED_KEY) === version;
+  } catch {
+    return false;
+  }
+}
+
+function markUpdateNotified(version: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(UPDATE_NOTIFIED_KEY, version);
+  } catch {
+    // A blocked storage area only means the dedupe is per-session.
+  }
+}
+
+/**
+ * Tell the user once per version that a verified update is available. The
+ * daemon has already sanitized the release notes; this only carries the
+ * version and a short summary, never a URL or a file name.
+ */
+export function notifyUpdateAvailable(event: {
+  version: string;
+  notesSummary?: string;
+}): void {
+  if (updateAlreadyNotified(event.version)) return;
+  markUpdateNotified(event.version);
+  const label = t('update.notificationTitle', { version: event.version });
+  if (notifyState.inApp) {
+    toast(event.notesSummary ? `${label} · ${event.notesSummary}` : label);
+  }
+  if (
+    notifyState.web &&
+    notifyState.webPermission === 'granted' &&
+    typeof document !== 'undefined' &&
+    document.hidden
+  ) {
+    try {
+      new window.Notification(label, {
+        body: event.notesSummary || t('update.notificationBody'),
+        tag: `${SLUG}:update:${event.version}`,
+      });
+    } catch {
+      // A browser that rejects the notification must not break the app.
+    }
   }
 }
 

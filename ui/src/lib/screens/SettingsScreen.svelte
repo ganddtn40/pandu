@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Icon from '../Icon.svelte';
+  import BackupCard from '../BackupCard.svelte';
+  import UpdateSettingsCard from '../UpdateSettingsCard.svelte';
   import { daemonApi, daemonOrigin } from '../api/client';
   import {
     daemonErrorMessage,
@@ -321,6 +323,8 @@
     </div>
   </section>
 
+  <UpdateSettingsCard />
+
   <RemoteAccessCard />
 
   <section class="settings-card card" data-glass data-glass-layer="card" data-glass-depth="2">
@@ -396,6 +400,8 @@
     </section>
   {/if}
 
+  <BackupCard />
+
   <section class="settings-card card" data-glass data-glass-layer="card" data-glass-depth="2">
     <div class="settings-card__head">
       <span class="settings-card__icon"><Icon name="lock" size={19} /></span>
@@ -452,10 +458,6 @@
         <Icon name="play" size={15} />
         {t('settings.replayTour')}
       </button>
-      <div class="about-row__updates">
-        <strong>{t('settings.updates')}</strong>
-        <span>{t('settings.updatesNote')}</span>
-      </div>
     </div>
   </section>
 

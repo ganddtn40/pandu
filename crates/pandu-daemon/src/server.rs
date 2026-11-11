@@ -28,6 +28,7 @@ use crate::remote::auth::constant_time_eq;
 use crate::remote::{RemoteMode, RemoteServerHandle, host};
 use crate::state::AppState;
 use crate::ui;
+use crate::update::http as update;
 
 /// One method and path the host listener mounts.
 ///
@@ -456,6 +457,32 @@ pub(crate) const HOST_ROUTES: &[HostRoute] = &[
         method: "GET",
         path: "/market/status",
         build: || get(market::status),
+    },
+    // Updates are host-only. The remote listener never sees them.
+    HostRoute {
+        method: "GET",
+        path: "/update",
+        build: || get(update::status),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/update/check",
+        build: || post(update::check),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/update/snooze",
+        build: || post(update::snooze),
+    },
+    HostRoute {
+        method: "POST",
+        path: "/update/settings",
+        build: || post(update::update_settings),
+    },
+    HostRoute {
+        method: "GET",
+        path: "/migrations",
+        build: || get(update::migrations),
     },
     HostRoute {
         method: "POST",
@@ -1073,6 +1100,7 @@ async fn serve_on(
             Duration::from_millis(state.config.log_watch_interval_ms.max(250)),
         ))
     });
+    let update_checker = tokio::spawn(crate::update::service::scheduler(state.update.clone()));
 
     let graceful = async move {
         tokio::select! {
@@ -1090,6 +1118,7 @@ async fn serve_on(
     if let Some(watcher) = watcher {
         watcher.abort();
     }
+    update_checker.abort();
     state.sessions.shutdown();
 
     result.map_err(DaemonError::from)

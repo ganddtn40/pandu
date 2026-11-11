@@ -17,6 +17,7 @@ use crate::remote::{PairingManager, RemoteAccess};
 use crate::sessions::SessionManager;
 use crate::snapshots::GitSnapshotService;
 use crate::store::Store;
+use crate::update::service::UpdateService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -35,6 +36,8 @@ pub struct AppState {
     pub remote: Arc<RemoteAccess>,
     /// Host-only skill and MCP market. Never mounted on the remote listener.
     pub market: Arc<MarketService>,
+    /// Host-only update checker. Never mounted on the remote listener.
+    pub update: Arc<UpdateService>,
     /// Per-process token that every state-changing host request must present.
     /// It is only handed to the UI served by this daemon and never stored.
     pub csrf: Arc<String>,
@@ -119,6 +122,11 @@ impl AppState {
             adapters.clone(),
             client.clone(),
         );
+        let update = Arc::new(UpdateService::new(
+            store.clone(),
+            live.clone(),
+            client.clone(),
+        ));
 
         Ok(Self {
             config: Arc::new(config),
@@ -135,6 +143,7 @@ impl AppState {
             pairing,
             remote,
             market,
+            update,
             csrf: Arc::new(crate::remote::auth::new_token()),
             client,
             started_at: Instant::now(),

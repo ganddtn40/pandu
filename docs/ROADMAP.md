@@ -105,7 +105,8 @@ The full token, surface, theme, and accessibility contract is in
 - [ ] Signed Android APK with documented keystore steps
 - [ ] Web/PWA bundle
 - [ ] macOS, iOS, and Linux bundles (planned after v0.2.0)
-- [ ] Manual `Check for updates` only; no background pings
+- [x] Signed update checks every 24 hours (can be disabled), no auto-install,
+  `pandu update` / `pandu rollback`, and a signed release manifest
 - [ ] README and beginner docs in all 14 languages
 
 ### Platform support

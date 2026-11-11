@@ -129,6 +129,10 @@ your local database.
   host-only overrides, PTY switching, and the context meter
 - [Privacy](docs/privacy.md) — what is stored locally, what can leave the
   machine, and how to delete it
+- [Updating](docs/updating.md) — update checks, the update card, signed
+  installs, rollback, and Android
+- [Data safety](docs/data-safety.md) — where your data lives, backups,
+  migrations, and uninstalls
 - [Market and registry](docs/market.md) — trust tiers, signed registry, install
   previews, offline behavior, and the contributor rules
 - [Rewrite decision record](docs/REWRITE.md) — what is kept, cut, and changed

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::{SecondsFormat, Utc};
@@ -18,14 +18,19 @@ use pandu_core::provider::{AgentInfo, DetectedFrom, ProviderProtocol};
 use pandu_core::redact::{CaptureLocation, RedactionRow};
 use pandu_core::replay::{FileChangeType, ReplayFileChange, ReplaySnapshot, SnapshotKind};
 use pandu_core::usage::TokenUsage;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::backup::Backup;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::error::{DaemonError, Result};
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
+/// Version of the key/value settings migration chain.
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+/// Keep this many timestamped pre-migration backups.
+const MIGRATION_BACKUPS_TO_KEEP: usize = 10;
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -315,6 +320,17 @@ CREATE TABLE IF NOT EXISTS remote_audit (
 
 CREATE INDEX IF NOT EXISTS idx_remote_audit_at ON remote_audit(at DESC);
 CREATE INDEX IF NOT EXISTS idx_remote_audit_event ON remote_audit(event, at DESC);
+
+-- Every schema migration records the backup it took and the versions it moved
+-- between. The table is append-only so the UI can show the most recent notice.
+CREATE TABLE IF NOT EXISTS migration_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  from_version INTEGER NOT NULL,
+  to_version INTEGER NOT NULL,
+  backup_path TEXT,
+  outcome TEXT NOT NULL
+);
 "#;
 
 #[derive(Debug, Clone, Default)]
@@ -476,6 +492,17 @@ pub struct Store {
     connection: Mutex<Connection>,
 }
 
+/// The most recent schema migration, shown once in the UI.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationRecord {
+    pub at: String,
+    pub from_version: u32,
+    pub to_version: u32,
+    pub backup_path: Option<String>,
+    pub outcome: String,
+}
+
 /// Refuse to open a 0.1.0 database.
 ///
 /// `CREATE TABLE IF NOT EXISTS` would silently leave the old `sessions` table
@@ -500,7 +527,7 @@ fn ensure_compatible_schema(connection: &Connection) -> Result<()> {
 /// Bring an older database up to the current schema. `SCHEMA` already creates
 /// any missing tables, so this only adds columns that `CREATE TABLE IF NOT
 /// EXISTS` cannot add to an existing table.
-fn migrate_schema(connection: &Connection, from: u32) -> Result<()> {
+fn migrate_schema(connection: &Connection, from: u32, fail_after_columns: bool) -> Result<()> {
     if from < 2 {
         add_column_if_missing(connection, "guard_events", "approval_nonce", "TEXT")?;
         add_column_if_missing(connection, "guard_events", "approval_expires_at", "TEXT")?;
@@ -524,6 +551,336 @@ fn migrate_schema(connection: &Connection, from: u32) -> Result<()> {
         add_column_if_missing(connection, "remote_audit", "prev_hash", "TEXT")?;
         add_column_if_missing(connection, "remote_audit", "entry_hash", "TEXT")?;
     }
+    if from < 5 {
+        // v5 adds the migration log. `SCHEMA` creates it before this runs.
+    }
+    if fail_after_columns {
+        return Err(DaemonError::other(
+            "test-only migration failpoint after schema columns",
+        ));
+    }
+    Ok(())
+}
+
+/// Bring key/value settings through their own version chain.
+///
+/// The database schema and the settings schema move independently: a release
+/// can add a setting without adding a column. The chain is idempotent and runs
+/// inside the same transaction as the schema migration.
+fn migrate_settings(connection: &Connection, from: u32) -> Result<()> {
+    if from < 2 {
+        rename_setting(connection, "theme", "appearance.theme")?;
+        rename_setting(connection, "appearance.mode", "appearance.theme")?;
+        rename_setting(connection, "remote.autoStart", "remote.autostart")?;
+        rename_setting(connection, "remote.devices.lastSeen", "remote.lastSeen")?;
+        rename_setting(connection, "market.manifest", "market.registryUrl")?;
+        rename_setting(connection, "market.manifest.url", "market.registryUrl")?;
+        rename_setting(connection, "market.manifests", "market.manifests.v2")?;
+        rename_setting(connection, "model.overrides", "pricing.overrides")?;
+        rename_setting(connection, "model.override", "pricing.overrides")?;
+        expand_appearance_json(connection)?;
+    }
+    connection.execute(
+        "INSERT INTO schema_meta (key, value) VALUES ('settings_schema_version', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![SETTINGS_SCHEMA_VERSION.to_string()],
+    )?;
+    Ok(())
+}
+
+fn rename_setting(connection: &Connection, from: &str, to: &str) -> Result<()> {
+    connection.execute(
+        "INSERT INTO settings (key, value)
+         SELECT ?2, value FROM settings WHERE key = ?1
+         ON CONFLICT(key) DO NOTHING",
+        params![from, to],
+    )?;
+    connection.execute("DELETE FROM settings WHERE key = ?1", params![from])?;
+    Ok(())
+}
+
+/// Expand a legacy JSON `appearance` object into individual settings.
+fn expand_appearance_json(connection: &Connection) -> Result<()> {
+    let Some(raw) = connection
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'appearance'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    else {
+        return Ok(());
+    };
+    if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&raw) {
+        for (key, value) in map {
+            let value = match value {
+                serde_json::Value::String(value) => value,
+                other => other.to_string(),
+            };
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO NOTHING",
+                params![format!("appearance.{key}"), value],
+            )?;
+        }
+    }
+    connection.execute("DELETE FROM settings WHERE key = 'appearance'", [])?;
+    Ok(())
+}
+
+fn database_version(connection: &Connection) -> Result<Option<u32>> {
+    meta_version(connection, "schema_version")
+}
+
+fn settings_version(connection: &Connection) -> Result<Option<u32>> {
+    meta_version(connection, "settings_schema_version")
+}
+
+fn meta_version(connection: &Connection, key: &str) -> Result<Option<u32>> {
+    let has_table: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_table {
+        return Ok(None);
+    }
+    let value: Option<String> = connection
+        .query_row(
+            "SELECT value FROM schema_meta WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(value.and_then(|value| value.parse::<u32>().ok()))
+}
+
+fn newer_schema_error(version: u32) -> DaemonError {
+    DaemonError::config(format!(
+        "this database was created by a newer version of {} (schema {version}; this build understands {SCHEMA_VERSION}). \
+         Update {} before opening it. Your data was not changed.",
+        pandu_core::brand::PRODUCT_NAME,
+        pandu_core::brand::PRODUCT_NAME
+    ))
+}
+
+/// Fail closed if SQLite reports any corruption before or after a migration.
+fn integrity_check(connection: &Connection) -> Result<()> {
+    let mut statement = connection.prepare("PRAGMA integrity_check")?;
+    let rows: Vec<String> = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if rows.len() == 1 && rows[0].eq_ignore_ascii_case("ok") {
+        return Ok(());
+    }
+    Err(DaemonError::config(format!(
+        "the database failed SQLite's integrity check: {}",
+        rows.join("; ")
+    )))
+}
+
+fn backup_database(source: &Connection, destination: &Path) -> Result<()> {
+    if destination.exists() {
+        return Ok(());
+    }
+    let mut target = Connection::open(destination)?;
+    {
+        let backup = Backup::new(source, &mut target)?;
+        backup.run_to_completion(64, std::time::Duration::from_millis(5), None)?;
+    }
+    integrity_check(&target)?;
+    Ok(())
+}
+
+fn restore_database(connection: &mut Connection, backup_path: &Path) -> Result<()> {
+    let source = Connection::open_with_flags(backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    {
+        let backup = Backup::new(&source, &mut *connection)?;
+        backup.run_to_completion(64, std::time::Duration::from_millis(5), None)?;
+    }
+    integrity_check(connection)?;
+    Ok(())
+}
+
+/// Copy a database to a consistent snapshot without migrating it.
+///
+/// This is the same SQLite backup API used before a migration, so a live
+/// database can be copied safely and the snapshot is a valid database even if
+/// the daemon is writing.
+pub fn snapshot_database(source: &Path, destination: &Path) -> Result<()> {
+    if !source.exists() {
+        return Err(DaemonError::config(format!(
+            "the database {} does not exist",
+            source.display()
+        )));
+    }
+    let connection = Connection::open(source)?;
+    integrity_check(&connection)?;
+    backup_database(&connection, destination)
+}
+
+/// The schema version a database file reports, without migrating it.
+pub fn database_file_version(path: &Path) -> Result<Option<u32>> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    database_version(&connection)
+}
+
+/// Run SQLite's integrity check on a database file.
+pub fn check_database_file(path: &Path) -> Result<()> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    integrity_check(&connection)
+}
+
+/// Settings that must never leave the machine in a backup archive.
+///
+/// The match is deliberately broad. A false positive only means one preference
+/// is missing from a backup; a false negative could leak a credential.
+pub fn is_secret_setting(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "token",
+        "secret",
+        "password",
+        "credential",
+        "authorization",
+        "bearer",
+        "api_key",
+        "apikey",
+        "private_key",
+        "pairing",
+        "pin_hash",
+    ]
+    .iter()
+    .any(|needle| key.contains(needle))
+}
+
+/// Remove remote device tokens and secret settings from a backup snapshot.
+///
+/// Returns the settings that are safe to include in the archive. The snapshot
+/// is checkpointed and integrity-checked so it is a single self-contained file.
+pub fn sanitize_backup_database(
+    path: &Path,
+    include_remote: bool,
+) -> Result<BTreeMap<String, String>> {
+    let connection = Connection::open(path)?;
+    integrity_check(&connection)?;
+    if !include_remote {
+        connection.execute("DELETE FROM remote_devices", [])?;
+    }
+    let mut settings = BTreeMap::new();
+    {
+        let mut statement = connection.prepare("SELECT key, value FROM settings ORDER BY key")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            if is_secret_setting(&key) {
+                connection.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+            } else {
+                settings.insert(key, value);
+            }
+        }
+    }
+    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;")?;
+    integrity_check(&connection)?;
+    Ok(settings)
+}
+
+/// Prepare an extracted database for restore.
+///
+/// Opens the database (which migrates older schemas and refuses a newer one),
+/// applies the archived settings, and always turns remote access off. The
+/// returned version is the schema version after migration.
+pub fn prepare_restored_database(path: &Path, settings: &BTreeMap<String, String>) -> Result<u32> {
+    let version;
+    {
+        let store = Store::open(path)?;
+        for (key, value) in settings {
+            if is_secret_setting(key) {
+                continue;
+            }
+            store.set_setting(key, value)?;
+        }
+        store.set_setting("remote.enabled", "0")?;
+        store.set_setting("remote.autostart", "0")?;
+        store.checkpoint()?;
+        version = database_version(&*store.lock()?)?.unwrap_or(SCHEMA_VERSION);
+    }
+    // A checkpointed database has no live WAL. Remove the empty sidecars so the
+    // file can be moved as a single unit.
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+        let _ = std::fs::remove_file(sidecar);
+    }
+    check_database_file(path)?;
+    Ok(version)
+}
+
+fn backup_path(database: &Path, from: u32) -> PathBuf {
+    let parent = database.parent().unwrap_or_else(|| Path::new("."));
+    let name = database
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("database");
+    let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..100 {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!("-{attempt}")
+        };
+        let candidate = parent.join(format!("{name}.bak-{stamp}-v{from}{suffix}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    parent.join(format!("{name}.bak-{stamp}-v{from}-overflow"))
+}
+
+fn prune_backups(database: &Path, keep: usize) {
+    let parent = database.parent().unwrap_or_else(|| Path::new("."));
+    let name = database
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("database");
+    let prefix = format!("{name}.bak-");
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    let mut backups: Vec<PathBuf> = entries
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix))
+        })
+        .collect();
+    backups.sort();
+    if backups.len() > keep {
+        for path in &backups[..backups.len() - keep] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn record_migration(
+    connection: &Connection,
+    from: u32,
+    to: u32,
+    backup: Option<&Path>,
+) -> Result<()> {
+    connection.execute(
+        "INSERT INTO migration_log (at, from_version, to_version, backup_path, outcome)
+         VALUES (?1, ?2, ?3, ?4, 'ok')",
+        params![
+            now_iso(),
+            from,
+            to,
+            backup.map(|path| path.display().to_string())
+        ],
+    )?;
     Ok(())
 }
 
@@ -670,8 +1027,19 @@ fn hex_string(bytes: &[u8]) -> String {
 
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        if path != Path::new(":memory:") {
+        Self::open_inner(path.as_ref(), false)
+    }
+
+    /// Test-only entry point that fails after the schema columns are added,
+    /// proving that a crash in the middle restores the pre-migration backup.
+    #[cfg(test)]
+    fn open_with_failpoint(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_inner(path.as_ref(), true)
+    }
+
+    fn open_inner(path: &Path, fail_after_columns: bool) -> Result<Self> {
+        let is_memory = path == Path::new(":memory:");
+        if !is_memory {
             if let Some(parent) = path.parent() {
                 if !parent.as_os_str().is_empty() {
                     std::fs::create_dir_all(parent)?;
@@ -687,39 +1055,84 @@ impl Store {
              PRAGMA foreign_keys = ON;",
         )?;
         ensure_compatible_schema(&connection)?;
-        connection.execute_batch(SCHEMA)?;
 
-        let existing: Option<String> = connection
-            .query_row(
-                "SELECT value FROM schema_meta WHERE key = 'schema_version'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-
-        match existing {
-            Some(version) => {
-                let version = version.parse::<u32>().unwrap_or(0);
-                if version > SCHEMA_VERSION {
-                    return Err(DaemonError::config(format!(
-                        "the database uses schema version {version}, but this build understands {SCHEMA_VERSION}"
-                    )));
-                }
-                if version < SCHEMA_VERSION {
-                    migrate_schema(&connection, version)?;
-                    connection.execute(
-                        "UPDATE schema_meta SET value = ?1 WHERE key = 'schema_version'",
-                        params![SCHEMA_VERSION.to_string()],
-                    )?;
-                }
+        // Inspect and back up the existing file before `SCHEMA` touches it.
+        // `CREATE TABLE IF NOT EXISTS` is idempotent, but a migration that adds
+        // a column is not, and a crash halfway through must be recoverable.
+        let existing_before = database_version(&connection)?;
+        if let Some(version) = existing_before {
+            if version > SCHEMA_VERSION {
+                return Err(newer_schema_error(version));
             }
-            None => {
-                migrate_schema(&connection, 0)?;
-                connection.execute(
-                    "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1)",
+        }
+        if !is_memory {
+            integrity_check(&connection)?;
+        }
+        let backup = match existing_before {
+            Some(version) if !is_memory && version < SCHEMA_VERSION => {
+                let path = backup_path(path, version);
+                backup_database(&connection, &path)?;
+                Some(path)
+            }
+            _ => None,
+        };
+
+        let migration = (|| -> Result<()> {
+            connection.execute_batch(SCHEMA)?;
+            let existing = database_version(&connection)?;
+            let from = existing.unwrap_or(0);
+            if from > SCHEMA_VERSION {
+                return Err(newer_schema_error(from));
+            }
+            let settings_from = settings_version(&connection)?.unwrap_or(0);
+            if from < SCHEMA_VERSION || settings_from < SETTINGS_SCHEMA_VERSION {
+                let transaction =
+                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                if from < SCHEMA_VERSION {
+                    migrate_schema(&transaction, from, fail_after_columns)?;
+                }
+                migrate_settings(&transaction, settings_from)?;
+                transaction.execute(
+                    "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     params![SCHEMA_VERSION.to_string()],
                 )?;
+                transaction.commit()?;
+                integrity_check(&connection)?;
+                // A brand-new database is not an upgrade. Recording v0 -> v5
+                // would show a backup notice for a backup that never existed.
+                if existing_before.is_some() {
+                    record_migration(&connection, from, SCHEMA_VERSION, backup.as_deref())?;
+                }
             }
+            Ok(())
+        })();
+
+        if let Err(error) = migration {
+            if let Some(backup) = &backup {
+                return match restore_database(&mut connection, backup) {
+                    Ok(()) => Err(DaemonError::config(format!(
+                        "the database migration failed, so Pandu restored the backup at {}. {error}",
+                        backup.display()
+                    ))),
+                    Err(restore_error) => Err(DaemonError::other(format!(
+                        "the database migration failed ({error}) and the automatic restore failed ({restore_error}). \
+                         The pre-migration backup is at {}.",
+                        backup.display()
+                    ))),
+                };
+            }
+            return Err(error);
+        }
+
+        if let Some(backup) = &backup {
+            prune_backups(path, MIGRATION_BACKUPS_TO_KEEP);
+            tracing::info!(
+                backup = %backup.display(),
+                from = existing_before.unwrap_or(0),
+                to = SCHEMA_VERSION,
+                "migrated the database and kept a pre-migration backup"
+            );
         }
 
         // Audit rows written before the hash chain existed have no hashes.
@@ -732,6 +1145,28 @@ impl Store {
         Ok(Self {
             connection: Mutex::new(connection),
         })
+    }
+
+    /// The most recent schema migration, for the one-time backup notice.
+    pub fn last_migration(&self) -> Result<Option<MigrationRecord>> {
+        let connection = self.lock()?;
+        let record = connection
+            .query_row(
+                "SELECT at, from_version, to_version, backup_path, outcome
+                 FROM migration_log ORDER BY id DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok(MigrationRecord {
+                        at: row.get(0)?,
+                        from_version: row.get(1)?,
+                        to_version: row.get(2)?,
+                        backup_path: row.get(3)?,
+                        outcome: row.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(record)
     }
 
     pub fn ping(&self) -> bool {
@@ -1795,6 +2230,23 @@ impl Store {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    /// Remove a setting. Missing keys are not an error.
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
+    /// Fold the write-ahead log back into the database file.
+    ///
+    /// Used before a database is copied or archived so the result is one
+    /// self-contained file.
+    pub fn checkpoint(&self) -> Result<()> {
+        let connection = self.lock()?;
+        connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
 
@@ -3817,5 +4269,310 @@ mod tests {
         drop(reopened);
         let reopened = Store::open(&path).unwrap();
         assert!(!reopened.verify_remote_audit_chain().unwrap().valid);
+    }
+
+    // ---------------------------------------------------------------------
+    // Schema fixtures and migration safety
+    // ---------------------------------------------------------------------
+
+    /// Columns that a database written before v2, v4, or v5 does not have.
+    const V2_COLUMNS: &[(&str, &str)] = &[
+        ("guard_events", "approval_nonce"),
+        ("guard_events", "approval_expires_at"),
+    ];
+    const V4_COLUMNS: &[(&str, &str)] = &[
+        ("remote_devices", "pin_failures"),
+        ("remote_devices", "respond_locked_at"),
+        ("remote_devices", "expires_at"),
+        ("remote_devices", "previous_token_hash"),
+        ("remote_devices", "previous_token_expires_at"),
+        ("remote_audit", "prev_hash"),
+        ("remote_audit", "entry_hash"),
+    ];
+
+    fn fixtures_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("schema")
+    }
+
+    /// Rebuild the checked-in database fixtures. Run this only when the schema
+    /// changes:
+    ///
+    /// ```text
+    /// cargo test -p pandu-daemon --lib build_schema_fixtures -- --ignored --nocapture
+    /// ```
+    ///
+    /// Every fixture starts from the current schema and then loses exactly the
+    /// columns and metadata a database of that version would not have had. The
+    /// migration tests then prove each released version still opens, migrates,
+    /// and keeps a usable pre-migration backup.
+    #[test]
+    #[ignore = "maintainer tool: rewrites the checked-in schema fixtures"]
+    fn build_schema_fixtures() {
+        let directory = fixtures_dir();
+        std::fs::create_dir_all(&directory).unwrap();
+        for version in 1..=4u32 {
+            let path = directory.join(format!("v{version}.db"));
+            let _ = std::fs::remove_file(&path);
+            {
+                let store = Store::open(&path).unwrap();
+                let connection = store.lock().unwrap();
+                if version < 2 {
+                    for (table, column) in V2_COLUMNS {
+                        connection
+                            .execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))
+                            .unwrap();
+                    }
+                }
+                if version < 4 {
+                    for (table, column) in V4_COLUMNS {
+                        connection
+                            .execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))
+                            .unwrap();
+                    }
+                }
+                connection
+                    .execute_batch(
+                        &"DROP TABLE IF EXISTS migration_log;
+                         DELETE FROM schema_meta WHERE key = 'settings_schema_version';
+                         UPDATE schema_meta SET value = 'SCHEMA_PLACEHOLDER'
+                         WHERE key = 'schema_version';"
+                            .replace("SCHEMA_PLACEHOLDER", &version.to_string()),
+                    )
+                    .unwrap();
+                for (key, value) in [
+                    ("theme", "dark"),
+                    ("appearance", r#"{"accent":"violet","density":"compact"}"#),
+                    ("remote.autoStart", "1"),
+                    ("market.manifest", "https://example.com/index.json"),
+                    ("model.overrides", r#"{"gpt-4.1":1.5}"#),
+                ] {
+                    connection
+                        .execute(
+                            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                            params![key, value],
+                        )
+                        .unwrap();
+                }
+                connection
+                    .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;")
+                    .unwrap();
+            }
+            println!("wrote {}", path.display());
+        }
+    }
+
+    fn fixture(version: u32) -> Vec<u8> {
+        let path = fixtures_dir().join(format!("v{version}.db"));
+        std::fs::read(&path).unwrap_or_else(|error| {
+            panic!(
+                "missing schema fixture {} ({error}). Run \
+                 `cargo test -p pandu-daemon --lib build_schema_fixtures -- --ignored`.",
+                path.display()
+            )
+        })
+    }
+
+    fn install_fixture(version: u32) -> (tempfile::TempDir, PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(pandu_core::brand::DATABASE_FILE);
+        std::fs::write(&path, fixture(version)).unwrap();
+        (directory, path)
+    }
+
+    fn version_of(path: &Path) -> Option<u32> {
+        let connection = Connection::open(path).unwrap();
+        meta_version(&connection, "schema_version").unwrap()
+    }
+
+    #[test]
+    fn every_released_schema_migrates_to_current() {
+        assert!(fixtures_dir().is_dir());
+        for version in 1..=4u32 {
+            let (directory, path) = install_fixture(version);
+            let store = Store::open(&path)
+                .unwrap_or_else(|error| panic!("schema v{version} failed to migrate: {error}"));
+
+            assert_eq!(
+                database_version(&store.lock().unwrap()).unwrap(),
+                Some(SCHEMA_VERSION)
+            );
+            assert_eq!(
+                settings_version(&store.lock().unwrap()).unwrap(),
+                Some(SETTINGS_SCHEMA_VERSION)
+            );
+
+            let migration = store.last_migration().unwrap().unwrap();
+            assert_eq!(migration.from_version, version);
+            assert_eq!(migration.to_version, SCHEMA_VERSION);
+            assert_eq!(migration.outcome, "ok");
+            let backup = PathBuf::from(migration.backup_path.unwrap());
+            assert!(backup.exists(), "the pre-migration backup must be kept");
+
+            // The backup is a consistent snapshot of the old database, not the
+            // migrated one, and it is itself valid.
+            let backup_connection =
+                Connection::open_with_flags(&backup, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            integrity_check(&backup_connection).unwrap();
+            assert_eq!(
+                meta_version(&backup_connection, "schema_version").unwrap(),
+                Some(version)
+            );
+            assert_eq!(
+                backup_connection
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = 'theme'",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                "dark"
+            );
+
+            // The settings chain ran on every old database.
+            assert_eq!(
+                store.get_setting("appearance.theme").unwrap().as_deref(),
+                Some("dark")
+            );
+            assert_eq!(
+                store.get_setting("appearance.accent").unwrap().as_deref(),
+                Some("violet")
+            );
+            assert_eq!(
+                store.get_setting("remote.autostart").unwrap().as_deref(),
+                Some("1")
+            );
+            assert_eq!(
+                store.get_setting("market.registryUrl").unwrap().as_deref(),
+                Some("https://example.com/index.json")
+            );
+            assert_eq!(
+                store.get_setting("pricing.overrides").unwrap().as_deref(),
+                Some(r#"{"gpt-4.1":1.5}"#)
+            );
+            assert_eq!(store.get_setting("theme").unwrap(), None);
+            assert_eq!(store.get_setting("appearance").unwrap(), None);
+            assert_eq!(store.get_setting("remote.autoStart").unwrap(), None);
+            assert_eq!(store.get_setting("market.manifest").unwrap(), None);
+            assert_eq!(store.get_setting("model.overrides").unwrap(), None);
+
+            // A migrated database still works.
+            let session = store
+                .create_session(NewSession {
+                    title: "After migration".to_string(),
+                    source: SessionSource::Proxy,
+                    capture_mode: CaptureMode::Proxy,
+                    ..NewSession::default()
+                })
+                .unwrap();
+            assert_eq!(store.list_sessions(10, 0, None).unwrap().len(), 1);
+            assert_eq!(session.status, SessionStatus::Active);
+
+            drop(store);
+            drop(directory);
+        }
+    }
+
+    #[test]
+    fn a_fresh_database_is_not_reported_as_a_migration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(pandu_core::brand::DATABASE_FILE);
+        let store = Store::open(&path).unwrap();
+        assert!(
+            store.last_migration().unwrap().is_none(),
+            "a new database must not show a backup notice"
+        );
+    }
+
+    #[test]
+    fn a_database_from_a_newer_release_is_refused_without_changes() {
+        let (directory, path) = install_fixture(4);
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute(
+                    "UPDATE schema_meta SET value = '99' WHERE key = 'schema_version'",
+                    [],
+                )
+                .unwrap();
+        }
+        let before = {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        };
+
+        let error = match Store::open(&path) {
+            Ok(_) => panic!("a newer schema must be refused"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("newer version"), "{error}");
+        assert!(error.contains("Update Pandu"), "{error}");
+        assert!(error.contains("Your data was not changed"), "{error}");
+
+        assert_eq!(version_of(&path), Some(99));
+        let after = {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(before, after);
+        assert!(
+            !std::fs::read_dir(directory.path())
+                .unwrap()
+                .filter_map(std::result::Result::ok)
+                .any(|entry| entry.file_name().to_string_lossy().contains(".bak-")),
+            "a refused database must not be backed up or touched"
+        );
+    }
+
+    #[test]
+    fn a_crash_in_the_middle_of_a_migration_restores_the_backup() {
+        let (directory, path) = install_fixture(4);
+        let error = match Store::open_with_failpoint(&path) {
+            Ok(_) => panic!("the migration failpoint must fail"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("restored the backup"), "{error}");
+
+        // The file is back to the exact pre-migration schema, not a half
+        // migrated mixture of old and new columns.
+        assert_eq!(version_of(&path), Some(4));
+        let connection = Connection::open(&path).unwrap();
+        let has_migration_log: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'migration_log')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !has_migration_log,
+            "the failed migration must be rolled back"
+        );
+        drop(connection);
+
+        let backup = std::fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().contains(".bak-"))
+            .expect("the failed migration kept its backup");
+        assert!(backup.path().exists());
+
+        // A later start with no failpoint completes the migration.
+        let store = Store::open(&path).unwrap();
+        assert_eq!(
+            database_version(&store.lock().unwrap()).unwrap(),
+            Some(SCHEMA_VERSION)
+        );
+        assert_eq!(store.last_migration().unwrap().unwrap().from_version, 4);
     }
 }

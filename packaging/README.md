@@ -21,13 +21,23 @@ maintainers without an explicit release decision.
 
 ## Rules
 
-- No background update pings. The app contacts GitHub Releases only when the
-  user presses `Check for updates`.
+- Update checks are one HTTPS `GET` to the pinned GitHub Releases API, at most
+  once every 24 hours, and can be turned off in Settings. They send no token,
+  no machine identifier, and no usage data. Pandu never installs an update
+  without an explicit user action.
+- Every update artifact is listed in a signed `pandu-update.json` with a
+  SHA-256 and a Minisign signature. Release builds trust only a production
+  updater public key and fail closed without one. Sign with
+  `packaging/sign-update.mjs`; keep the private key offline.
 - Release binaries are built from a tagged commit in CI, never from a developer
   machine.
-- Android signing keys are supplied by the user and never committed.
+- Android signing keys are supplied by the user and never committed. Keep the
+  APK signing key separate from the updater key.
 - Checksums are published next to every artifact.
 - The npm wrapper verifies the downloaded binary's checksum before running it.
+- Installers and uninstallers never delete user data. The database and settings
+  live outside the application directory, and removing them is an explicit
+  opt-in.
 
 ## Android signing (drafted, not yet active)
 
@@ -39,3 +49,24 @@ keytool -genkeypair -v -keystore pandu-release.keystore `
 Set `PANDU_ANDROID_KEYSTORE`, `PANDU_ANDROID_KEYSTORE_PASSWORD`,
 `PANDU_ANDROID_KEY_ALIAS`, and `PANDU_ANDROID_KEY_PASSWORD` in the release
 environment. Never commit the keystore or passwords.
+
+## Update manifest signing
+
+`packaging/sign-update.mjs` writes the signed JSON asset that `pandu update`
+and the desktop updater read. It needs the `minisign` binary and an offline
+private key:
+
+```powershell
+node packaging/sign-update.mjs `
+  --version 0.3.0 `
+  --notes dist/notes.md `
+  --artifact windows-x86_64=dist/pandu.exe `
+  --artifact linux-x86_64=dist/pandu `
+  --key E:\secure\pandu-updater-2026.key `
+  --out dist/pandu-update.json
+```
+
+Upload the output as `pandu-update.json` on the GitHub release. The full key
+ceremony, rotation, and compromise response are in
+[`docs/RELEASING.md`](../docs/RELEASING.md#4-updater-trust-root-and-key-ceremony).
+

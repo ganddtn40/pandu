@@ -25,9 +25,11 @@ reqwest = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }
 portable-pty = "0.9"
 crossterm = "0.29"
 
 [dev-dependencies]
+pandu-core = { path = "../pandu-core", features = ["test-signing"] }
 tempfile = { workspace = true }
 rusqlite = { workspace = true }

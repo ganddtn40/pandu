@@ -5,6 +5,7 @@
 //! `pandu doctor` and `pandu report` are local, read-only diagnostics, and
 //! `pandu pair` issues a short-lived code for the phone companion.
 
+use std::io::{IsTerminal, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,6 +25,7 @@ use serde_json::{Value, json};
 use tracing_subscriber::EnvFilter;
 
 mod pty;
+mod updater;
 
 #[derive(Debug, Parser)]
 #[command(name = brand::CLI_COMMAND, version, about = brand::TAGLINE)]
@@ -55,6 +57,14 @@ enum Command {
     Models(ModelsArgs),
     /// Maintain the signed skill and MCP registry. Maintainer tooling only.
     Market(MarketArgs),
+    /// Check for and install a verified update. Never runs in the background.
+    Update(UpdateArgs),
+    /// Restore the binary kept by the last update.
+    Rollback(RollbackArgs),
+    /// Write a local backup of the database and settings.
+    Backup(BackupArgs),
+    /// Restore a local backup. Remote access is off afterwards.
+    Restore(RestoreArgs),
 }
 
 #[derive(Debug, Args, Default, Clone)]
@@ -288,6 +298,62 @@ struct MarketCheckArgs {
     json: bool,
 }
 
+#[derive(Debug, Args, Default)]
+struct UpdateArgs {
+    /// Only check for an update. Do not download or install anything.
+    #[arg(long)]
+    check: bool,
+    /// Install even when agent sessions are running.
+    #[arg(long, short = 'y')]
+    yes: bool,
+    /// Print JSON instead of a human-readable summary.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+struct RollbackArgs {
+    /// Print JSON instead of a human-readable summary.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args, Default)]
+struct BackupArgs {
+    /// Directory for the database and Pandu state.
+    #[arg(long)]
+    home: Option<PathBuf>,
+    /// SQLite database path. Defaults to <home>/pandu.db.
+    #[arg(long)]
+    database: Option<PathBuf>,
+    /// Write the archive here. Defaults to <home>/backups/<name>-backup-<time>.tar.gz.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+    /// Include remote device tokens in the archive. The archive becomes
+    /// sensitive; keep it private.
+    #[arg(long = "include-remote")]
+    include_remote: bool,
+    /// Print JSON instead of a human-readable summary.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct RestoreArgs {
+    /// The backup archive to restore.
+    #[arg(value_name = "ARCHIVE")]
+    archive: PathBuf,
+    /// Directory for the database and Pandu state.
+    #[arg(long)]
+    home: Option<PathBuf>,
+    /// SQLite database path. Defaults to <home>/pandu.db.
+    #[arg(long)]
+    database: Option<PathBuf>,
+    /// Print JSON instead of a human-readable summary.
+    #[arg(long)]
+    json: bool,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -338,6 +404,10 @@ fn main() -> anyhow::Result<()> {
             MarketAction::Sign(args) => market_sign(args),
             MarketAction::Check(args) => market_check(args),
         },
+        Command::Update(args) => runtime()?.block_on(run_update(config, args)),
+        Command::Rollback(args) => run_rollback(args),
+        Command::Backup(args) => run_backup(config, args),
+        Command::Restore(args) => runtime()?.block_on(run_restore(config, args)),
     }
 }
 
@@ -470,6 +540,251 @@ fn market_check(args: MarketCheckArgs) -> anyhow::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// update, rollback, backup, restore
+// ---------------------------------------------------------------------------
+
+async fn run_update(config: Config, args: UpdateArgs) -> anyhow::Result<()> {
+    if !args.check {
+        confirm_running_sessions(&config, args.yes).await?;
+    }
+    let outcome = updater::run(args.check).await?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&updater::outcome_json(&outcome))?
+        );
+    } else {
+        updater::print_outcome(&outcome);
+    }
+    Ok(())
+}
+
+/// Pandu does not stop PTY sessions to install an update. Tell the user exactly
+/// what is running and ask before replacing the binary.
+async fn confirm_running_sessions(config: &Config, assume_yes: bool) -> anyhow::Result<()> {
+    let url = format!("{}/api/overview", daemon_base_url(config));
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return Ok(());
+    };
+    let Ok(response) = client.get(&url).send().await else {
+        return Ok(());
+    };
+    if !response.status().is_success() {
+        return Ok(());
+    }
+    let Ok(body) = response.json::<Value>().await else {
+        return Ok(());
+    };
+    let sessions = body
+        .get("activeSessions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if sessions.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "warning: {} Pandu-owned agent session(s) are running:",
+        sessions.len()
+    );
+    for line in active_session_summary(&sessions).lines() {
+        eprintln!("  {line}");
+    }
+    eprintln!(
+        "Pandu will not stop them. The update replaces the binary on disk, and a \
+         running session keeps using the old build until it exits."
+    );
+    if cfg!(windows) {
+        eprintln!(
+            "Windows may refuse to replace a binary that is still running. If the \
+             update stops, close the sessions and try again."
+        );
+    }
+    if assume_yes {
+        eprintln!("Continuing because --yes was passed.");
+        return Ok(());
+    }
+    if std::io::stdin().is_terminal() {
+        eprint!("Continue and install the update? [y/N] ");
+        std::io::stderr().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            return Ok(());
+        }
+        bail!("Update cancelled. Nothing was installed.");
+    }
+    bail!(
+        "Refusing to update while agents are running. Stop the sessions, or re-run \
+         with --yes to continue."
+    );
+}
+
+fn active_session_summary(sessions: &[Value]) -> String {
+    sessions
+        .iter()
+        .take(5)
+        .map(|session| {
+            let title = session
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .unwrap_or("Untitled session");
+            let agent = session
+                .get("agent")
+                .and_then(|agent| agent.get("name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|agent| !agent.is_empty());
+            match agent {
+                Some(agent) => format!("- {title} ({agent})"),
+                None => format!("- {title}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn run_rollback(args: RollbackArgs) -> anyhow::Result<()> {
+    let previous = updater::rollback()?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "rolledBack": true,
+                "previousBinary": previous.display().to_string(),
+            }))?
+        );
+    } else {
+        println!("Restored the previous binary from {}.", previous.display());
+        println!("Start {} again to use it.", brand::PRODUCT_NAME);
+    }
+    Ok(())
+}
+
+fn run_backup(mut config: Config, args: BackupArgs) -> anyhow::Result<()> {
+    let BackupArgs {
+        home,
+        database,
+        output,
+        include_remote,
+        json: as_json,
+    } = args;
+    if let Some(home) = home {
+        config.database_path = home.join(brand::DATABASE_FILE);
+        config.home = home;
+    }
+    let database = database.unwrap_or_else(|| config.database_path.clone());
+    let output = output.unwrap_or_else(|| default_backup_path(&config.home));
+    if include_remote {
+        eprintln!(
+            "warning: this backup includes remote device tokens and pairing data. \
+             Keep the archive private."
+        );
+    }
+    let summary = pandu_daemon::backup::create_backup(&database, &output, include_remote)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        println!("Backup written to {}.", summary.path);
+        println!(
+            "{} settings, database schema v{}, {:.1} MiB.",
+            summary.settings_count,
+            summary.database_schema,
+            summary.bytes as f64 / (1024.0 * 1024.0)
+        );
+        if summary.include_remote {
+            println!("Remote device tokens are included. Keep this archive private.");
+        } else {
+            println!("Remote device tokens and secret settings are not included.");
+        }
+    }
+    Ok(())
+}
+
+async fn run_restore(mut config: Config, args: RestoreArgs) -> anyhow::Result<()> {
+    let RestoreArgs {
+        archive,
+        home,
+        database,
+        json: as_json,
+    } = args;
+    if let Some(home) = home {
+        config.database_path = home.join(brand::DATABASE_FILE);
+        config.home = home;
+    }
+    let database = database.unwrap_or_else(|| config.database_path.clone());
+    if daemon_is_running(&config).await {
+        bail!(
+            "{} is running. Stop it before restoring a backup, then try again.",
+            brand::PRODUCT_NAME
+        );
+    }
+    let summary = pandu_daemon::backup::restore_backup(&archive, &database)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        println!("Restored {} from {}.", summary.database, summary.archive);
+        println!(
+            "{} settings, database schema v{}.",
+            summary.settings_count, summary.database_schema
+        );
+        if let Some(previous) = &summary.pre_restore_backup {
+            println!("The database before the restore is at {previous}.");
+        }
+        println!("Remote access is off. Pair your phone again if you need it.");
+    }
+    Ok(())
+}
+
+fn default_backup_path(home: &Path) -> PathBuf {
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    home.join("backups")
+        .join(format!("{}-backup-{stamp}.tar.gz", brand::SLUG))
+}
+
+async fn daemon_is_running(config: &Config) -> bool {
+    let url = format!("{}/health", daemon_base_url(config));
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return false;
+    };
+    let Ok(response) = client.get(&url).send().await else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Ok(body) = response.json::<Value>().await else {
+        return false;
+    };
+    body.get("version").is_some() && body.get("database").is_some()
+}
+
+fn daemon_base_url(config: &Config) -> String {
+    let host = match config.host.as_str() {
+        "0.0.0.0" => "127.0.0.1".to_string(),
+        "::" | "[::]" => "::1".to_string(),
+        other => other.to_string(),
+    };
+    let authority = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host
+    };
+    format!("http://{authority}:{}", config.port)
+}
+
+// ---------------------------------------------------------------------------
 // audit
 // ---------------------------------------------------------------------------
 
@@ -566,7 +881,7 @@ fn models_audit(args: ModelsAuditArgs) -> anyhow::Result<()> {
 
 enum Daemon {
     External,
-    Owned(ServerHandle),
+    Owned(Box<ServerHandle>),
 }
 
 async fn run_agent(config: Config, args: RunArgs) -> anyhow::Result<()> {
@@ -677,7 +992,7 @@ async fn ensure_daemon(config: &Config) -> anyhow::Result<(Daemon, SocketAddr)> 
         .await
         .with_context(|| format!("could not start the {} daemon", brand::PRODUCT_NAME))?;
     let addr = handle.addr;
-    Ok((Daemon::Owned(handle), addr))
+    Ok((Daemon::Owned(Box::new(handle)), addr))
 }
 
 async fn probe_daemon(config: &Config) -> Option<Value> {
@@ -1298,6 +1613,26 @@ mod tests {
     #[test]
     fn the_cli_name_comes_from_the_brand() {
         assert_eq!(Cli::command().get_name(), brand::CLI_COMMAND);
+    }
+
+    #[test]
+    fn running_sessions_are_listed_by_title_and_agent() {
+        let sessions = vec![
+            json!({"title": "Fix the login flow", "agent": {"name": "Claude Code"}}),
+            json!({"title": "  ", "agent": null}),
+        ];
+        assert_eq!(
+            active_session_summary(&sessions),
+            "- Fix the login flow (Claude Code)\n- Untitled session"
+        );
+    }
+
+    #[test]
+    fn the_running_session_warning_caps_the_list() {
+        let sessions = (0..8)
+            .map(|index| json!({"title": format!("Session {index}")}))
+            .collect::<Vec<_>>();
+        assert_eq!(active_session_summary(&sessions).lines().count(), 5);
     }
 
     fn adapter() -> Adapter {
