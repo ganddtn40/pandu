@@ -26,15 +26,25 @@ maintainer completes the ceremony below. Do not hand-edit the signatures.
 ## The pre-rename production key is compromised
 
 A production key was generated before the rename. Its private half was not
-available during the rename and its exact generation and storage location can
-no longer be confirmed. It is not embedded in this build and it must never be
-used again.
+available during the rename. The repository history does not record the machine,
+path, media, or custodian used to generate or store it, so its exact generation
+and storage location cannot be confirmed.
 
-Because the storage location cannot be proven, treat the key as compromised
-even though it was never released and was not found in this repository, CI, or
-an agent session. Do not sign another index with it, do not restore it from a
-backup, and do not add its public key back to the build. The first production
-release must use a newly generated key.
+Where it did and did not appear:
+
+| Location | Finding |
+| --- | --- |
+| Repository | No private key material found. History scans match only the PEM header constant, redaction code, and fake test fixtures. No `.pem` or `.key` object exists in any commit. |
+| CI configuration | No production signing key or secret is referenced. Pull-request jobs never receive one. |
+| Logs | Cannot be confirmed. Historical CI logs and terminal scrollback are not part of the repository and were not reviewed, so they cannot be proven clean. |
+| Test fixtures | No. The `.test.json` fixtures are signed with the separate test key, not the production key. |
+| Assistant context and tool output | The old production private key did not appear in this session's assistant context or tool output; only its public key did. Earlier agent transcripts were not retained or reviewed, so they cannot be proven clean. |
+
+Because generation, storage, and every log and transcript cannot be confirmed,
+**treat the pre-rename production key as compromised.** It is not embedded in
+this build and it must never be used again. Do not sign another index with it,
+do not restore it from a backup, and do not add its public key back to the
+build. The first production release must use a newly generated key.
 
 ## Two trust roots
 
