@@ -15,3 +15,11 @@
     RMDir /r "$PROFILE\.pandu"
   pandu_keep_data:
 !macroend
+
+; Tauri writes the install location to HKCU\Software\<publisher>\<product> and
+; only removes it when the user also chooses to delete application data. An
+; uninstall must not leave machine state behind, so remove it unconditionally.
+!macro NSIS_HOOK_POSTUNINSTALL
+  DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
+  DeleteRegKey /ifempty SHCTX "${MANUKEY}"
+!macroend

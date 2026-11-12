@@ -53,20 +53,20 @@ swaps it back. Neither command touches `pandu.db`.
 
 ## What an uninstall changes
 
-The desktop installers are not part of this build yet. When the MSI and NSIS
-bundles ship, their uninstallers must keep user data by default:
+The Windows installers keep user data by default:
 
-- The uninstaller removes only files it installed.
-- `~/.pandu/v2` stays in place.
-- A separate, unchecked checkbox is required to delete data. The default is to
-  keep it.
-- The same rule applies to the macOS `.dmg` and the Linux packages.
+- The NSIS uninstaller removes only files and registrations it created.
+- `~/.pandu/v2` stays in place unless you answer **Yes** to its data question.
+- The default answer is **No**, and silent uninstalls always keep the data.
+- The MSI has no data-deletion question; remove `%USERPROFILE%\.pandu`
+  manually only if you want the data gone.
+- The same rule applies to the future macOS `.dmg` and Linux packages.
 
-This is a release requirement, not an optional setting. There is no MSI or NSIS
-bundle in this repository yet, so there is nothing to uninstall and no
-installer test to run. The packaging manifest already declares the data
-directory as `.pandu`, outside the application folder. Do not add an
-uninstaller action that deletes it.
+The packaging manifest declares the data directory as `.pandu`, outside the
+application folder. Do not add an uninstaller action that deletes it without an
+explicit choice. The cleanup is tested with `app/scripts/uninstall-check.mjs`;
+see [`install/uninstall.md`](install/uninstall.md) for the commands and the
+exact leftovers it checks.
 
 The Android app follows the same rule: uninstalling the app removes the APK,
 not your exported backups. Android may remove app-private storage when you
