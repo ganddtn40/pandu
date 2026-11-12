@@ -6,6 +6,9 @@ import { saveScreenshot } from './screenshots';
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase6');
 mkdirSync(SHOTS, { recursive: true });
 
+const README_SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'readme');
+mkdirSync(README_SHOTS, { recursive: true });
+
 const DEMO_DAEMON = 'http://127.0.0.1:4321';
 const LIVE_DAEMON = 'http://127.0.0.1:4322';
 const DESIGN_KEY = 'pandu.design';
@@ -121,6 +124,10 @@ async function screenshot(page: Page, name: string): Promise<void> {
   await saveScreenshot(page, path.join(SHOTS, name));
 }
 
+async function readmeScreenshot(page: Page, name: string): Promise<void> {
+  await saveScreenshot(page, path.join(README_SHOTS, name));
+}
+
 async function expectNoDevelopmentCopy(page: Page): Promise<void> {
   await expect(page.locator('body')).not.toContainText(
     /Phase\s+\d|Preview data|arrives in Phase|coming in Phase|shell preview/i,
@@ -226,6 +233,74 @@ async function shapeStats(page: Page) {
 async function waitForHomeData(page: Page): Promise<void> {
   await expect(page.locator('.preview-note')).toContainText('Synced', { timeout: 15_000 });
 }
+
+/**
+ * README captures use the default light theme and the dark theme so the
+ * repository can show the matching image for GitHub's colour scheme. They stay
+ * in their own folder so a design change never rewrites the phase history.
+ * Run this block first: later tests approve demo guards and change the data.
+ */
+test.describe('README captures', () => {
+  test.describe('desktop', () => {
+    test.use({ viewport: { width: 1440, height: 900 } });
+
+    test('captures the home in light and dark', async ({ page }) => {
+      for (const theme of ['light', 'dark'] as const) {
+        await open(page, `/?theme=${theme}&surface=hybrid`);
+        await waitForHomeData(page);
+        await expect(page.locator('.topbar .brand img')).toBeVisible();
+        await expectNoHorizontalOverflow(page);
+        await readmeScreenshot(page, `desktop-home-${theme}.png`);
+      }
+    });
+
+    test('captures the market', async ({ page }) => {
+      await open(page, '/market');
+      await ready(page);
+      await expect(
+        page.getByRole('heading', { level: 1, name: 'Skills and MCP servers' }),
+      ).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+      await readmeScreenshot(page, 'desktop-market.png');
+    });
+
+    test('captures a recorded flight', async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await open(page, '/flights');
+      await page
+        .locator('.flight-row')
+        .filter({ hasText: 'Fix flaky checkout test' })
+        .click();
+      const detail = page.locator('.flight-detail');
+      await expect(
+        detail.getByRole('heading', { level: 2, name: 'Fix flaky checkout test' }),
+      ).toBeVisible();
+      await expect(detail.getByRole('tab', { name: 'Live output' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      await expect(detail.locator('.output-panel')).toContainText('The test reads');
+      await detail.locator('.output-panel').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(150);
+      await expectNoHorizontalOverflow(page);
+      await readmeScreenshot(page, 'desktop-flight-output.png');
+    });
+  });
+
+  test.describe('phone', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+    test('captures the home in light and dark', async ({ page }) => {
+      for (const theme of ['light', 'dark'] as const) {
+        await open(page, `/?theme=${theme}&surface=hybrid`);
+        await waitForHomeData(page);
+        await expect(page.locator('nav.tabbar')).toBeVisible();
+        await expectNoHorizontalOverflow(page);
+        await readmeScreenshot(page, `phone-home-${theme}.png`);
+      }
+    });
+  });
+});
 
 test.describe('first run', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
