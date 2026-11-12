@@ -41,8 +41,7 @@ All notable changes to this project are documented here. The format follows
   changelog, and the frozen `legacy/` tree.
 - `docs/RELEASING.md` with the release checklist and package-name checks for
   npm, crates.io, winget, and GitHub.
-- `AGENTS.md`, `INSTALL-FOR-AGENTS.md`, `llms.txt`, and
-  `packaging/manifest.json`.
+- `AGENTS.md`, `INSTALL-FOR-AGENTS.md`, and `packaging/manifest.json`.
 
 ## [0.1.0]
 
