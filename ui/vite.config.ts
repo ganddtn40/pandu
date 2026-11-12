@@ -91,6 +91,9 @@ export default defineConfig({
     target: 'es2022',
     cssCodeSplit: false,
     reportCompressedSize: true,
+    // `scripts/check-size.mjs` reads this to follow the real static import
+    // graph instead of guessing which chunks an entry loads.
+    manifest: true,
     rollupOptions: {
       input: {
         main: 'index.html',

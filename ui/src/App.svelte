@@ -1,36 +1,63 @@
 <script lang="ts">
+  import type { Component } from 'svelte';
   import { onMount } from 'svelte';
-  import AddAgent from './lib/AddAgent.svelte';
-  import AppearanceSheet from './lib/AppearanceSheet.svelte';
   import BottomTabs from './lib/BottomTabs.svelte';
-  import GlassPreview from './lib/GlassPreview.svelte';
-  import HomePreview from './lib/HomePreview.svelte';
   import InstallPrompt from './lib/InstallPrompt.svelte';
-  import OnboardingPreview from './lib/OnboardingPreview.svelte';
-  import QuickPrompt from './lib/QuickPrompt.svelte';
+  import Lazy from './lib/Lazy.svelte';
   import RemoteBanner from './lib/RemoteBanner.svelte';
   import SideRail from './lib/SideRail.svelte';
   import Toast from './lib/Toast.svelte';
   import TopBar from './lib/TopBar.svelte';
+  import { addAgentState } from './lib/add-agent.svelte';
   import { initDaemon } from './lib/api/daemon.svelte';
   import { startRemoteHostWatch } from './lib/api/remote-host.svelte';
-  import FlightsScreen from './lib/screens/FlightsScreen.svelte';
-  import InboxScreen from './lib/screens/InboxScreen.svelte';
-  import MarketScreen from './lib/screens/MarketScreen.svelte';
-  import SessionScreen from './lib/screens/SessionScreen.svelte';
-  import SettingsScreen from './lib/screens/SettingsScreen.svelte';
-  import { openQuickPrompt } from './lib/quick-prompt.svelte';
+  import { appearanceState } from './lib/design/appearance.svelte';
+  import { openQuickPrompt, quickPromptState } from './lib/quick-prompt.svelte';
   import { routeLabel } from './lib/router';
   import { initRouter, routeState } from './lib/router.svelte';
   import { initGlass, type GlassController } from './glass/engine';
   import { PRODUCT_NAME } from './lib/brand';
 
+  type Loader = () => Promise<{ default: Component }>;
+
+  /**
+   * Every screen is a route chunk. Market, Flights (which owns the replay and
+   * snapshot/diff views), Settings, Inbox, Session, and Home are fetched only
+   * when their route is opened, so a deep link to one screen does not pay for
+   * the others.
+   */
+  const routeLoaders: Record<string, Loader> = {
+    '/': () => import('./lib/HomePreview.svelte'),
+    '/inbox': () => import('./lib/screens/InboxScreen.svelte'),
+    '/flights': () => import('./lib/screens/FlightsScreen.svelte'),
+    '/market': () => import('./lib/screens/MarketScreen.svelte'),
+    '/settings': () => import('./lib/screens/SettingsScreen.svelte'),
+    '/session': () => import('./lib/screens/SessionScreen.svelte'),
+  };
+
   let canvas = $state<HTMLCanvasElement | null>(null);
   let glass: GlassController | undefined;
 
   const isWelcome = $derived(routeState.path === '/welcome');
+  const activeLoader = $derived(routeLoaders[routeState.path] ?? null);
   const dev = import.meta.env.DEV;
   const forcedFallback = new URLSearchParams(window.location.search).get('glass') === 'off';
+
+  // Overlays are loaded on first open and then stay mounted so their close
+  // transitions still run. None of them is part of the initial route chunk.
+  let appearanceMounted = $state(false);
+  let addAgentMounted = $state(false);
+  let quickPromptMounted = $state(false);
+
+  $effect(() => {
+    if (appearanceState.open) appearanceMounted = true;
+  });
+  $effect(() => {
+    if (addAgentState.open) addAgentMounted = true;
+  });
+  $effect(() => {
+    if (quickPromptState.open) quickPromptMounted = true;
+  });
 
   function onKeydown(event: KeyboardEvent): void {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -46,7 +73,17 @@
     if (canvas) {
       glass = initGlass(canvas, forcedFallback);
     }
+    // The resource benchmark reads this timestamp over the WebView2 debugging
+    // protocol. It marks the first interactive frame after the shell mounts.
+    let readyFrame = requestAnimationFrame(() => {
+      readyFrame = requestAnimationFrame(() => {
+        document.documentElement.dataset.appReadyAt = String(
+          Math.round(performance.timeOrigin + performance.now()),
+        );
+      });
+    });
     return () => {
+      cancelAnimationFrame(readyFrame);
       cleanupRouter();
       cleanupDaemon();
       stopRemoteWatch();
@@ -64,7 +101,7 @@
 <canvas bind:this={canvas} class="glass-canvas" aria-hidden="true"></canvas>
 
 {#if isWelcome}
-  <OnboardingPreview />
+  <Lazy load={() => import('./lib/OnboardingPreview.svelte')} label="Welcome" />
 {:else}
   <div class="app-shell">
     <TopBar />
@@ -74,19 +111,13 @@
       <SideRail />
       <main class="panel" aria-label={PRODUCT_NAME}>
         {#if dev && routeState.path === '/glass-preview'}
-          <GlassPreview />
-        {:else if routeState.path === '/inbox'}
-          <InboxScreen />
-        {:else if routeState.path === '/flights'}
-          <FlightsScreen />
-        {:else if routeState.path === '/market'}
-          <MarketScreen />
-        {:else if routeState.path === '/settings'}
-          <SettingsScreen />
-        {:else if routeState.path === '/session'}
-          <SessionScreen />
+          <Lazy load={() => import('./lib/GlassPreview.svelte')} label="Glass preview" />
+        {:else if activeLoader}
+          {#key routeState.path}
+            <Lazy load={activeLoader} label={routeLabel(routeState.path)} />
+          {/key}
         {:else}
-          <HomePreview />
+          <Lazy load={() => import('./lib/HomePreview.svelte')} label="Home" />
         {/if}
       </main>
     </div>
@@ -95,8 +126,14 @@
   </div>
 {/if}
 
-<AppearanceSheet />
-<AddAgent />
-<QuickPrompt />
+{#if appearanceMounted}
+  <Lazy load={() => import('./lib/AppearanceSheet.svelte')} label="Appearance" />
+{/if}
+{#if addAgentMounted}
+  <Lazy load={() => import('./lib/AddAgent.svelte')} label="Add agent" />
+{/if}
+{#if quickPromptMounted}
+  <Lazy load={() => import('./lib/QuickPrompt.svelte')} label="Quick prompt" />
+{/if}
 <InstallPrompt />
 <Toast />

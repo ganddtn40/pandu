@@ -111,10 +111,12 @@ over an opaque `--sheet-bg`; the canvas sits below their scrims.
 
 ## Budgets
 
-- JavaScript < 150 KB gzip for the host entry plus its preloaded shared chunk
-  (current build: 145.6 KB gzip). The remote shell is a separate 8.7 KB gzip
-  chunk that loads only on a remote origin.
-- CSS: 137.4 KB, 20.8 KB gzip
+- Initial host JavaScript < 90 KB gzip (current build: 78.98 KB). The remote
+  shell is a separate 70.88 KB gzip entry that loads only on a remote origin.
+- Lazy route and overlay chunks < 25 KB gzip each; total JavaScript < 200 KB
+  (current build: 163.34 KB).
+- CSS: 134.8 KB raw, 20.24 KB gzip
+- The size gate reads Vite's manifest and runs in CI after every build
 - No layout shift from font loading
 - 44 px minimum touch targets
 - Contrast ≥ 4.5:1 for text over every surface and accent pair

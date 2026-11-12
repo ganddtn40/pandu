@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-size.mjs",
+    "size": "node scripts/check-size.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",

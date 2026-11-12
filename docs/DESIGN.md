@@ -313,8 +313,10 @@ overlays keep a background alpha of at least 0.9.
 
 | Budget | Target |
 | --- | --- |
-| UI JavaScript | < 150 KB gzip |
-| UI CSS | small; currently ~10 KB gzip |
+| Initial UI JavaScript | ≤ 90 KB gzip per entry (host and companion) |
+| Lazy route/overlay chunk | ≤ 25 KB gzip each |
+| All UI JavaScript | ≤ 200 KB gzip |
+| UI CSS | ≤ 30 KB gzip; currently ~20 KB |
 | Idle canvas redraws | 0/s when nothing changes |
 | Idle CPU | ~0% |
 | Font loading layout shift | none (`font-display: swap`, system-first stack) |
@@ -323,9 +325,10 @@ overlays keep a background alpha of at least 0.9.
 | Touch targets | ≥ 44 px |
 | Text contrast | ≥ 4.5:1 |
 
-Current build: ~150.0 KB JavaScript (49.6 KB gzip) and ~50.1 KB CSS (9.7 KB
-gzip). The JavaScript budget is tight; new runtime dependencies need a measured
-reason.
+Current build: 78.9 KB gzip initial host JavaScript, 70.9 KB initial companion
+JavaScript, 163.3 KB across every chunk, and 20.2 KB gzip CSS. Every screen and
+overlay is a lazy chunk; `ui/scripts/check-size.mjs` fails the build when a
+budget is exceeded, so new runtime dependencies need a measured reason.
 
 ## 10. Platform support
 
@@ -333,15 +336,16 @@ Stated plainly so nothing unsupported is advertised:
 
 | Platform | Status |
 | --- | --- |
-| Web (PWA) | Today |
-| Android | Today |
-| Windows | Today |
+| Windows | Supported |
+| Web (PWA) | Supported |
+| Android | Experimental |
 | macOS | Planned |
 | iOS | Planned |
 | Linux | Planned |
 
 The UI is responsive and tested at 1440×900 and 390×844 (plus 360×640 for the
 phone bottom-edge case). Android is a companion viewer/approver, not a recorder.
+It stays experimental until emulator and phone verification are complete.
 
 ## 11. File map
 

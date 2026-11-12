@@ -36,6 +36,7 @@ const en = {
   'common.connecting': 'Connecting',
   'common.retry': 'Retry',
   'common.loading': 'Loading…',
+  'lazy.failed': '{label} could not be loaded. Reload the app to try again.',
   'common.copy': 'Copy',
   'common.copied': 'Copied',
   'common.open': 'Open',
