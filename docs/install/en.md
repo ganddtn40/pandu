@@ -117,6 +117,12 @@ already deploy software with Group Policy, Intune, or another package manager.
   After uninstalling the MSI, delete `%USERPROFILE%\.pandu` manually only if
   you also want to remove flights and settings.
 
+Install one or the other, not both. The MSI reuses the folder that an earlier
+per-user install recorded under `HKCU\Software\Pandu contributors\Pandu`, so
+running it after the setup puts a per-machine product in `%LOCALAPPDATA%\Pandu`.
+Uninstall the setup build first; on a clean machine the MSI installs to
+`C:\Program Files\Pandu`.
+
 ### Portable build
 
 1. Extract `pandu-0.2.0-x86_64-pc-windows-msvc-portable.zip` to a folder you
