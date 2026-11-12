@@ -4,7 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-13
+
+The first tagged preview of the Rust rewrite. It is unsigned, has no automatic
+update, and ships with the signed market disabled until the production keys are
+provisioned.
 
 ### Changed
 
@@ -42,6 +46,15 @@ All notable changes to this project are documented here. The format follows
 - `docs/RELEASING.md` with the release checklist and package-name checks for
   npm, crates.io, winget, and GitHub.
 - `AGENTS.md`, `INSTALL-FOR-AGENTS.md`, and `packaging/manifest.json`.
+
+### Fixed
+
+- The tag workflow now pins `toolchain: stable` on every Rust step and defines
+  `[profile.dist]`, so cargo-dist can build the CLI instead of failing before
+  the first artifact.
+- The browser and daemon suites no longer depend on the host's installed agents,
+  PATH, or reduced-transparency setting.
+- The Windows PTY test no longer races the child process as it exits.
 
 ## [0.1.0]
 

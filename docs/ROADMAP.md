@@ -122,11 +122,13 @@ The full token, surface, theme, and accessibility contract is in
 - [ ] README translated into all 14 languages
 
 CLI release artifacts are produced by the tag workflow, not by a local
-`cargo build`. The Android SDK/NDK are available to CI, but no production
-Android keystore is provisioned yet. The Android job is experimental and
-non-blocking: its APK is not attached to a release until physical-phone
-verification is recorded. The first tagged run is still required to prove the
-cargo-dist path end to end.
+`cargo build`. The 0.2.0 preview was built locally with cargo-dist 0.34.0 and
+Tauri, and is published unsigned; the tag workflow remains the path for the next
+release. The Android SDK/NDK are available to CI, but no production Android
+keystore is provisioned yet. The Android job is experimental and non-blocking:
+its APK is not attached to a release until physical-phone verification is
+recorded. The first tagged run is still required to prove the cargo-dist path
+end to end.
 
 ### Platform support
 
