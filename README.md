@@ -44,10 +44,10 @@
 > 0–11 are complete; Phase 12 (docs, catalogs, release polish) is in progress.
 > Windows and the PWA are supported. Android is an experimental companion
 > verified on an emulator. macOS, iOS, and Linux are planned. English ships with
-> 13 draft catalogs that fall back to English per key. Release builds currently
-> fail closed for updates and the market until the production signing keys are
-> provisioned. The 0.1.0 TypeScript/Node implementation is preserved under
-> `legacy/` as the behavior spec.
+> 13 draft catalogs that fall back to English per key. The 0.2.0 preview release
+> is unsigned and has no automatic update; the updater and registry trust roots
+> are not provisioned, so both fail closed. The 0.1.0 TypeScript/Node
+> implementation is preserved under `legacy/` as the behavior spec.
 
 ## Contents
 
@@ -78,9 +78,10 @@
 
 ## Quick start
 
-> **No tagged release is published yet.** The tag workflow builds the Windows
-> installer, MSI, and portable CLI zip, then creates a draft release that a
-> maintainer publishes by hand. Until that happens, build from source.
+> **0.2.0 is a preview release.** It ships the Windows installer, MSI, portable
+> build, and CLI archive, all unsigned. There is no automatic update: the
+> updater and registry keys are not provisioned, so both fail closed. The tag
+> workflow stays the signed-release path and creates a draft only.
 
 ### From source
 
@@ -104,9 +105,10 @@ Open `http://127.0.0.1:5174`. The UI dev server talks to the daemon at
 
 ### Windows desktop app
 
-The packaged desktop app bundles the daemon and the same UI in one window. Once
-the release is published, download `Pandu_0.2.0_x64-setup.exe` (per-user NSIS)
-or the `.msi` (per-machine) from Releases. To run the shell from source:
+The packaged desktop app bundles the daemon and the same UI in one window.
+Download `Pandu_0.2.0_x64-setup.exe` (per-user NSIS), the `.msi` (per-machine),
+or the portable zip from the [latest release](https://github.com/ganddtn40/pandu/releases/latest).
+To run the shell from source:
 
 ```powershell
 pnpm --dir app install
