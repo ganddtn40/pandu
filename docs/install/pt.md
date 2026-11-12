@@ -150,9 +150,8 @@ por conta própria, usar `pandu run -- <agent>` ou executar diagnósticos.
 
 1. Baixe `pandu-cli-x86_64-pc-windows-msvc.zip` e `SHA256SUMS`.
 2. Verifique o arquivo com `Get-FileHash`, como mostrado acima.
-3. Extraia. O zip contém a pasta `pandu-cli-x86_64-pc-windows-msvc` com
-   `pandu.exe`.
-4. Coloque essa pasta no `PATH` ou execute `pandu.exe` pelo caminho completo.
+3. Extraia. `pandu.exe` está na raiz do arquivo.
+4. Coloque a pasta de extração no `PATH` ou execute `pandu.exe` pelo caminho completo.
 
 O release também inclui `pandu-cli-installer.ps1`, que instala a CLI para o
 usuário atual. Leia o script antes de executar se quiser saber exatamente onde

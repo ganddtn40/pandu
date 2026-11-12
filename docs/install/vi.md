@@ -143,9 +143,8 @@ daemon, dùng `pandu run -- <agent>` hoặc chạy chẩn đoán.
 
 1. Tải `pandu-cli-x86_64-pc-windows-msvc.zip` và `SHA256SUMS`.
 2. Kiểm tra tệp nén bằng `Get-FileHash` như trên.
-3. Giải nén. Tệp ZIP chứa thư mục `pandu-cli-x86_64-pc-windows-msvc` với
-   `pandu.exe` bên trong.
-4. Thêm thư mục đó vào `PATH`, hoặc chạy `pandu.exe` bằng đường dẫn đầy đủ.
+3. Giải nén. `pandu.exe` nằm ở thư mục gốc của tệp nén.
+4. Thêm thư mục giải nén vào `PATH`, hoặc chạy `pandu.exe` bằng đường dẫn đầy đủ.
 
 Bản phát hành cũng có `pandu-cli-installer.ps1`, cài CLI cho người dùng hiện tại.
 Đọc tập lệnh trước khi chạy nếu bạn muốn biết chính xác nó ghi ở đâu.

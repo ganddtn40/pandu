@@ -185,9 +185,8 @@ ausführen willst.
 
 1. Lade `pandu-cli-x86_64-pc-windows-msvc.zip` und `SHA256SUMS`.
 2. Prüfe das Archiv mit `Get-FileHash`, wie oben.
-3. Entpacke es. Das Zip enthält einen Ordner
-   `pandu-cli-x86_64-pc-windows-msvc` mit `pandu.exe`.
-4. Lege den Ordner in den `PATH` oder starte `pandu.exe` mit vollem Pfad.
+3. Entpacke es. `pandu.exe` liegt direkt im Archiv.
+4. Lege den Entpackungsordner in den `PATH` oder starte `pandu.exe` mit vollem Pfad.
 
 Das Release enthält außerdem `pandu-cli-installer.ps1`, das die CLI für den
 aktuellen Benutzer installiert. Lies das Skript vor dem Ausführen, wenn du genau

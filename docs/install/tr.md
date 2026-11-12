@@ -147,9 +147,8 @@ içindedir.
 
 1. `pandu-cli-x86_64-pc-windows-msvc.zip` ve `SHA256SUMS` indirin.
 2. Arşivi yukarıda gösterildiği gibi `Get-FileHash` ile doğrulayın.
-3. Çıkarın. ZIP içinde `pandu.exe` bulunan
-   `pandu-cli-x86_64-pc-windows-msvc` klasörü vardır.
-4. Bu klasörü `PATH`'e ekleyin veya `pandu.exe` dosyasını tam yoluyla çalıştırın.
+3. Çıkarın. `pandu.exe` arşivin kökünde.
+4. Çıkarma klasörünü `PATH`'e ekleyin veya `pandu.exe` dosyasını tam yoluyla çalıştırın.
 
 Sürümde ayrıca CLI'yi geçerli kullanıcı için kuran `pandu-cli-installer.ps1`
 bulunur. Tam olarak nereye yazdığını bilmek istiyorsanız betiği çalıştırmadan

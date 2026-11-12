@@ -144,9 +144,8 @@ PWA는 같은 원격 대시보드를 브라우저에서 설치한 것입니다. 
 
 1. `pandu-cli-x86_64-pc-windows-msvc.zip`과 `SHA256SUMS`를 내려받습니다.
 2. 위와 같이 `Get-FileHash`로 압축 파일을 확인합니다.
-3. 압축을 풉니다. ZIP 안의 `pandu-cli-x86_64-pc-windows-msvc` 폴더에
-   `pandu.exe`가 있습니다.
-4. 그 폴더를 `PATH`에 추가하거나 `pandu.exe`를 전체 경로로 실행합니다.
+3. 압축을 풉니다. `pandu.exe`는 압축 파일의 최상위에 있습니다.
+4. 압축을 푼 폴더를 `PATH`에 추가하거나 `pandu.exe`를 전체 경로로 실행합니다.
 
 릴리스에는 현재 사용자용 CLI를 설치하는 `pandu-cli-installer.ps1`도 포함됩니다.
 정확히 어디에 쓰는지 알고 싶다면 실행 전에 스크립트를 읽어 보세요.

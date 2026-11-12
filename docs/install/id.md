@@ -175,10 +175,9 @@ daemon sendiri, memakai `pandu run -- <agent>`, atau menjalankan diagnostik.
 
 1. Unduh `pandu-cli-x86_64-pc-windows-msvc.zip` dan `SHA256SUMS`.
 2. Verifikasi arsip dengan `Get-FileHash` seperti di atas.
-3. Ekstrak. Zip berisi folder `pandu-cli-x86_64-pc-windows-msvc` dengan
-   `pandu.exe`.
-4. Tambahkan folder itu ke `PATH`, atau jalankan `pandu.exe` dengan jalur
-   lengkap.
+3. Ekstrak. `pandu.exe` berada di akar arsip.
+4. Tambahkan folder hasil ekstrak ke `PATH`, atau jalankan `pandu.exe` dengan
+   jalur lengkap.
 
 Rilis juga menyertakan `pandu-cli-installer.ps1`, yang memasang CLI untuk
 pengguna saat ini. Baca skripnya sebelum menjalankan jika Anda ingin tahu persis

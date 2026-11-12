@@ -184,9 +184,8 @@ PWA は同じリモートダッシュボードをブラウザーからインス�
 
 1. `pandu-cli-x86_64-pc-windows-msvc.zip` と `SHA256SUMS` をダウンロードします。
 2. 上記と同様に `Get-FileHash` でアーカイブを検証します。
-3. 展開します。zip には `pandu-cli-x86_64-pc-windows-msvc` フォルダーと
-   `pandu.exe` が含まれています。
-4. そのフォルダーを `PATH` に追加するか、フルパスで `pandu.exe` を実行します。
+3. 展開します。`pandu.exe` はアーカイブの直下にあります。
+4. 展開先のフォルダーを `PATH` に追加するか、フルパスで `pandu.exe` を実行します。
 
 リリースには `pandu-cli-installer.ps1` も含まれます。現在のユーザー用に CLI
 をインストールします。書き込み先を正確に知りたい場合は、実行前にスクリプトを

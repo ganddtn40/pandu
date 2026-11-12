@@ -156,8 +156,8 @@ PWA 是同一个远程面板，从浏览器安装。它需要一个能访问你�
 
 1. 下载 `pandu-cli-x86_64-pc-windows-msvc.zip` 和 `SHA256SUMS`。
 2. 如上所述用 `Get-FileHash` 校验压缩包。
-3. 解压。zip 包含 `pandu-cli-x86_64-pc-windows-msvc` 文件夹和 `pandu.exe`。
-4. 把该文件夹加入 `PATH`，或用完整路径运行 `pandu.exe`。
+3. 解压。`pandu.exe` 位于压缩包的根目录。
+4. 把解压后的文件夹加入 `PATH`，或用完整路径运行 `pandu.exe`。
 
 发布还包含 `pandu-cli-installer.ps1`，为当前用户安装 CLI。如果你想确切知道
 它写入哪里，请先阅读脚本再运行。
