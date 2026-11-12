@@ -442,6 +442,11 @@ stops the release before the draft is created.
    - Portable zip: starts with WebView2 already installed.
    Confirm the tray icon, close-to-tray behavior, `pandu://flights/<id>`, and
    that uninstall keeps `%USERPROFILE%\.pandu` unless you opt in to deletion.
+   Run `node app/scripts/uninstall-check.mjs --phase before` before uninstalling
+   and `--phase after --baseline dist/uninstall-baseline.json` afterwards. The
+   after-check must pass with no protocol handler, shortcut, task, service,
+   autostart value, uninstall entry, install directory, or vendor registry key
+   left behind. See [`BENCHMARKS.md`](BENCHMARKS.md#uninstall-hygiene).
 3. Install the APK on a clean phone or emulator. Confirm the camera permission
    is requested only after **Scan QR**, the Keystore token survives a restart,
    the four notification channels exist, the 15-minute background check runs,
@@ -467,3 +472,68 @@ stops the release before the draft is created.
    ```
 
 8. Update the changelog and close the release issue.
+
+## 7. Private-repo dry run
+
+The tag workflow has never run end to end. Before the first public tag, run it
+once in a private repository with a throwaway tag. This proves the workflow
+syntax, the cargo-dist and Tauri paths, the gates, and the draft-release step
+without publishing anything.
+
+Use the tag **`v0.0.0-ci-test`**. It is the only tag allowed to skip the
+app-version match, and it always produces a draft (`draft: true`), never a
+published release.
+
+1. Create a private repository and push the release commit and branch.
+2. Enable Actions and set the repository default workflow permissions to
+   **Read repository contents**. The release job requests `contents: write` for
+   the draft only.
+3. Create and push the throwaway tag:
+
+   ```bash
+   git tag v0.0.0-ci-test
+   git push origin v0.0.0-ci-test
+   ```
+
+4. Watch the run:
+
+   ```bash
+   gh run list --workflow Release
+   gh run watch
+   ```
+
+5. Check the expected result:
+   - `plan`, `cli-local`, `cli-global`, `windows-app`, `verify`, `licenses`,
+     `registry-gate`, `update-gate`, and `sbom` succeed.
+   - `android` may fail; it is non-blocking and its APK is not a release asset.
+   - `release` creates a **draft** named `v0.0.0-ci-test`, marked prerelease.
+   - The draft contains the CLI archives, Windows installers, portable zip,
+     SBOMs, `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.
+   - The draft does **not** contain `pandu-update.json` or an Android APK.
+   - `SHA256SUMS` matches every attached file.
+
+6. Download one asset and verify it:
+
+   ```bash
+   gh release download v0.0.0-ci-test --pattern SHA256SUMS
+   gh release download v0.0.0-ci-test --pattern 'Pandu_*_x64-setup.exe'
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+
+7. Clean up. Do not leave the tag or the draft behind:
+
+   ```bash
+   gh release delete v0.0.0-ci-test --yes --cleanup-tag
+   git tag -d v0.0.0-ci-test
+   git push origin :refs/tags/v0.0.0-ci-test
+   ```
+
+   `--cleanup-tag` deletes the remote tag. Delete the local tag separately if
+   it still exists. Workflow artifacts expire after their retention window; if
+   the repository is only for the dry run, delete it as well.
+
+8. Record the run URL and any fixes in the release issue. Fix the workflow and
+   repeat the dry run until it passes. Only then create the real version tag.
+
+If the dry run fails, do not create the real tag. The draft is not a release;
+delete it and fix the workflow first.
