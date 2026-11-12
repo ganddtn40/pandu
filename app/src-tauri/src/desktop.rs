@@ -79,16 +79,25 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 fn create_window(app: &tauri::App, origin: &str) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle().clone();
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title(brand::WINDOW_TITLE)
         .inner_size(1180.0, 780.0)
         .min_inner_size(900.0, 600.0)
         .center()
         .visible(false)
-        .devtools(cfg!(debug_assertions))
+        .devtools(
+            cfg!(debug_assertions)
+                || std::env::var_os(brand::env_name("WEBVIEW_DEVTOOLS")).is_some(),
+        )
         .initialization_script(shell::init_script(origin))
-        .on_navigation(move |url| navigation_allowed(&app_handle, url))
-        .build()?;
+        .on_navigation(move |url| navigation_allowed(&app_handle, url));
+    // The resource benchmark needs a WebView2 debugging endpoint to read the
+    // first-interactive-frame timestamp. This is an environment-only hook; the
+    // app never enables it by itself.
+    if let Some(args) = std::env::var_os(brand::env_name("WEBVIEW_ARGS")) {
+        builder = builder.additional_browser_args(&args.to_string_lossy());
+    }
+    let window = builder.build()?;
 
     // Closing the window keeps the recorder alive in the tray. Quit is an
     // explicit action from the tray menu.

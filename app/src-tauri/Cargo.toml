@@ -17,6 +17,11 @@ publish = false
 name = "pandu_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# `tauri build` enables this. A raw `cargo build --release` needs it too, or the
+# binary keeps loading `devUrl` instead of the embedded UI.
+custom-protocol = ["tauri/custom-protocol"]
+
 [[bin]]
 name = "Pandu"
 path = "src/main.rs"
