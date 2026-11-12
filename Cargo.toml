@@ -107,3 +107,9 @@ strip = "symbols"
 
 [profile.release.package."*"]
 opt-level = "z"
+
+# cargo-dist builds the CLI with `--profile dist`. Inherit the release profile
+# so the archive ships the same optimized, stripped binary as a manual
+# `cargo build --release` instead of an unoptimized fallback.
+[profile.dist]
+inherits = "release"
