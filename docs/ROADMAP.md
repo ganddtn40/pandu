@@ -127,8 +127,8 @@ Tauri, and is published unsigned; the tag workflow remains the path for the next
 release. The Android SDK/NDK are available to CI, but no production Android
 keystore is provisioned yet. The Android job is experimental and non-blocking:
 its APK is not attached to a release until physical-phone verification is
-recorded. The first tagged run is still required to prove the cargo-dist path
-end to end.
+recorded. The tag workflow itself has not run end to end yet; the next release
+should let it build and publish so the cargo-dist path is proven.
 
 ### Platform support
 
