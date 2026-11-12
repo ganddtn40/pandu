@@ -282,12 +282,12 @@ not break because Pandu broke.
 | CLI binary | < 12 MB |
 | Idle RAM | < 40 MB |
 | Startup | < 300 ms |
-| UI JavaScript | < 150 KB gzip |
+| UI JavaScript | < 90 KB gzip initial per entry; < 200 KB total |
 | Android APK | < 15 MB |
 | Proxy overhead | < 2 ms p99 |
 
-These are release gates, not aspirations. Phase 12 measures them on a clean
-machine and records the numbers.
+These are release gates, not aspirations. The measured Windows numbers are in
+[`BENCHMARKS.md`](BENCHMARKS.md); the Android APK and proxy p99 remain open.
 
 ### Visual direction
 

@@ -12,9 +12,10 @@ come back without reopening old decisions.
 
 **Theme:** one binary, five tabs, proxy and log-watch capture, design v2.
 
-Phases 0–11 are complete. Phase 12 covers the remaining documentation,
-benchmarks, and language catalogs; the unchecked product and quality items in
-this roadmap are still open before the release criteria below can be met.
+Phases 0–11 are complete. Windows and PWA benchmarks are recorded in
+[`BENCHMARKS.md`](BENCHMARKS.md); Phase 12 covers the remaining documentation and
+language catalogs. The unchecked product and quality items in this roadmap are
+still open before the release criteria below can be met.
 
 ### Product
 
@@ -107,31 +108,34 @@ The full token, surface, theme, and accessibility contract is in
 - [ ] npm wrapper (`npx pandu`)
 - [x] winget and scoop manifests (drafts with hashes filled at release time)
 - [x] Windows Tauri bundle (MSI/NSIS)
-- [x] Signed Android APK with documented keystore steps
+- [ ] Signed Android APK with documented keystore steps (debug build and
+      throwaway-signing verification pending; production keystore not provisioned)
 - [x] Web/PWA bundle
 - [ ] macOS, iOS, and Linux bundles (planned after v0.2.0)
 - [x] Signed update checks every 24 hours (can be disabled), no auto-install,
   `pandu update` / `pandu rollback`, and a signed release manifest
 - [ ] README and beginner docs in all 14 languages (7 shipped)
 
-Android and CLI release artifacts are produced by the tag workflow, not by a
-local `cargo build`: the Android SDK/NDK and the release keystore live in CI.
-The first tagged run is still required to prove the Android signing and
-cargo-dist paths end to end.
+CLI release artifacts are produced by the tag workflow, not by a local
+`cargo build`. The Android SDK/NDK and the release keystore live in CI, but the
+Android job is experimental and non-blocking: its APK is not attached to a
+release until emulator and phone verification are recorded. The first tagged
+run is still required to prove the cargo-dist path end to end.
 
 ### Platform support
 
 | Platform | Status |
 | --- | --- |
-| Web (PWA) | Today |
-| Android | Today |
-| Windows | Today |
+| Windows | Supported |
+| Web (PWA) | Supported |
+| Android | Experimental |
 | macOS | Planned |
 | iOS | Planned |
 | Linux | Planned |
 
-Android is a companion viewer/approver, not a recorder. Nothing outside the
-"Today" rows is advertised as working.
+Android is a companion viewer/approver, not a recorder. It stays experimental
+until emulator and phone verification are recorded, and it cannot block a
+release. Nothing outside the supported rows is advertised as working.
 
 ### Quality gates
 
@@ -144,9 +148,9 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 - [x] Text contrast ≥ 4.5:1 across every theme, surface, and accent pair
 - [x] 44 px minimum touch targets on phone
 - [x] Zero idle canvas redraws and visible focus rings
-- [x] UI JavaScript < 150 KB gzip for the host entry plus its preloaded shared
-      chunk (currently ~145.6 KB gzip; the remote shell loads only on a remote
-      origin)
+- [x] Initial host JavaScript < 90 KB gzip (currently 78.98 KB), lazy route
+      chunks < 25 KB each, total JS < 200 KB (163.34 KB); enforced by
+      `pnpm --dir ui size` in CI
 - [x] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction
@@ -156,8 +160,9 @@ Android is a companion viewer/approver, not a recorder. Nothing outside the
 - [x] CI matrix on Windows, macOS, Linux
 - [ ] Performance: binary < 12 MB, idle RAM < 40 MB, startup < 300 ms, Android
       APK < 15 MB, proxy overhead < 2 ms p99 (measured on Windows: CLI binary
-      9.31 MB, daemon ready 58 ms, core idle 32.5 MB, desktop total 404.4 MB
-      with WebView2; APK and proxy p99 still unmeasured)
+      9.31 MB, daemon ready 54 ms, core idle 34.8 MB, whole app 396.9–426.6 MB
+      with WebView2, TTI 540–814 ms; APK and proxy p99 still unmeasured; see
+      [`BENCHMARKS.md`](BENCHMARKS.md))
 
 ### Release plan
 

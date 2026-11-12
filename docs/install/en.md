@@ -138,18 +138,25 @@ already deploy software with Group Policy, Intune, or another package manager.
    and paired devices. Choose **Yes** only if you want them permanently gone.
 4. Silent uninstalls always keep the data folder.
 
+The exact cleanup, the manual steps, and the `uninstall-check.mjs` verification
+are in [uninstall.md](uninstall.md).
+
 ## Android companion
 
 The companion is a small, scoped dashboard for your phone. It can watch flights
 and answer approval requests, but it cannot start agents or change settings.
 It is optional.
 
+**Experimental:** the Android companion has not yet been verified on an emulator
+and a physical phone. The APK is not attached to releases until it is; build it
+from source if you want to test it.
+
 The short version:
 
 1. On the computer, open **Settings > Remote access** and turn remote access
    on. Choose the Tailscale mode and run the `tailscale serve` command Pandu
    shows you.
-2. Download the signed APK from the same release page.
+2. Build the APK from source (experimental); see [android.md](android.md).
 3. Allow your browser or file manager to install unknown apps, then open the
    APK.
 4. Open Pandu on the phone and scan the pairing QR code shown on the computer.

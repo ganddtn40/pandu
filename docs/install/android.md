@@ -4,6 +4,11 @@ The Android companion lets you watch your flights and answer approval requests
 from your phone. It is optional. The computer still owns the agent process and
 every decision, and a paired phone cannot start agents or change settings.
 
+> **Experimental status.** The companion has not yet been verified on an
+> emulator and a physical phone. Its APK is not attached to releases and its CI
+> job is allowed to fail. The instructions below describe the target behavior;
+> they are being verified and may change. Build the APK from source to test it.
+
 This guide is written for someone who has never installed an APK from outside
 the Play Store. Follow it in order.
 
@@ -25,7 +30,7 @@ the Play Store. Follow it in order.
 ## What you need
 
 - Android 10 or newer.
-- The signed APK from the official release page.
+- An APK built from this repository until the first verified release.
 - A computer running Pandu with remote access enabled.
 - An HTTPS address that reaches the computer. The supported default is
   `tailscale serve`; a Cloudflare tunnel or another trusted HTTPS tunnel also
@@ -55,17 +60,22 @@ loopback UI.
 The remote listener is a separate service on port `4320`. The normal daemon
 listener stays on loopback port `4319`.
 
-## Download and verify the APK
+## Build and verify the APK
 
-Download the APK from the same release page as the desktop app. The file name
-looks like:
+The companion is experimental, so no APK is attached to releases yet. Build one
+from source with JDK 17, the Android SDK, and the NDK installed:
 
-```text
-pandu-0.2.0-android-universal-release-signed.apk
+```powershell
+node app/scripts/android-init.mjs
+node app/scripts/android-build.mjs --out dist/android
 ```
 
-The release also includes `SHA256SUMS`. Verify the APK on a computer before
-copying it to the phone:
+The unsigned debug APK is written under `dist/android`. For a throwaway
+verification signature, follow the script's `--release` help; never reuse a test
+keystore for a real release and never commit a keystore.
+
+Once an APK is attached to a release, the release also includes `SHA256SUMS`.
+Verify it on a computer before copying it to the phone:
 
 ```powershell
 Get-FileHash .\pandu-0.2.0-android-universal-release-signed.apk -Algorithm SHA256
@@ -264,10 +274,10 @@ On Windows:
 The output must say `Verifies` and list the release certificate. If it says
 `DOES NOT VERIFY`, do not install the file.
 
-The release workflow signs the APK with the CI keystore and runs `apksigner
-verify` before uploading it. The keystore is supplied through repository
-secrets and is never committed. A tag release fails closed when the signing
-secrets are missing; it never publishes an unsigned release APK.
+When the companion is promoted out of experimental, the release workflow will
+sign the APK with the CI keystore and run `apksigner verify` before uploading
+it. The keystore is supplied through repository secrets and is never committed.
+Until then the Android job is non-blocking and its APK is not a release asset.
 
 ## Update and uninstall
 

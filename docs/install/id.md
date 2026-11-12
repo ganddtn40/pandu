@@ -136,12 +136,16 @@ Pendamping adalah dasbor kecil dengan cakupan terbatas untuk ponsel. Anda dapat
 memantau penerbangan dan menjawab permintaan persetujuan, tetapi tidak dapat
 memulai agen atau mengubah pengaturan. Fitur ini opsional.
 
+**Eksperimental:** pendamping Android belum diverifikasi di emulator dan ponsel
+fisik. APK belum dilampirkan ke rilis sampai verifikasi selesai; bangun dari
+sumber jika ingin mencobanya.
+
 Ringkasnya:
 
 1. Di komputer, buka **Settings > Remote access** dan aktifkan akses jarak
    jauh. Pilih mode Tailscale dan jalankan perintah `tailscale serve` yang
    ditampilkan Pandu.
-2. Unduh APK bertanda tangan dari halaman rilis yang sama.
+2. Bangun APK dari sumber (eksperimental); lihat [android.md](android.md).
 3. Izinkan browser atau pengelola berkas memasang aplikasi dari sumber tidak
    dikenal, lalu buka APK.
 4. Buka Pandu di ponsel dan pindai kode QR dari komputer.

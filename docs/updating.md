@@ -113,13 +113,37 @@ not embedded one, the build says:
 That is intentional. A build without a production key fails closed and never
 falls back to the test key used by debug builds and fixtures.
 
+## Unsigned releases
+
+Windows release artifacts are unsigned unless the release notes say an
+Authenticode certificate was used. This is expected while the project has no
+code-signing certificate. An unsigned file is not automatically unsafe, but it
+is also not attributable: verify the SHA-256 before running it.
+
+1. Download `SHA256SUMS` from the same release page.
+2. Run `Get-FileHash <file> -Algorithm SHA256` and compare it with the line for
+   that file. The hashes must match exactly.
+3. If Windows shows **Windows protected your PC**, choose **More info**, then
+   **Run anyway** only after the hash matched and the file came from the
+   official release page. Never bypass SmartScreen for a mirror, a chat
+   attachment, or a file-sharing link.
+4. Check the release notes. They say whether the artifacts are signed.
+
+The signing policy, the verification commands, and the process for provisioning
+a certificate are in [`code-signing-policy.md`](code-signing-policy.md).
+Android signing is separate and uses `apksigner`, never Authenticode.
+
 ## Android
 
 The Android companion does not update itself. Android has no silent self-update
 for apps installed outside a store, and Pandu does not request the
 `REQUEST_INSTALL_PACKAGES` permission.
 
-To update:
+The companion is experimental and no APK is attached to releases yet. Build it
+from source until the first verified release; see
+[`install/android.md`](install/android.md).
+
+To update once a verified APK is available:
 
 1. Download the newer signed APK from the same GitHub release page.
 2. Check its SHA-256 against `SHA256SUMS`, and optionally its signer with

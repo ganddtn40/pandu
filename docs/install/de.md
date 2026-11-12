@@ -140,12 +140,17 @@ Der Begleiter ist ein kleines, begrenztes Dashboard für das Telefon. Er kann
 Flüge beobachten und Genehmigungsanfragen beantworten, aber keine Agenten
 starten oder Einstellungen ändern. Er ist optional.
 
+**Experimentell:** Der Android-Begleiter wurde noch nicht auf einem Emulator und
+einem echten Telefon geprüft. Die APK wird erst nach Abschluss der Prüfung an
+Releases angehängt; baue sie aus dem Quellcode, wenn du sie testen möchtest.
+
 Kurzfassung:
 
 1. Öffne am Computer **Settings > Remote access** und aktiviere den
    Fernzugriff. Wähle den Tailscale-Modus und führe den von Pandu angezeigten
    Befehl `tailscale serve` aus.
-2. Lade die signierte APK von derselben Release-Seite herunter.
+2. Baue die APK aus dem Quellcode (experimentell); siehe
+   [android.md](android.md).
 3. Erlaube deinem Browser oder Dateimanager die Installation unbekannter Apps
    und öffne die APK.
 4. Öffne Pandu auf dem Telefon und scanne den QR-Code vom Computer.

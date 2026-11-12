@@ -14,7 +14,7 @@ manifest offline and publishes the draft by hand.
 | Windows app | `Pandu_<version>_x64-setup.exe` (NSIS, per-user) | Tauri 2 |
 | Windows app | `Pandu_<version>_x64_en-US.msi` (WiX, per-machine) | Tauri 2 |
 | Windows portable | `pandu-<version>-x86_64-pc-windows-msvc-portable.zip` | `app/scripts/portable.mjs` |
-| Android | `pandu-<version>-android-universal-release-signed.apk` | Tauri 2 + Gradle + `apksigner` |
+| Android (experimental) | `pandu-<version>-android-universal-release-signed.apk`; not attached to releases until verified | Tauri 2 + Gradle + `apksigner` |
 | PWA | served by the daemon from the bundled `ui/dist`; no separate asset | Vite |
 | winget | `packaging/winget/ganddtn40.Pandu.yaml` draft | winget-pkgs |
 | scoop | `packaging/scoop/pandu.json` draft | scoop bucket |

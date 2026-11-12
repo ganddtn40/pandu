@@ -135,12 +135,17 @@ El compañero es un panel pequeño y limitado para el teléfono. Puede ver vuelo
 y responder solicitudes de aprobación, pero no puede iniciar agentes ni cambiar
 ajustes. Es opcional.
 
+**Experimental:** el compañero de Android aún no se ha verificado en un emulador
+y un teléfono físico. El APK no se adjunta a las versiones hasta que se complete
+la verificación; compílalo desde el código fuente si quieres probarlo.
+
 Resumen:
 
 1. En el ordenador, abre **Settings > Remote access** y activa el acceso
    remoto. Elige el modo Tailscale y ejecuta el comando `tailscale serve` que
    muestra Pandu.
-2. Descarga el APK firmado de la misma página de lanzamientos.
+2. Compila el APK desde el código fuente (experimental); consulta
+   [android.md](android.md).
 3. Permite que tu navegador o gestor de archivos instale apps desconocidas y
    abre el APK.
 4. Abre Pandu en el teléfono y escanea el QR del ordenador.

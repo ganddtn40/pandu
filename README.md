@@ -33,7 +33,8 @@ the installable web app, in seven languages:
 | 中文 | [docs/install/zh.md](docs/install/zh.md) |
 
 Platform-specific details: [Android](docs/install/android.md),
-[PWA](docs/install/pwa.md), and [troubleshooting](docs/install/troubleshooting.md).
+[PWA](docs/install/pwa.md), [uninstall and cleanup](docs/install/uninstall.md),
+and [troubleshooting](docs/install/troubleshooting.md).
 
 ## What v0.2.0 is
 
@@ -55,15 +56,17 @@ Platform-specific details: [Android](docs/install/android.md),
 
 | Platform | Status |
 | --- | --- |
-| Web (PWA) | Today |
-| Android | Today |
-| Windows | Today |
+| Windows | Supported |
+| Web (PWA) | Supported |
+| Android | Experimental |
 | macOS | Planned |
 | iOS | Planned |
 | Linux | Planned |
 
-Android is a companion viewer/approver, not a recorder. Nothing outside the
-"Today" rows is advertised as working.
+Android is a companion viewer/approver, not a recorder. It stays experimental
+until it has been verified on an emulator and a physical phone; the Android CI
+job is allowed to fail and Android is not part of a release until then. Nothing
+outside the supported rows is advertised as working.
 
 ## Design and appearance
 
@@ -165,7 +168,10 @@ your local database.
 - [Issue drafts](docs/issues/) — ready-to-paste `help wanted` work
 - [Adapter format](adapters/README.md) — how to add an agent
 - [UI notes](ui/README.md) — glass engine, budgets, and commands
-- [Releasing](docs/RELEASING.md) — gates, package-name checks, and registry signing
+- [Benchmarks](docs/BENCHMARKS.md) — measured artifact sizes, whole-app idle RAM/CPU, TTI, and uninstall hygiene
+- [Releasing](docs/RELEASING.md) — gates, dry run, package-name checks, and registry signing
+- [Code signing policy](docs/code-signing-policy.md) — what is signed, what is not, and how to verify
+- [Uninstall and cleanup](docs/install/uninstall.md) — data retention and the leftover check
 - [Install for agents](INSTALL-FOR-AGENTS.md) — copy-paste setup for an AI agent
 
 ## License

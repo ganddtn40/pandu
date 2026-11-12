@@ -143,12 +143,17 @@ Le compagnon est un petit tableau de bord limité pour le téléphone. Il peut
 suivre les vols et répondre aux demandes d'approbation, mais il ne peut pas
 démarrer d'agent ni modifier les réglages. Il est facultatif.
 
+**Expérimental :** le compagnon Android n'a pas encore été vérifié sur un
+émulateur et un téléphone physique. L'APK n'est pas joint aux versions tant que
+ce n'est pas fait ; compilez-le depuis les sources pour l'essayer.
+
 En bref :
 
 1. Sur l'ordinateur, ouvrez **Settings > Remote access** et activez l'accès à
    distance. Choisissez le mode Tailscale et exécutez la commande
    `tailscale serve` affichée par Pandu.
-2. Téléchargez l'APK signé depuis la même page de publication.
+2. Compilez l'APK depuis les sources (expérimental) ; voir
+   [android.md](android.md).
 3. Autorisez votre navigateur ou gestionnaire de fichiers à installer des
    applications inconnues, puis ouvrez l'APK.
 4. Ouvrez Pandu sur le téléphone et scannez le QR code de l'ordinateur.
