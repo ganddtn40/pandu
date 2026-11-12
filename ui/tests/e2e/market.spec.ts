@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { saveScreenshot } from './screenshots';
 
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase8');
 mkdirSync(SHOTS, { recursive: true });
@@ -60,7 +61,7 @@ async function search(page: Page, query: string): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
+  await saveScreenshot(page, path.join(SHOTS, name));
 }
 
 async function openDetail(page: Page, id: string): Promise<void> {

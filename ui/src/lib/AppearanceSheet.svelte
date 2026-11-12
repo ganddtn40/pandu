@@ -182,7 +182,7 @@
         <section class="sheet-section" aria-labelledby="appearance-theme">
           <div class="sheet-section__head">
             <h3 id="appearance-theme">Theme</h3>
-            <p>Dark is the default. Light and Frost stay soft, never stark white.</p>
+            <p>Light is the default. Dark stays deep; Frost stays cool and airy.</p>
           </div>
           <div class="theme-cards" role="group" aria-label="Theme">
             {#each THEME_MODES as option}

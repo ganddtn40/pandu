@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { saveScreenshot } from './screenshots';
 
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase9');
 mkdirSync(SHOTS, { recursive: true });
@@ -22,13 +23,13 @@ async function open(page: Page, url: string): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
+  await saveScreenshot(page, path.join(SHOTS, name));
 }
 
 async function shotOf(page: Page, selector: string, name: string): Promise<void> {
   const target = page.locator(selector);
   await target.scrollIntoViewIfNeeded();
-  await target.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
+  await saveScreenshot(target, path.join(SHOTS, name));
 }
 
 test.describe('model, effort, and context', () => {

@@ -17,7 +17,8 @@
   --font-scale: 1;
   --text-min: 12px;
 
-  /* Dark graphite is the default. */
+  /* Dark graphite is the fallback. Light is the product default and is
+     applied by the boot script before first paint. */
   --bg: #0a0c0f;
   --bg-deep: #07090c;
   --panel-bg: rgba(14, 17, 22, 0.93);
@@ -53,11 +54,11 @@
   --glass-intensity: 0.55;
   --glass-refraction: 1.075;
 
-  --accent: #ff7a2f;
-  --accent-strong: #ff8a45;
-  --accent-ink: #ffb27a;
-  --accent-soft: rgba(255, 122, 47, 0.16);
-  --accent-contrast: #1a0d06;
+  --accent: #4d9dff;
+  --accent-strong: #74b3ff;
+  --accent-ink: #9cc8ff;
+  --accent-soft: rgba(77, 157, 255, 0.16);
+  --accent-contrast: #07111d;
 
   --radius-sm: 12px;
   --radius-md: 18px;
@@ -646,9 +647,9 @@ pre {
   letter-spacing: -0.015em;
 }
 
-.brand svg {
+.brand :is(svg, img) {
   display: block;
-  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.28));
+  filter: drop-shadow(0 6px 14px rgba(20, 32, 64, 0.2));
 }
 
 .search {

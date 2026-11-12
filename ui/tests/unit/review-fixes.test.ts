@@ -44,8 +44,8 @@ describe('small logo', () => {
   it('ships a flat favicon variant with no gradients', () => {
     const small = readFileSync(join(publicRoot, 'logo-small.svg'), 'utf8');
     expect(small).not.toMatch(/gradient/i);
-    expect(small).toMatch(/<circle[^>]*r="8\.7"/);
-    expect(small).toMatch(/#ff7a2f/);
+    expect(small).toMatch(/fill-rule="evenodd"/);
+    expect(small).toMatch(/#1857d6/);
     expect(indexHtml).toContain('href="/logo-small.svg"');
   });
 });

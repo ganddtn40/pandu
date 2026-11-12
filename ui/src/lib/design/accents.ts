@@ -43,6 +43,13 @@ function palette(
 
 export const ACCENTS: AccentPreset[] = [
   {
+    id: 'blue',
+    label: 'Blue',
+    dark: palette('#4D9DFF', '#74B3FF', '#9CC8FF', '#07111D', 0.16),
+    light: palette('#2F7FE0', '#1F6BC7', '#0B5CAD', '#07111D', 0.12),
+    frost: palette('#2F7FE0', '#1F6BC7', '#0A549C', '#07111D', 0.12),
+  },
+  {
     id: 'orange',
     label: 'Orange',
     dark: palette('#FF7A2F', '#FF8A45', '#FFB27A', '#1A0D06', 0.16),
@@ -55,13 +62,6 @@ export const ACCENTS: AccentPreset[] = [
     dark: palette('#E8D9B5', '#F2E6C8', '#F2E6C8', '#1A1710', 0.18),
     light: palette('#B9A36F', '#A38E5A', '#6B5A33', '#1A1710', 0.16),
     frost: palette('#B3A06E', '#9C8A5B', '#5E4F2C', '#1A1710', 0.16),
-  },
-  {
-    id: 'blue',
-    label: 'Blue',
-    dark: palette('#4D9DFF', '#74B3FF', '#9CC8FF', '#07111D', 0.16),
-    light: palette('#2F7FE0', '#1F6BC7', '#0B5CAD', '#07111D', 0.12),
-    frost: palette('#2F7FE0', '#1F6BC7', '#0A549C', '#07111D', 0.12),
   },
   {
     id: 'green',

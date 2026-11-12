@@ -15,7 +15,7 @@
     "android:build": "node scripts/android-build.mjs",
     "checksums": "node scripts/checksums.mjs",
     "resources": "node scripts/resources.mjs",
-    "icons": "tauri icon ../design/logo/png/pandu-mark-1024.png",
+    "icons": "tauri icon ../design/logo/icon-manifest.json",
     "check:brand": "node scripts/check-brand.mjs",
     "sync:brand": "node scripts/sync-brand.mjs",
     "smoke": "node scripts/smoke.mjs",

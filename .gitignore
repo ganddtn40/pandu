@@ -37,7 +37,7 @@ playwright-report/
 blob-report/
 /ui/.tmp/
 
-# Generated logo exports (SVGs are the source)
+# Generated logo exports (the master PNG and SVGs are the source)
 /design/logo/png/
 
 # Pandu local data

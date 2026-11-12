@@ -27,9 +27,9 @@
       <stop offset="1" stop-color="#ffffff" stop-opacity="0.16" />
     </linearGradient>
     <linearGradient id="hero-accent" x1="196" y1="62" x2="236" y2="104" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffc59b" />
-      <stop offset="0.5" stop-color="#ff8a45" />
-      <stop offset="1" stop-color="#e85f0c" />
+      <stop offset="0" stop-color="#9cc8ff" />
+      <stop offset="0.5" stop-color="#4d9dff" />
+      <stop offset="1" stop-color="#1f6bc7" />
     </linearGradient>
     <radialGradient id="hero-gloss" cx="0.34" cy="0.24" r="0.6">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.4" />
@@ -84,6 +84,6 @@
   />
 
   <circle cx="216" cy="82" r="15" fill="url(#hero-accent)" />
-  <circle cx="216" cy="82" r="5.4" fill="#fff5ec" opacity="0.92" />
-  <circle cx="216" cy="82" r="24" fill="#ff7a2f" opacity="0.16" filter="url(#hero-blur)" />
+  <circle cx="216" cy="82" r="5.4" fill="#f5f9ff" opacity="0.92" />
+  <circle cx="216" cy="82" r="24" fill="#4d9dff" opacity="0.16" filter="url(#hero-blur)" />
 </svg>

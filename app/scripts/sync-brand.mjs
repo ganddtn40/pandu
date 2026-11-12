@@ -56,7 +56,7 @@ function setToml(relativePath, section, key, value, label) {
     description: `${brand.name} desktop and Android shell.`,
     scripts: {
       ...pkg.scripts,
-      icons: `tauri icon ../design/logo/png/${slug}-mark-1024.png`,
+      icons: 'tauri icon ../design/logo/icon-manifest.json',
     },
   };
   if (JSON.stringify(pkg) !== JSON.stringify(next)) {

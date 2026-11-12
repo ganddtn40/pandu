@@ -291,14 +291,14 @@ These are release gates, not aspirations. The measured Windows numbers are in
 
 ### Visual direction
 
-Design v2: dark graphite bento dashboards, matte cards with 1 px hairlines and
-20–28 px radii, large light numerals, thin charts, one accent, and a subtle
-status glow. A left icon rail and floating glass top bar frame the workspace;
-sheets, modals, toasts, and phone navigation are the only floating glass layers.
-The default accent is warm orange `#FF7A2F`. Dark is the default theme, with
-Light and Frost variants. No amber-on-black, no monospace uppercase labels, no
-serif display type, no hero marketing headlines, no radar/grid decoration, no
-sharp corners.
+Design v2: light paper bento dashboards, matte cards with 1 px hairlines and
+20–28 px radii, large ink numerals, thin charts, one accent, and a subtle status
+glow. A left icon rail and floating glass top bar frame the workspace; sheets,
+modals, toasts, and phone navigation are the only floating glass layers. The
+default accent is blue `#2F7FE0`. Light is the default theme, with Dark and
+Frost variants. No amber-on-black, no monospace uppercase labels, no serif
+display type, no hero marketing headlines, no radar/grid decoration, no sharp
+corners.
 
 Three surface styles: Bento Matte (solid cards, no blur), Liquid Glass
 (everything refracts), and Hybrid (default: matte cards, glass floating layers).
@@ -501,8 +501,8 @@ never exported. The full token and component contract is in
   one accent, and a left icon rail under a floating glass top bar. Floating
   sheets, toasts, modals, and the phone tab bar are the only glass chrome.
 - Three surface styles: Bento Matte, Liquid Glass, and Hybrid (default: matte
-  cards, glass floating layers). Themes: Dark (default), Light, Frost. Accent
-  presets: Orange (default `#FF7A2F`), Cream, Blue, Green, Violet, Silver, Mono.
+  cards, glass floating layers). Themes: Light (default), Dark, Frost. Accent
+  presets: Blue (default `#2F7FE0`), Orange, Cream, Green, Violet, Silver, Mono.
 - Design tokens are data attributes on `<html>` (`data-theme`, `data-surface`,
   `data-accent`, `data-radius`, `data-density`, `data-font`, `data-motion`,
   `data-borders`, `data-wallpaper`, `data-performance`). `ui/index.html` applies
@@ -566,9 +566,9 @@ never exported. The full token and component contract is in
 - The glass engine caps shapes at 12 on phones and low-end devices (16 on
   desktop). Low-end devices and battery saver auto-enable Performance mode on
   first run; the user can still turn it off.
-- The mark was checked at 16, 24, and 32 px. `Logo.svelte` switches to a
-  simplified mark below 28 px, and `public/logo-small.svg` is the flat favicon
-  variant with no gradients.
+- The mark was checked at 16, 24, and 32 px. `Logo.svelte` uses the glossy
+  raster tile at 28 px and above, and switches to the flat vector P below 28 px.
+  `ui/public/logo-small.svg` is the flat 32 px favicon with no gradients.
 
 ### Phase 5 implementation notes (real data)
 

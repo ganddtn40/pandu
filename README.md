@@ -42,8 +42,8 @@ and [troubleshooting](docs/install/troubleshooting.md).
   the Windows shell opens it in a desktop window.
 - **Five tabs.** Home, Inbox, Flights, Market, Settings, plus a global quick
   prompt (`Ctrl/Cmd+K`).
-- **Design v2.** Dark graphite bento dashboards with matte cards, hairline
-  borders, one accent, and floating glass chrome. Three themes (Dark, Light,
+- **Design v2.** Light paper bento dashboards with matte cards, hairline
+  borders, one accent, and floating glass chrome. Three themes (Light, Dark,
   Frost), three surface styles (Bento Matte, Liquid Glass, Hybrid), and full
   appearance customization in Settings.
 - **Two capture modes today.** Proxy and log-watch are implemented; hook/OTel is
@@ -70,9 +70,10 @@ outside the supported rows is advertised as working.
 
 ## Design and appearance
 
-- Default accent: warm orange `#FF7A2F`. Presets: Orange, Cream, Blue, Green,
-  Violet, Silver, Mono.
-- Themes: Dark (default), Light, Frost.
+- Default accent: blue `#2F7FE0`. Presets: Blue, Orange, Cream, Green, Violet,
+  Silver, Mono.
+- Themes: Light (default), Dark, Frost. The app icon is a glossy white tile
+  with a blue navigation P; the favicon is a flat vector variant.
 - Surfaces: Bento Matte, Liquid Glass, Hybrid (default: matte cards, glass
   floating layers).
 - Settings → Appearance controls theme, surface, accent, corner radius,

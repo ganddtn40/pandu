@@ -75,18 +75,18 @@ Doctor, and Provenance remain deferred.
 
 | Theme | Character |
 | --- | --- |
-| Dark (default) | Graphite `#0a0c0f`, near-black panels, light text |
-| Light | Warm paper `#eeebe4`, ink text |
+| Light (default) | Warm paper `#eeebe4`, ink text |
+| Dark | Graphite `#0a0c0f`, near-black panels, light text |
 | Frost | Cool blue-white `#e7eef5`, ink text |
 
-Dark is the default. Light and Frost share the "light" shader treatment; only
+Light is the default. Light and Frost share the "light" shader treatment; only
 Dark uses the smoked, near-black glass tint.
 
 ### Accents
 
-One accent per theme, default warm orange `#FF7A2F`. Presets: Orange, Cream,
-Blue, Green, Violet, Silver, Mono. Green and red remain reserved for status, so
-the accent presets avoid a green/red that could be mistaken for state.
+One accent per theme, default blue `#2F7FE0`. Presets: Blue, Orange, Cream,
+Green, Violet, Silver, Mono. Green and red remain reserved for status, so the
+accent presets avoid a green/red that could be mistaken for state.
 
 Every accent declares:
 

@@ -6,15 +6,15 @@
  * prompts, snapshots, or anything carrying a bearer token. Those requests are
  * left to the network untouched.
  */
-const VERSION = 'pandu-shell-v2';
+const VERSION = 'pandu-shell-v3';
 const SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/logo.svg',
   '/logo-small.svg',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {

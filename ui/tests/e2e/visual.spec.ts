@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { saveScreenshot } from './screenshots';
 
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase6');
 mkdirSync(SHOTS, { recursive: true });
@@ -117,7 +118,7 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 }
 
 async function screenshot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
+  await saveScreenshot(page, path.join(SHOTS, name));
 }
 
 async function expectNoDevelopmentCopy(page: Page): Promise<void> {
@@ -296,7 +297,7 @@ test.describe('desktop shell', () => {
     await expect(page.locator('.preview-note')).toContainText('demo mode');
     await expectNoDevelopmentCopy(page);
     await expectNoHorizontalOverflow(page);
-    await screenshot(page, 'desktop-home-dark-demo.png');
+    await screenshot(page, 'desktop-home-light-demo.png');
   });
 
   for (const theme of ['dark', 'light', 'frost'] as const) {

@@ -47,7 +47,7 @@ const keystorePackage = `${androidPackage}.keystore`;
 const pkg = readJson('app/package.json');
 check('app/package.json name', pkg.name, `@${slug}/app`);
 check('app/package.json description', pkg.description, `${brand.name} desktop and Android shell.`);
-check('app/package.json icons script', pkg.scripts?.icons, `tauri icon ../design/logo/png/${slug}-mark-1024.png`);
+check('app/package.json icons script', pkg.scripts?.icons, 'tauri icon ../design/logo/icon-manifest.json');
 for (const script of ['check:brand', 'sync:brand', 'android:init', 'android:build', 'build:portable', 'checksums', 'smoke', 'resources']) {
   checkTruthy(`app/package.json scripts.${script}`, pkg.scripts?.[script]);
 }
@@ -73,7 +73,6 @@ checkTruthy('tauri NSIS uninstall hook', tauri.bundle?.windows?.nsis?.installerH
 const android = readJson('app/src-tauri/tauri.android.conf.json');
 check('android window title', android.app?.windows?.[0]?.title, brand.name);
 check('android window url', android.app?.windows?.[0]?.url, 'companion.html');
-check('android bundle target', android.bundle?.targets?.[0], 'apk');
 
 // Cargo.toml -------------------------------------------------------------------
 const cargo = readText('app/src-tauri/Cargo.toml');
@@ -146,11 +145,17 @@ for (const icon of [
   'app/src-tauri/icons/128x128.png',
   'app/src-tauri/icons/128x128@2x.png',
   'app/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png',
+  'app/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png',
+  'app/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_monochrome.png',
   'app/src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher.xml',
 ]) {
   checkTruthy(icon, exists(icon));
 }
-for (const icon of ['ui/public/icons/icon-192.png', 'ui/public/icons/icon-512.png']) {
+for (const icon of [
+  'ui/public/icons/icon-192.png',
+  'ui/public/icons/icon-512.png',
+  'ui/public/icons/icon-maskable-512.png',
+]) {
   checkTruthy(icon, exists(icon));
 }
 

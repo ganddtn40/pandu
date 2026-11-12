@@ -13,19 +13,18 @@ describe('isTheme', () => {
 
 describe('resolveTheme', () => {
   it('prefers a forced URL theme', () => {
-    expect(resolveTheme('dark', true, 'light')).toBe('light');
-    expect(resolveTheme('light', false, 'dark')).toBe('dark');
+    expect(resolveTheme('dark', 'light')).toBe('light');
+    expect(resolveTheme('light', 'dark')).toBe('dark');
   });
 
   it('falls back to the saved theme', () => {
-    expect(resolveTheme('light', false, null)).toBe('light');
-    expect(resolveTheme('dark', true, null)).toBe('dark');
+    expect(resolveTheme('light', null)).toBe('light');
+    expect(resolveTheme('dark', null)).toBe('dark');
   });
 
-  it('uses the OS preference when nothing is saved', () => {
-    expect(resolveTheme(null, true, null)).toBe('light');
-    expect(resolveTheme(null, false, null)).toBe('dark');
-    expect(resolveTheme('sepia', false, null)).toBe('dark');
+  it('uses light when nothing is saved', () => {
+    expect(resolveTheme(null, null)).toBe('light');
+    expect(resolveTheme('sepia', null)).toBe('light');
   });
 });
 

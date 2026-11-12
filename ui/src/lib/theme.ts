@@ -4,15 +4,14 @@ export function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
 }
 
-/** Pick the theme from an explicit override, then storage, then the OS. */
-export function resolveTheme(
-  saved: string | null,
-  systemPrefersLight: boolean,
-  forced: string | null,
-): Theme {
+/**
+ * Pick the theme from an explicit override, then storage, then the product
+ * default. Light is the product default; the OS preference no longer decides.
+ */
+export function resolveTheme(saved: string | null, forced: string | null): Theme {
   if (isTheme(forced)) return forced;
   if (isTheme(saved)) return saved;
-  return systemPrefersLight ? 'light' : 'dark';
+  return 'light';
 }
 
 export function nextTheme(theme: Theme): Theme {

@@ -42,7 +42,7 @@ and MCP registry; adapter and theme discovery remain later work.
 
 ### Design v2
 
-- [x] Dark (default), Light, and Frost themes
+- [x] Light (default), Dark, and Frost themes
 - [x] Three surface styles: Bento Matte, Liquid Glass, Hybrid (default)
 - [x] Seven accent presets with a single accent per theme
 - [x] Corner radius: Sharp, Soft (default), Round

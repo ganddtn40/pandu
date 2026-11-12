@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { saveScreenshot } from './screenshots';
 
 const SHOTS = path.resolve(process.cwd(), '..', 'docs', 'screenshots', 'phase7');
 mkdirSync(SHOTS, { recursive: true });
@@ -22,12 +23,12 @@ async function openHostSettings(page: Page): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
+  await saveScreenshot(page, path.join(SHOTS, name));
 }
 
 async function shotOf(locator: Locator, name: string): Promise<void> {
   await locator.scrollIntoViewIfNeeded();
-  await locator.screenshot({ path: path.join(SHOTS, name), animations: 'disabled' });
+  await saveScreenshot(locator, path.join(SHOTS, name));
 }
 
 /** Host mutations need the loopback Origin, JSON, and the per-process token. */
@@ -97,7 +98,7 @@ test.describe('remote access', () => {
 
     const remoteContext = await browser.newContext({
       viewport: { width: 390, height: 844 },
-      colorScheme: 'dark',
+      colorScheme: 'light',
       reducedMotion: 'reduce',
       deviceScaleFactor: 2,
     });

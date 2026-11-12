@@ -238,7 +238,7 @@ describe('loadDesign and saveDesign', () => {
     expect(stored.wallpaperImage).toBeUndefined();
     expect(stored.wallpaper).toBe('image');
     expect(storage.getItem(WALLPAPER_STORAGE_KEY)).toBe(design.wallpaperImage);
-    expect(storage.getItem(LEGACY_THEME_KEY)).toBe('dark');
+    expect(storage.getItem(LEGACY_THEME_KEY)).toBe(DEFAULT_DESIGN.theme);
     expect(storage.getItem(LEGACY_PERFORMANCE_KEY)).toBe('1');
   });
 

@@ -5,15 +5,11 @@ import { storageKey } from './brand';
 const STORAGE_KEY = storageKey('theme');
 
 function currentTheme(): Theme {
-  if (typeof document === 'undefined') return 'dark';
+  if (typeof document === 'undefined') return 'light';
   const attr = document.documentElement.dataset.theme;
   if (attr === 'light' || attr === 'dark') return attr;
   const params = new URLSearchParams(window.location.search);
-  return resolveTheme(
-    localStorage.getItem(STORAGE_KEY),
-    window.matchMedia('(prefers-color-scheme: light)').matches,
-    params.get('theme'),
-  );
+  return resolveTheme(localStorage.getItem(STORAGE_KEY), params.get('theme'));
 }
 
 export const themeState = $state<{ value: Theme }>({ value: currentTheme() });

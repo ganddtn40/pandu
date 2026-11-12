@@ -61,8 +61,8 @@ export interface ThemeJson {
 }
 
 export const THEME_MODES: Array<{ id: ThemeMode; label: string; note: string }> = [
-  { id: 'dark', label: 'Dark', note: 'Graphite, the default' },
-  { id: 'light', label: 'Light', note: 'Warm paper and ink' },
+  { id: 'light', label: 'Light', note: 'Warm paper and ink, the default' },
+  { id: 'dark', label: 'Dark', note: 'Graphite and glass' },
   { id: 'frost', label: 'Frost', note: 'Cool, airy light' },
 ];
 
@@ -123,7 +123,7 @@ export const LANGUAGES: Array<{ id: LanguageId; label: string; note: string }> =
 
 export const THEME_IDS: ThemeMode[] = THEME_MODES.map((entry) => entry.id);
 export const SURFACE_IDS: SurfaceStyle[] = SURFACE_STYLES.map((entry) => entry.id);
-export const ACCENT_IDS: AccentId[] = ['orange', 'cream', 'blue', 'green', 'violet', 'silver', 'mono'];
+export const ACCENT_IDS: AccentId[] = ['blue', 'orange', 'cream', 'green', 'violet', 'silver', 'mono'];
 export const RADIUS_IDS: RadiusId[] = ['sharp', 'soft', 'round'];
 export const DENSITY_IDS: DensityId[] = ['compact', 'comfortable', 'spacious'];
 export const FONT_IDS: FontId[] = FONTS.map((entry) => entry.id);
@@ -174,9 +174,9 @@ export function clampNumber(value: unknown, min: number, max: number, fallback: 
 
 export const DEFAULT_DESIGN: DesignPreferences = {
   version: DESIGN_SCHEMA_VERSION,
-  theme: 'dark',
+  theme: 'light',
   surface: 'hybrid',
-  accent: 'orange',
+  accent: 'blue',
   radius: 'soft',
   density: 'comfortable',
   font: 'system',

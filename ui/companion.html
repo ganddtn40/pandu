@@ -1,9 +1,9 @@
 <!doctype html>
 <html
   lang="en"
-  data-theme="dark"
+  data-theme="light"
   data-surface="hybrid"
-  data-accent="orange"
+  data-accent="blue"
   data-radius="soft"
   data-density="comfortable"
   data-font="system"
@@ -17,16 +17,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#0b0d10" />
+    <meta name="theme-color" content="#f3f1ec" />
     <link rel="icon" href="/logo-small.svg" type="image/svg+xml" sizes="any" />
     <title>__BRAND_TITLE__</title>
     <script>
       // Apply the saved design before the first paint so there is no flash.
       (function () {
         var root = document.documentElement;
-        var themes = ['dark', 'light', 'frost'];
+        var themes = ['light', 'dark', 'frost'];
         var surfaces = ['matte', 'glass', 'hybrid'];
-        var accents = ['orange', 'cream', 'blue', 'green', 'violet', 'silver', 'mono'];
+        var accents = ['blue', 'orange', 'cream', 'green', 'violet', 'silver', 'mono'];
         var radii = ['sharp', 'soft', 'round'];
         var densities = ['compact', 'comfortable', 'spacious'];
         var fonts = ['system', 'inter', 'mono'];
@@ -43,9 +43,9 @@
             saved = null;
           }
           if (saved && typeof saved === 'object') {
-            root.dataset.theme = pick(saved.theme, themes, 'dark');
+            root.dataset.theme = pick(saved.theme, themes, 'light');
             root.dataset.surface = pick(saved.surface, surfaces, 'hybrid');
-            root.dataset.accent = pick(saved.accent, accents, 'orange');
+            root.dataset.accent = pick(saved.accent, accents, 'blue');
             root.dataset.radius = pick(saved.radius, radii, 'soft');
             root.dataset.density = pick(saved.density, densities, 'comfortable');
             root.dataset.font = pick(saved.font, fonts, 'system');
@@ -55,7 +55,7 @@
             root.dataset.performance = saved.performance === true ? 'on' : 'off';
           } else {
             var legacy = localStorage.getItem('__BRAND_STORAGE_PREFIX__theme');
-            root.dataset.theme = legacy === 'light' ? 'light' : 'dark';
+            root.dataset.theme = themes.indexOf(legacy) >= 0 ? legacy : 'light';
           }
           var forced = new URLSearchParams(location.search).get('theme');
           if (themes.indexOf(forced) >= 0) root.dataset.theme = forced;
@@ -66,7 +66,7 @@
           }
           root.dataset.glassPattern = pattern;
         } catch (error) {
-          root.dataset.theme = 'dark';
+          root.dataset.theme = 'light';
         }
       })();
     </script>

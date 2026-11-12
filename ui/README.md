@@ -9,16 +9,16 @@ renderer is custom WebGL2 code in `src/glass`.
 
 ## Design direction
 
-Design v2 is a graphite bento dashboard, not a pure-glass demo:
+Design v2 is a light paper bento dashboard, not a pure-glass demo:
 
-- Matte cards with 1 px hairlines, 20–28 px radii, large light numerals, thin
+- Matte cards with 1 px hairlines, 20–28 px radii, large ink numerals, thin
   charts, and one accent.
 - A left icon rail and a floating glass top bar on desktop; a floating glass tab
   pill and action button on phone.
 - Floating sheets, modals, toasts, and phone navigation are the only glass
   chrome. Working cards stay matte by default.
-- Themes: Dark (default), Light, Frost. Default accent: warm orange `#FF7A2F`.
-  Presets: Orange, Cream, Blue, Green, Violet, Silver, Mono.
+- Themes: Light (default), Dark, Frost. Default accent: blue `#2F7FE0`.
+  Presets: Blue, Orange, Cream, Green, Violet, Silver, Mono.
 - Surface styles: Bento Matte, Liquid Glass, Hybrid (default).
 - Five tabs: Home, Inbox, Flights, Market, Settings. A global quick prompt opens
   from `Ctrl/Cmd+K`.
