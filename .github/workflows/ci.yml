@@ -90,6 +90,9 @@ jobs:
       - name: Build the UI
         run: pnpm --dir ui build
 
+      - name: Check the per-chunk gzip budgets
+        run: pnpm --dir ui size
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
 
@@ -244,6 +247,10 @@ jobs:
 
   android:
     name: Android companion (unsigned)
+    # EXPERIMENTAL: the companion has not been verified on an emulator and a
+    # physical phone yet, so a broken Android build must not block the repo.
+    # Remove this once Phase 11b verification is recorded in docs/KNOWN-LIMITS.md.
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -337,6 +344,14 @@ jobs:
           test -s docs/install/android.md
           test -s docs/install/pwa.md
           test -s docs/install/troubleshooting.md
+
+      - name: Require the release and cleanup documents
+        run: |
+          test -s docs/BENCHMARKS.md
+          test -s docs/code-signing-policy.md
+          test -s docs/install/uninstall.md
+          node --check app/scripts/uninstall-check.mjs
+          node --check app/scripts/resources.mjs
 
       - name: Check the channel manifests match brand.json
         run: node packaging/channel-manifests.mjs --check
