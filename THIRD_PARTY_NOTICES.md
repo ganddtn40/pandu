@@ -5,7 +5,7 @@ third-party components distributed with the application. The full license
 text for each component is available from its source and in the lockfiles.
 
 - Rust crates: 378
-- JavaScript packages: 64
+- JavaScript packages: 62
 
 ## Rust crates
 
@@ -401,7 +401,6 @@ text for each component is available from its source and in the lockfiles.
 | `@jridgewell/trace-mapping` | 0.3.31 | MIT | https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping |
 | `@oxc-project/types` | 0.156.0 | MIT | https://oxc.rs |
 | `@playwright/test` | 1.65.0 | Apache-2.0 | https://playwright.dev |
-| `@rolldown/binding-win32-x64-msvc` | 1.2.16 | MIT | https://rolldown.rs/ |
 | `@rolldown/pluginutils` | 1.0.1 | MIT | https://github.com/rolldown/plugins/tree/main/packages/pluginutils#readme |
 | `@sveltejs/acorn-typescript` | 1.0.13 | MIT | https://github.com/sveltejs/acorn-typescript#readme |
 | `@sveltejs/load-config` | 0.2.3 | MIT | https://github.com/sveltejs/language-tools#readme |
@@ -430,7 +429,6 @@ text for each component is available from its source and in the lockfiles.
 | `fdir` | 6.5.0 | MIT | https://github.com/thecodrr/fdir#readme |
 | `is-reference` | 3.0.3 | MIT | https://github.com/Rich-Harris/is-reference#readme |
 | `lightningcss` | 1.33.0 | MPL-2.0 | https://github.com/parcel-bundler/lightningcss#readme |
-| `lightningcss-win32-x64-msvc` | 1.33.0 | MPL-2.0 | https://github.com/parcel-bundler/lightningcss#readme |
 | `locate-character` | 3.0.0 | MIT | https://gitlab.com/Rich-Harris/locate-character#README |
 | `magic-string` | 0.30.21, 1.4.5 | MIT | https://github.com/Rich-Harris/magic-string#readme |
 | `mri` | 1.2.0 | MIT | https://github.com/lukeed/mri#readme |

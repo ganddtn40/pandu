@@ -796,6 +796,7 @@ fn file_identity(metadata: &fs::Metadata) -> Result<String> {
 /// A file's identity must not change when an agent appends to its log, so a
 /// content hash is not suitable. Fall back to the creation time when the
 /// platform has no file id.
+#[cfg(not(unix))]
 fn created_identity(metadata: &fs::Metadata) -> Result<String> {
     let created = metadata
         .created()

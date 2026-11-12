@@ -50,6 +50,10 @@ try {
   );
   js = Object.values(licenses)
     .flat()
+    // Native bindings declare `os` or `cpu` and are only installed for the
+    // host platform. They are build tools, never bundled, and including them
+    // would make this file differ between Windows, macOS, and Linux CI.
+    .filter((pkg) => !(pkg.paths ?? []).some((path) => isPlatformSpecific(path)))
     .map((pkg) => ({
       name: pkg.name,
       version: (pkg.versions ?? []).join(', '),
@@ -59,6 +63,15 @@ try {
     .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 } catch (error) {
   console.warn(`pnpm licenses failed; JavaScript section will be empty: ${error.message}`);
+}
+
+function isPlatformSpecific(packagePath) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(packagePath, 'package.json'), 'utf8'));
+    return manifest.os !== undefined || manifest.cpu !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 const missing = [...rust, ...js].filter((pkg) => pkg.license === 'NO LICENSE DECLARED');

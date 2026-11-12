@@ -1344,6 +1344,7 @@ fn default_message(event_type: AgentEventType) -> &'static str {
     }
 }
 
+#[cfg(windows)]
 fn event_label(event_type: &str) -> &'static str {
     match event_type {
         "agent.started" => "started",

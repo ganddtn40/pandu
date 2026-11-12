@@ -190,22 +190,6 @@ jobs:
           workspaces: app/plugins/keystore
           key: keystore-plugin
 
-      - name: Check shell formatting
-        working-directory: app/src-tauri
-        run: cargo fmt --all -- --check
-
-      - name: Lint the shell
-        working-directory: app/src-tauri
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Check the Android plugin on the host target
-        working-directory: app/plugins/keystore
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Check the shell tests
-        working-directory: app/src-tauri
-        run: cargo test
-
       - name: Install pnpm
         uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
@@ -224,6 +208,27 @@ jobs:
         run: |
           pnpm --dir ui install --frozen-lockfile
           pnpm --dir app install --frozen-lockfile
+
+      # Tauri's build script validates frontendDist, so the UI bundle has to
+      # exist before the shell is linted or tested.
+      - name: Build the UI bundle
+        run: pnpm --dir ui build
+
+      - name: Check shell formatting
+        working-directory: app/src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Lint the shell
+        working-directory: app/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check the Android plugin on the host target
+        working-directory: app/plugins/keystore
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check the shell tests
+        working-directory: app/src-tauri
+        run: cargo test
 
       - name: Check brand drift
         run: node app/scripts/check-brand.mjs
