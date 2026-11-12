@@ -147,9 +147,9 @@ The companion is a small, scoped dashboard for your phone. It can watch flights
 and answer approval requests, but it cannot start agents or change settings.
 It is optional.
 
-**Experimental:** the Android companion has not yet been verified on an emulator
-and a physical phone. The APK is not attached to releases until it is; build it
-from source if you want to test it.
+**Experimental:** the Android companion has been verified on an emulator, but
+not yet on a physical phone. The APK is not attached to releases until phone
+verification is recorded; build it from source if you want to test it.
 
 The short version:
 

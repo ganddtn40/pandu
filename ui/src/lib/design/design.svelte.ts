@@ -5,6 +5,7 @@ import { DESIGN_STORAGE_KEY, loadDesign, saveDesign } from './theme-json';
 import {
   DEFAULT_DESIGN,
   DESIGN_SCHEMA_VERSION,
+  isRtlLanguage,
   type DesignPreferences,
   type ThemeMode,
 } from './types';
@@ -44,6 +45,8 @@ export function applyDesign(design: DesignPreferences): void {
   html.dataset.wallpaper = design.wallpaper;
   html.dataset.performance = design.performance ? 'on' : 'off';
   html.dataset.designReady = 'true';
+  html.lang = design.language;
+  html.dir = isRtlLanguage(design.language) ? 'rtl' : 'ltr';
   html.style.colorScheme = design.theme === 'dark' ? 'dark' : 'light';
   html.style.setProperty('--font-scale', String(design.fontScale));
   html.style.setProperty('--glass-blur-px', `${Math.round(4 + design.glassBlur * 0.32)}px`);

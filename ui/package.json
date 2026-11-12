@@ -9,6 +9,7 @@
     "size": "node scripts/check-size.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",

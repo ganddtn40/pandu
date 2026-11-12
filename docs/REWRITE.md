@@ -597,10 +597,13 @@ never exported. The full token and component contract is in
 - Inbox approves or denies through
   `/api/guards/events/{id}/decision` and moves the event to the resolved list.
   The demo seed includes one pending approval so the flow is testable offline.
-- i18n lives in `ui/src/lib/i18n/catalog.ts`: English is complete, draft
-  catalogs fall back per key, and `{name}` placeholders interpolate only when
-  the variable exists. The reactive `t()` reads the language from the design
-  store.
+- i18n lives in `ui/src/lib/i18n/catalog.ts` and
+  `ui/src/lib/i18n/catalogs/*.ts`: English is complete, the 13 draft catalogs
+  load as lazy chunks and fall back per key, and `{name}` placeholders
+  interpolate only when the variable exists. The reactive `t()` reads the
+  language from the design store and re-renders when a catalog chunk arrives.
+  `html.lang` and `html.dir` are set before first paint, Arabic is RTL, and
+  `pnpm --dir ui check:i18n` enforces core keys, placeholders, and coverage.
 - Production builds hide `/glass-preview`; development keeps it as the
   rendering lab. Diagnostics stay out of user-facing screens.
 - Playwright starts disposable daemons itself: demo on port 4321 and live on

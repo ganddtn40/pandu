@@ -99,8 +99,10 @@ The full token, surface, theme, and accessibility contract is in
 - [x] Playwright gates for the shell and design system
 - [x] Playwright e2e for the five tabs against disposable demo and live daemons
 - [x] i18n scaffolding: English complete, drafts fall back per key
-- [ ] 14 complete language catalogs, RTL, missing-key CI gate (7 shipped:
-      `en`, `id`, `es`, `fr`, `de`, `ja`, `zh`)
+- [x] 14 language catalogs with lazy loading, RTL layout, and a missing-key CI
+      gate (`en` plus 13 draft catalogs; `pnpm --dir ui check:i18n`)
+- [ ] Native review and completion of the 13 draft catalogs (`id` at 35.6%,
+      the other drafts at 10.3%; English is 1,081 keys)
 
 ### Install and release
 
@@ -115,13 +117,15 @@ The full token, surface, theme, and accessibility contract is in
 - [ ] macOS, iOS, and Linux bundles (planned after v0.2.0)
 - [x] Signed update checks every 24 hours (can be disabled), no auto-install,
   `pandu update` / `pandu rollback`, and a signed release manifest
-- [ ] README and beginner docs in all 14 languages (7 shipped)
+- [x] Beginner install guide in all 14 interface languages (English is the full
+      reference; the others are compact translations)
+- [ ] README translated into all 14 languages
 
 CLI release artifacts are produced by the tag workflow, not by a local
 `cargo build`. The Android SDK/NDK are available to CI, but no production
 Android keystore is provisioned yet. The Android job is experimental and
-non-blocking: its APK is not attached to a release until emulator and phone
-verification are recorded. The first tagged run is still required to prove the
+non-blocking: its APK is not attached to a release until physical-phone
+verification is recorded. The first tagged run is still required to prove the
 cargo-dist path end to end.
 
 ### Platform support
@@ -136,8 +140,8 @@ cargo-dist path end to end.
 | Linux | Planned |
 
 Android is a companion viewer/approver, not a recorder. It stays experimental
-until emulator and phone verification are recorded, and it cannot block a
-release. Nothing outside the supported rows is advertised as working.
+until physical-phone verification is recorded, and it cannot block a release.
+Nothing outside the supported rows is advertised as working.
 
 ### Quality gates
 
@@ -145,14 +149,14 @@ release. Nothing outside the supported rows is advertised as working.
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo test --workspace`
 - [x] `pnpm check`
-- [x] `pnpm test` (20 files / 143 tests)
-- [x] Playwright design, visual, and daemon e2e suite (59 tests)
+- [x] `pnpm test` (20 files / 145 tests)
+- [x] Playwright design, visual, and daemon e2e suite (61 tests)
 - [x] Text contrast ≥ 4.5:1 across every theme, surface, and accent pair
 - [x] 44 px minimum touch targets on phone
 - [x] Zero idle canvas redraws and visible focus rings
-- [x] Initial host JavaScript < 90 KB gzip (currently 78.98 KB), lazy route
-      chunks < 25 KB each, total JS < 200 KB (163.34 KB); enforced by
-      `pnpm --dir ui size` in CI
+- [x] Initial host JavaScript < 90 KB gzip (currently 63.48 KB), lazy route
+      chunks < 25 KB each (largest 18.56 KB), total JS < 200 KB (186.28 KB);
+      enforced by `pnpm --dir ui size` in CI
 - [x] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
 - [ ] Property/fuzz tests for the SSE parser and redaction

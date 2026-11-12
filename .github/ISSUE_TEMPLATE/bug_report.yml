@@ -1,0 +1,85 @@
+name: Bug report
+description: Report a reproducible problem with Pandu.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        **Do not report security vulnerabilities here.** Follow [SECURITY.md](https://github.com/ganddtn40/pandu/blob/rewrite/SECURITY.md) and use GitHub's private vulnerability reporting.
+
+        Remove secrets, API keys, prompts, source code, and personal paths from logs and screenshots before posting.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear description of the problem and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the problem.
+      placeholder: |
+        1. Start Pandu with ...
+        2. Open ...
+        3. Click ...
+        4. See ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where does it happen?
+      options:
+        - Windows desktop app
+        - Web app / PWA
+        - Android companion (experimental)
+        - CLI or daemon
+        - Proxy or capture
+        - Market or registry
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Pandu version or commit
+      description: The version shown in Settings, or the commit you built.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and browser
+      description: For example Windows 11 24H2, Chrome 140, or Android 15.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste only the lines that show the failure. Redact secrets and private data.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed secrets, tokens, prompts, source code, and personal paths from this report.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true

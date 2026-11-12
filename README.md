@@ -20,17 +20,29 @@ Pandu is not an AI agent; it guides, records and protects the agents you already
 ## Install
 
 The beginner guides cover the Windows desktop app, the Android companion, and
-the installable web app, in seven languages:
+the installable web app, in all 14 interface languages:
 
 | Language | Guide |
 | --- | --- |
-| English | [docs/install/en.md](docs/install/en.md) |
+| English (reference) | [docs/install/en.md](docs/install/en.md) |
 | Bahasa Indonesia | [docs/install/id.md](docs/install/id.md) |
 | Español | [docs/install/es.md](docs/install/es.md) |
 | Français | [docs/install/fr.md](docs/install/fr.md) |
 | Deutsch | [docs/install/de.md](docs/install/de.md) |
 | 日本語 | [docs/install/ja.md](docs/install/ja.md) |
 | 中文 | [docs/install/zh.md](docs/install/zh.md) |
+| العربية | [docs/install/ar.md](docs/install/ar.md) |
+| हिन्दी | [docs/install/hi.md](docs/install/hi.md) |
+| 한국어 | [docs/install/ko.md](docs/install/ko.md) |
+| Português (Brasil) | [docs/install/pt.md](docs/install/pt.md) |
+| Русский | [docs/install/ru.md](docs/install/ru.md) |
+| Türkçe | [docs/install/tr.md](docs/install/tr.md) |
+| Tiếng Việt | [docs/install/vi.md](docs/install/vi.md) |
+
+The English guide is the full reference. The other interface catalogs are
+drafts that fall back to English per key; the install guides are compact
+translations of the same steps. [`docs/TRANSLATING.md`](docs/TRANSLATING.md)
+explains the catalog layout and coverage.
 
 Platform-specific details: [Android](docs/install/android.md),
 [PWA](docs/install/pwa.md), [uninstall and cleanup](docs/install/uninstall.md),
@@ -63,10 +75,11 @@ and [troubleshooting](docs/install/troubleshooting.md).
 | iOS | Planned |
 | Linux | Planned |
 
-Android is a companion viewer/approver, not a recorder. It stays experimental
-until it has been verified on an emulator and a physical phone; the Android CI
-job is allowed to fail and Android is not part of a release until then. Nothing
-outside the supported rows is advertised as working.
+Android is a companion viewer/approver, not a recorder. It has been verified
+on an emulator but not yet on a physical phone, so it stays experimental; the
+Android CI job is allowed to fail and Android is not part of a release until
+phone verification is recorded. Nothing outside the supported rows is
+advertised as working.
 
 ## Design and appearance
 

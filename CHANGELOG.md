@@ -25,9 +25,17 @@ All notable changes to this project are documented here. The format follows
   `registry/index.json` and `registry/revoked.json` keep their frozen
   pre-rename key id and signatures because the offline production key was not
   available during the rename.
+- Light is the default theme, with the blue P mark as the app icon on Windows,
+  Android, iOS, the PWA, and the favicon. Dark and Frost remain available.
 
 ### Added
 
+- Fourteen interface languages: English plus thirteen draft catalogs with lazy
+  chunk loading, per-key English fallback, Arabic right-to-left layout, and the
+  `pnpm --dir ui check:i18n` gate.
+- Beginner install guides in all fourteen interface languages, plus
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, GitHub issue and pull request
+  templates, and `docs/TRANSLATING.md`.
 - A repository-wide name guard that fails the test suite if the pre-rename name
   appears outside the migration, the frozen production trust root, the
   changelog, and the frozen `legacy/` tree.

@@ -34,6 +34,11 @@
         var fonts = ['system', 'inter', 'mono'];
         var motions = ['full', 'reduced', 'off'];
         var wallpapers = ['procedural', 'image', 'none'];
+        var languages = [
+          'en', 'id', 'es', 'fr', 'de', 'ja', 'zh',
+          'ar', 'hi', 'ko', 'pt', 'ru', 'tr', 'vi'
+        ];
+        var rtlLanguages = ['ar'];
         function pick(value, allowed, fallback) {
           return allowed.indexOf(value) >= 0 ? value : fallback;
         }
@@ -61,6 +66,12 @@
           }
           var forced = new URLSearchParams(location.search).get('theme');
           if (themes.indexOf(forced) >= 0) root.dataset.theme = forced;
+          var savedLanguage =
+            saved && typeof saved === 'object' ? pick(saved.language, languages, 'en') : 'en';
+          var forcedLanguage = new URLSearchParams(location.search).get('lang');
+          if (languages.indexOf(forcedLanguage) >= 0) savedLanguage = forcedLanguage;
+          root.lang = savedLanguage;
+          root.dir = rtlLanguages.indexOf(savedLanguage) >= 0 ? 'rtl' : 'ltr';
           root.style.colorScheme = root.dataset.theme === 'dark' ? 'dark' : 'light';
           var pattern = new URLSearchParams(location.search).get('pattern');
           if (pattern !== 'checker' && pattern !== 'smoky') {

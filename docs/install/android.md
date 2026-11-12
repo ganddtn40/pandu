@@ -20,7 +20,7 @@ the Play Store. Follow it in order.
 
 - [What you need](#what-you-need)
 - [Turn on remote access on the computer](#turn-on-remote-access-on-the-computer)
-- [Download and verify the APK](#download-and-verify-the-apk)
+- [Build and verify the APK](#build-and-verify-the-apk)
 - [Allow installs from your browser or file manager](#allow-installs-from-your-browser-or-file-manager)
 - [Install the APK](#install-the-apk)
 - [Pair the phone](#pair-the-phone)

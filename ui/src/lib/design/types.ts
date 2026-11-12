@@ -17,7 +17,21 @@ export type DensityId = 'compact' | 'comfortable' | 'spacious';
 export type FontId = 'system' | 'inter' | 'mono';
 export type MotionId = 'full' | 'reduced' | 'off';
 export type WallpaperId = 'procedural' | 'image' | 'none';
-export type LanguageId = 'en' | 'id' | 'es' | 'fr' | 'de' | 'ja' | 'zh';
+export type LanguageId =
+  | 'en'
+  | 'id'
+  | 'es'
+  | 'fr'
+  | 'de'
+  | 'ja'
+  | 'zh'
+  | 'ar'
+  | 'hi'
+  | 'ko'
+  | 'pt'
+  | 'ru'
+  | 'tr'
+  | 'vi';
 
 export interface DesignPreferences {
   version: number;
@@ -119,7 +133,21 @@ export const LANGUAGES: Array<{ id: LanguageId; label: string; note: string }> =
   { id: 'de', label: 'Deutsch', note: 'Draft, needs review' },
   { id: 'ja', label: '日本語', note: 'Draft, needs review' },
   { id: 'zh', label: '简体中文', note: 'Draft, needs review' },
+  { id: 'ar', label: 'العربية', note: 'Draft, needs review · RTL' },
+  { id: 'hi', label: 'हिन्दी', note: 'Draft, needs review' },
+  { id: 'ko', label: '한국어', note: 'Draft, needs review' },
+  { id: 'pt', label: 'Português (Brasil)', note: 'Draft, needs review' },
+  { id: 'ru', label: 'Русский', note: 'Draft, needs review' },
+  { id: 'tr', label: 'Türkçe', note: 'Draft, needs review' },
+  { id: 'vi', label: 'Tiếng Việt', note: 'Draft, needs review' },
 ];
+
+/** Languages written right to left. The shell mirrors layout and text. */
+export const RTL_LANGUAGES: ReadonlySet<LanguageId> = new Set<LanguageId>(['ar']);
+
+export function isRtlLanguage(value: LanguageId): boolean {
+  return RTL_LANGUAGES.has(value);
+}
 
 export const THEME_IDS: ThemeMode[] = THEME_MODES.map((entry) => entry.id);
 export const SURFACE_IDS: SurfaceStyle[] = SURFACE_STYLES.map((entry) => entry.id);

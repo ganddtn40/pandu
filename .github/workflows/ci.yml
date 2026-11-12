@@ -84,6 +84,9 @@ jobs:
       - name: Type-check
         run: pnpm --dir ui check
 
+      - name: Check the language catalogs
+        run: pnpm --dir ui check:i18n
+
       - name: Unit tests
         run: pnpm --dir ui test
 
@@ -331,7 +334,7 @@ jobs:
 
       - name: Require a beginner install guide in every supported language
         run: |
-          for lang in en id es fr de ja zh; do
+          for lang in en id es fr de ja zh ar hi ko pt ru tr vi; do
             test -s "docs/install/${lang}.md" || {
               echo "Missing docs/install/${lang}.md"
               exit 1
