@@ -97,6 +97,7 @@ harness runs `target/debug/pandu.exe`.
 | Agent definitions | `adapters` | TOML only. Add or update a fixture in the adapter tests. |
 | Market entries | `registry` | Security-sensitive. Follow [`docs/registry/CONTRIBUTING.md`](docs/registry/CONTRIBUTING.md). |
 | Documentation | `docs` | Keep platform and translation claims honest. |
+| CI, release automation, review routing | `.github` | See [`.github/CONFIGURATION.md`](.github/CONFIGURATION.md). |
 
 Do not rename or edit files under `legacy/`. It is the frozen 0.1.0 behavior
 spec.
