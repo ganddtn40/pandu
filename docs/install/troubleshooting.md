@@ -9,6 +9,7 @@ It contains local paths and counts, never prompt text or API keys. See
 
 **Contents**
 
+- [Double-clicking the setup does nothing](#double-clicking-the-setup-does-nothing)
 - [Windows says “Windows protected your PC”](#windows-says-windows-protected-your-pc)
 - [The app does not start, or shows a blank window](#the-app-does-not-start-or-shows-a-blank-window)
 - [WebView2 is missing](#webview2-is-missing)
@@ -24,6 +25,40 @@ It contains local paths and counts, never prompt text or API keys. See
 - [Reset Pandu without losing your data](#reset-pandu-without-losing-your-data)
 - [Find the data directory](#find-the-data-directory)
 - [Collect a diagnostic report](#collect-a-diagnostic-report)
+
+## Double-clicking the setup does nothing
+
+The Windows installer is not code-signed, and Windows tags files downloaded from
+a browser. SmartScreen can hold the launch before the wizard draws its window,
+so a double-click can end with no window, no tray icon, and no error.
+
+1. Open **Downloads**, right-click `Pandu_<version>_x64-setup.exe`, and choose
+   **Properties**. If a **Security** line says the file came from another
+   computer, tick **Unblock**, then **Apply**.
+2. Start the installer from PowerShell and watch for the wizard:
+
+   ```powershell
+   Start-Process "$env:USERPROFILE\Downloads\Pandu_0.2.0_x64-setup.exe" -Wait
+   ```
+
+   A normal window appears. If you see nothing, check the taskbar before
+   assuming the launch failed.
+3. Install silently and check the result:
+
+   ```powershell
+   Start-Process "$env:USERPROFILE\Downloads\Pandu_0.2.0_x64-setup.exe" -ArgumentList /S -Wait
+   Test-Path "$env:LOCALAPPDATA\Pandu\Pandu.exe"
+   ```
+
+   `True` means the files are on disk even though no window appeared. `False`
+   means the installer never ran; go back to step 2 and read the message it
+   shows.
+4. If the NSIS installer still refuses to run, use the MSI from the same
+   release. It installs for all users, so Windows shows a UAC prompt and the
+   account needs administrator rights.
+
+The installer is 64-bit and needs Windows 10 or newer with the WebView2
+Runtime, which the installer fetches when it is missing.
 
 ## Windows says “Windows protected your PC”
 
@@ -51,11 +86,12 @@ the prompt, and it will never ask you to disable SmartScreen.
 5. Launch Pandu from PowerShell to see the log on stderr:
 
    ```powershell
-   & "$env:LOCALAPPDATA\Programs\Pandu\Pandu.exe"
+   & "$env:LOCALAPPDATA\Pandu\Pandu.exe"
    ```
 
-   The exact path depends on where you installed it. If the app is in the
-   Start menu, right-click the shortcut and open its file location.
+   That is the default location for the NSIS installer. If you used the MSI or
+   moved the app, right-click the Start menu shortcut and open its file
+   location.
 6. Set `PANDU_LOG=debug` before launching to get more detail:
 
    ```powershell
