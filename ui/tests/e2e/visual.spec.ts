@@ -58,7 +58,7 @@ async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> 
   }
 
   await page.addInitScript(
-    ({ daemonUrl, isOnboarded, webgl, constrained }) => {
+    ({ daemonUrl, isOnboarded, webgl, constrained, designKey }) => {
       window.__panduDaemonUrl = daemonUrl;
       try {
         // Seed first-run state once per context. Re-running this on every
@@ -67,6 +67,13 @@ async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> 
           sessionStorage.setItem('pandu.e2ePrepared', '1');
           if (isOnboarded) localStorage.setItem('pandu.onboarded', '1');
           else localStorage.removeItem('pandu.onboarded');
+          // CI runners report few cores, which would otherwise trip the
+          // first-run low-end heuristic and hide the WebGL path. A stored
+          // design pins the test to the full renderer unless the test asks
+          // for the constrained profile.
+          if (!constrained) {
+            localStorage.setItem(designKey, JSON.stringify({ performance: false }));
+          }
         }
       } catch {
         // Storage is optional.
@@ -94,7 +101,7 @@ async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> 
         });
       }
     },
-    { daemonUrl: daemon, isOnboarded: onboarded, webgl: forceGlass, constrained: lowEnd },
+    { daemonUrl: daemon, isOnboarded: onboarded, webgl: forceGlass, constrained: lowEnd, designKey: DESIGN_KEY },
   );
 }
 

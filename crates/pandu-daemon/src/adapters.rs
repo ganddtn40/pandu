@@ -263,9 +263,9 @@ pub fn expand_path(input: &str) -> Result<PathBuf, String> {
         text.replace_range(start..=end, &value);
     }
 
-    if text.contains('~') {
+    if text.starts_with('~') {
         return Err(format!(
-            "path \"{input}\" uses ~ somewhere other than the start"
+            "path \"{input}\" uses an unsupported home directory form"
         ));
     }
 
@@ -431,8 +431,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_tilde_in_the_middle() {
-        let error = expand_path("/tmp/~/logs").unwrap_err();
-        assert!(error.contains("somewhere other than the start"));
+    fn allows_a_tilde_in_the_middle() {
+        // Windows 8.3 short paths (C:\Users\RUNNER~1\...) are legitimate and
+        // must not be mistaken for an unsupported home-directory form.
+        assert_eq!(
+            expand_path("/tmp/~/logs").unwrap(),
+            PathBuf::from("/tmp/~/logs")
+        );
+    }
+
+    #[test]
+    fn rejects_a_leading_tilde_that_is_not_a_home_directory() {
+        let error = expand_path("~someone/logs").unwrap_err();
+        assert!(error.contains("unsupported home directory form"));
     }
 }
