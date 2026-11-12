@@ -6,21 +6,25 @@ Pandu records what your agents do, shows it live, lets you replay every step,
 and asks permission before risky actions. Everything stays on your machine. No
 account, no cloud, no telemetry.
 
-Pandu is not an AI agent; it guides, records and protects the agents you already use.
+Pandu is not an AI agent; it guides, records and protects the agents you already
+use.
 
-> **Status:** the 0.2.0 rewrite is in progress on `main`. Phases
-> 0–11 are complete: the Rust core, proxy, adapters, guards, snapshots, the
-> design v2 UI, the five tabs wired to real daemon data, host-confirmed remote
-> access, the signed skill/MCP market, model controls, updates and backups, and
-> the Windows desktop app, Android companion, and PWA packages. Phase 12 — the
-> remaining documentation, benchmarks, and language catalogs — is tracked in the
+> **Status:** the 0.2.0 rewrite is the active line on `main`. Phases 0–11 are
+> complete: the Rust core, proxy, adapters, guards, snapshots, the design v2 UI,
+> the five tabs wired to real daemon data, host-confirmed remote access, the
+> signed skill/MCP market, model controls, updates and backups, and the Windows
+> desktop app, Android companion, and PWA packages. Phase 12 is in progress: the
+> fourteen-language interface with RTL, beginner install guides, community docs,
+> and the benchmark report have shipped; native review of the 13 draft catalogs,
+> README translations, the npm wrapper, macOS/iOS/Linux bundles, and the
+> remaining fuzz and crash-safety tests are open in the
 > [roadmap](docs/ROADMAP.md). The shipped 0.1.0 TypeScript/Node implementation is
 > preserved under `legacy/` as the behavior spec.
 
 ## Install
 
-The beginner guides cover the Windows desktop app, the Android companion, and
-the installable web app, in all 14 interface languages:
+The beginner guides cover the command-line tool, the Windows desktop app, the
+Android companion, and the installable web app, in all 14 interface languages:
 
 | Language | Guide |
 | --- | --- |
@@ -30,7 +34,7 @@ the installable web app, in all 14 interface languages:
 | Français | [docs/install/fr.md](docs/install/fr.md) |
 | Deutsch | [docs/install/de.md](docs/install/de.md) |
 | 日本語 | [docs/install/ja.md](docs/install/ja.md) |
-| 中文 | [docs/install/zh.md](docs/install/zh.md) |
+| 简体中文 | [docs/install/zh.md](docs/install/zh.md) |
 | العربية | [docs/install/ar.md](docs/install/ar.md) |
 | हिन्दी | [docs/install/hi.md](docs/install/hi.md) |
 | 한국어 | [docs/install/ko.md](docs/install/ko.md) |
@@ -58,6 +62,9 @@ and [troubleshooting](docs/install/troubleshooting.md).
   borders, one accent, and floating glass chrome. Three themes (Light, Dark,
   Frost), three surface styles (Bento Matte, Liquid Glass, Hybrid), and full
   appearance customization in Settings.
+- **Fourteen interface languages.** English plus thirteen draft catalogs,
+  lazy-loaded with per-key English fallback and a right-to-left layout for
+  Arabic.
 - **Two capture modes today.** Proxy and log-watch are implemented; hook/OTel is
   deferred, and a single trust badge per flight is still on the roadmap.
 - **Local by default.** SQLite on disk, no telemetry, no TLS interception, no
@@ -117,6 +124,7 @@ The full contract is in [`docs/DESIGN.md`](docs/DESIGN.md).
 | `ui` | Svelte 5 + TypeScript + Vite UI and WebGL2 glass |
 | `design` | Logo sources and export scripts |
 | `adapters` | Data-driven TOML agent definitions |
+| `registry` | Signed market entries, schema, fixtures, and signing tools |
 | `docs` | Rewrite record, roadmap, design system, beginner docs, issue drafts |
 | `packaging` | cargo-dist, winget/scoop drafts, release manifest, notices |
 | `legacy` | 0.1.0 TypeScript/Node behavior spec |
@@ -125,8 +133,8 @@ The full contract is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 Requirements:
 
-- Rust stable 1.89+ (`rust-toolchain.toml` installs components via rustup)
-- Node.js 22+ and pnpm 10+
+- Rust 1.89+ (stable; `rust-toolchain.toml` pins the channel and components)
+- Node.js 24 and pnpm 12.9.1 (the versions CI uses)
 - Git (optional; snapshots degrade gracefully without it)
 - Windows desktop builds: the Tauri 2 prerequisites and WebView2 (the installer
   downloads the bootstrapper when it is missing)
@@ -139,7 +147,7 @@ Rust gates:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo build --release -p pandu-cli
+cargo check --release -p pandu-daemon
 ```
 
 UI gates:
@@ -148,10 +156,15 @@ UI gates:
 cd ui
 pnpm install
 pnpm check
+pnpm check:i18n
 pnpm test
 pnpm build
 pnpm exec playwright test
 ```
+
+`pnpm build` also enforces the JavaScript budgets with `pnpm size`. Playwright
+runs `target/debug/pandu.exe`, so build the CLI first with
+`cargo build -p pandu-cli`.
 
 The UI preview is available at `http://127.0.0.1:5174` with `pnpm dev`, or
 `http://127.0.0.1:4174` with `pnpm preview` after a build. Start the daemon with
@@ -177,16 +190,25 @@ your local database.
   migrations, and uninstalls
 - [Market and registry](docs/market.md) — trust tiers, signed registry, install
   previews, offline behavior, and the contributor rules
+- [Translating](docs/TRANSLATING.md) — catalog layout, coverage, drafts, and RTL
 - [Rewrite decision record](docs/REWRITE.md) — what is kept, cut, and changed
 - [Roadmap](docs/ROADMAP.md) — v0.2.0 scope, phases, and deferred features
 - [Issue drafts](docs/issues/) — ready-to-paste `help wanted` work
 - [Adapter format](adapters/README.md) — how to add an agent
 - [UI notes](ui/README.md) — glass engine, budgets, and commands
-- [Benchmarks](docs/BENCHMARKS.md) — measured artifact sizes, whole-app idle RAM/CPU, TTI, and uninstall hygiene
-- [Releasing](docs/RELEASING.md) — gates, dry run, package-name checks, and registry signing
-- [Code signing policy](docs/code-signing-policy.md) — what is signed, what is not, and how to verify
-- [Uninstall and cleanup](docs/install/uninstall.md) — data retention and the leftover check
+- [Benchmarks](docs/BENCHMARKS.md) — measured artifact sizes, whole-app idle
+  RAM/CPU, TTI, and uninstall hygiene
+- [Releasing](docs/RELEASING.md) — gates, dry run, package-name checks, and
+  registry signing
+- [Code signing policy](docs/code-signing-policy.md) — what is signed, what is
+  not, and how to verify
+- [Uninstall and cleanup](docs/install/uninstall.md) — data retention and the
+  leftover check
 - [Install for agents](INSTALL-FOR-AGENTS.md) — copy-paste setup for an AI agent
+- [Contributing](CONTRIBUTING.md) — setup, gates, and where each change belongs
+- [Security policy](SECURITY.md) — supported versions and private vulnerability
+  reporting
+- [Code of conduct](CODE_OF_CONDUCT.md) — participation rules
 
 ## License
 
