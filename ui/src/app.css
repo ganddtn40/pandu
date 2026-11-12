@@ -6778,6 +6778,63 @@ html[data-glass-reason='reduced-transparency'] .panel {
 
 /* Paired device dashboard ------------------------------------------------ */
 
+/*
+ * The barcode plugin draws the camera preview behind the webview. While the
+ * scanner is open the page must be transparent; everything except the scanner
+ * overlay is hidden so the preview is visible.
+ */
+html.remote-scanning,
+html.remote-scanning body {
+  background: transparent !important;
+}
+
+html.remote-scanning #app > *:not(.remote-scan) {
+  visibility: hidden;
+}
+
+.remote-scan {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(28px, env(safe-area-inset-top)) 22px max(34px, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+.remote-scan__hint {
+  max-width: 320px;
+  margin: 0;
+  padding: 11px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(10, 12, 15, 0.76);
+  color: #f6f2ea;
+  font-size: max(var(--text-min), calc(13px * var(--font-scale)));
+  line-height: 1.45;
+  text-align: center;
+  backdrop-filter: blur(14px);
+}
+
+.remote-scan__frame {
+  width: min(64vw, 280px);
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 22px;
+  box-shadow:
+    0 0 0 100vmax rgba(4, 6, 9, 0.32),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.22);
+}
+
+.remote-scan__cancel {
+  pointer-events: auto;
+  background: rgba(10, 12, 15, 0.78);
+  color: #f6f2ea;
+  backdrop-filter: blur(14px);
+}
+
 .remote-app {
   position: relative;
   z-index: 1;
@@ -6798,6 +6855,11 @@ html[data-glass-reason='reduced-transparency'] .panel {
   justify-content: center;
   gap: 18px;
   max-width: 560px;
+  /* The dashboard header already clears the status bar. The gate screens have
+     no header, so they need the inset themselves or the clock overlaps the
+     brand mark. */
+  padding-top: calc(18px + env(safe-area-inset-top));
+  padding-bottom: calc(40px + env(safe-area-inset-bottom));
 }
 
 .remote-app--center {
@@ -6806,6 +6868,8 @@ html[data-glass-reason='reduced-transparency'] .panel {
   gap: 14px;
   color: var(--text-soft);
   text-align: center;
+  padding-top: calc(18px + env(safe-area-inset-top));
+  padding-bottom: calc(40px + env(safe-area-inset-bottom));
 }
 
 .remote-app__brand {

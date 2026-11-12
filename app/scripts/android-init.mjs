@@ -7,7 +7,7 @@
  * again after `tauri android init --force` to restore the patches.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { appDir, appPath, readBrand } from './lib/brand.mjs';
 
@@ -111,6 +111,17 @@ function patchManifest(text) {
 }
 
 patchFile(manifestPath, patchManifest);
+
+// Tauri writes the legacy launcher PNGs but does not copy the adaptive icon
+// definition from `icons/android` into the generated project. Without the
+// `mipmap-anydpi-v26` XML Android falls back to the bitmap icon and never
+// applies the themed mask.
+const androidIcons = appPath('src-tauri/icons/android');
+const resDir = join(genDir, 'app/src/main/res');
+if (existsSync(androidIcons)) {
+  cpSync(androidIcons, resDir, { recursive: true });
+  console.log(`copied adaptive icons from ${androidIcons}`);
+}
 
 // Tauri's generated Gradle project signs release builds with the debug key.
 // That would make the APK installable but unshippable: every CI machine would

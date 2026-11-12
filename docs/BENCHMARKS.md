@@ -30,10 +30,15 @@ with each other, not with a different laptop.
 | `Pandu_0.2.0_x64-setup.exe` (NSIS) | 5.10 MB |
 | `Pandu_0.2.0_x64_en-US.msi` | 6.93 MB |
 | `pandu-0.2.0-x86_64-pc-windows-msvc-portable.zip` | 6.19 MB |
-| Android APK | not built yet; Phase 11b is pending |
+| `pandu-0.2.0-android-arm64-release-signed.apk` (test key) | 9.21 MB |
+| `pandu-0.2.0-android-universal-release-signed.apk` (test key) | 25.68 MB |
 
-The CLI budget is 12 MB. The APK budget is 15 MB and remains unmeasured until
-the Android build is verified.
+The CLI budget is 12 MB. The APK budget is 15 MB for the per-device download.
+The arm64-only release APK is 9.21 MB. The universal APK carries all four ABIs
+(`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`) and is 25.68 MB; it is not the
+size a phone downloads. Both were signed with a throwaway test key and verified
+with `apksigner`. The debug APK is 702.34 MB because it is unstripped and
+contains all four ABIs; it is not a distributable artifact.
 
 ## Web UI payload
 
@@ -43,12 +48,12 @@ separately so a lazy route cannot hide behind the initial budget.
 
 | Check | Budget | Actual | Result |
 | --- | --- | --- | --- |
-| Initial host JS | 90 KB | 78.98 KB | pass |
-| Initial companion JS | 80 KB | 70.88 KB | pass |
+| Initial host JS | 90 KB | 79.02 KB | pass |
+| Initial companion JS | 80 KB | 71.29 KB | pass |
 | Largest async chunk | 25 KB | 18.67 KB (`SettingsScreen`) | pass |
 | Largest shared chunk | 70 KB | 62.21 KB (`widgets.svelte`) | pass |
-| Total JS | 200 KB | 163.34 KB | pass |
-| CSS | 30 KB | 20.24 KB | pass |
+| Total JS | 200 KB | 163.73 KB | pass |
+| CSS | 30 KB | 20.48 KB | pass |
 
 The per-chunk gate is part of `pnpm --dir ui build` and runs in CI after the
 build. A chunk that grows past its budget fails the build instead of silently
@@ -96,7 +101,7 @@ What the numbers mean:
 | CLI binary | < 12 MB | 9.31 MB | pass |
 | Core idle RAM | < 40 MB | 34.8 MB | pass |
 | Daemon ready | < 300 ms | 54 ms | pass |
-| Android APK | < 15 MB | not built | not measured |
+| Android APK (arm64, release) | < 15 MB | 9.21 MB | pass |
 
 ## Uninstall hygiene
 
@@ -140,8 +145,12 @@ per-machine install and is covered by the post-release check in
 
 ## What is not measured
 
-- **Android.** No APK has been built or measured. The 15 MB budget is open until
-  Phase 11b completes. Android remains experimental.
+- **Android on a phone.** The release APK was measured on this machine and
+  verified with `apksigner`, and the debug build ran on an Android 17 emulator.
+  A physical phone, OEM battery managers, a real camera, and an upgrade from one
+  signed release to the next are untested. Android remains experimental.
+- **Android App Bundle.** Gradle also produced an `.aab`, but its download size
+  through Play is not measured; only the APK is.
 - **macOS, Linux, and iOS.** No builds exist, so there is nothing to measure.
 - **GPU and battery.** The WebGL2 glass engine is measured only through total
   working set and CPU. No GPU timer or battery drain test exists.

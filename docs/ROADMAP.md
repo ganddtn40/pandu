@@ -108,8 +108,9 @@ The full token, surface, theme, and accessibility contract is in
 - [ ] npm wrapper (`npx pandu`)
 - [x] winget and scoop manifests (drafts with hashes filled at release time)
 - [x] Windows Tauri bundle (MSI/NSIS)
-- [ ] Signed Android APK with documented keystore steps (debug build and
-      throwaway-signing verification pending; production keystore not provisioned)
+- [x] Signed Android APK with documented keystore steps (throwaway-signed
+      release APK built and verified with `apksigner` on 2026-11-12; production
+      keystore not provisioned)
 - [x] Web/PWA bundle
 - [ ] macOS, iOS, and Linux bundles (planned after v0.2.0)
 - [x] Signed update checks every 24 hours (can be disabled), no auto-install,
@@ -117,10 +118,11 @@ The full token, surface, theme, and accessibility contract is in
 - [ ] README and beginner docs in all 14 languages (7 shipped)
 
 CLI release artifacts are produced by the tag workflow, not by a local
-`cargo build`. The Android SDK/NDK and the release keystore live in CI, but the
-Android job is experimental and non-blocking: its APK is not attached to a
-release until emulator and phone verification are recorded. The first tagged
-run is still required to prove the cargo-dist path end to end.
+`cargo build`. The Android SDK/NDK are available to CI, but no production
+Android keystore is provisioned yet. The Android job is experimental and
+non-blocking: its APK is not attached to a release until emulator and phone
+verification are recorded. The first tagged run is still required to prove the
+cargo-dist path end to end.
 
 ### Platform support
 
@@ -237,12 +239,14 @@ or picking up a `help wanted` draft.
 ## Release criteria for v0.2.0
 
 - All v0.2.0 checkboxes above are complete.
-- A clean-machine install works on Windows, Android, and Web/PWA.
+- A clean-machine install works on Windows and Web/PWA. Android installs and
+  runs on an emulator; a physical-phone install is still pending.
 - macOS, iOS, and Linux remain clearly labeled as planned until their bundles
   ship.
 - The Android companion pairs and views flights over an HTTPS tunnel (for
   example `tailscale serve`); cleartext LAN HTTP is intentionally blocked in
-  release builds.
+  release builds. Emulator verification used loopback HTTP in a debug build;
+  the HTTPS tunnel path and a physical phone remain unverified.
 - The performance budgets are measured and recorded in the release notes.
 - No known data-loss, credential-leak, or agent-breaking bug is open.
 - `legacy/` is deleted only after parity is demonstrated in its own commit.

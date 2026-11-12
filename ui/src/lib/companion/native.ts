@@ -9,6 +9,7 @@
 import { setDaemonOverride, useRemoteTokenStore } from '../api/client';
 import { t } from '../i18n/i18n.svelte';
 import {
+  cancelScan,
   configureHost,
   confirmWithBiometrics,
   initNotificationChannels,
@@ -29,6 +30,8 @@ export interface CompanionHooks {
   adoptHost(raw: string): Promise<string>;
   /** Open the camera and parse one pairing QR. */
   scan(): Promise<PairingPayload>;
+  /** Close the scanner without a result. */
+  cancelScan(): Promise<void>;
   /** Ask for BiometricPrompt or the device PIN before a high-risk decision. */
   confirmHighRisk(title: string): Promise<boolean>;
   /** After the host confirms: channels, notification permission, watch. */
@@ -129,6 +132,7 @@ export const companionHooks: CompanionHooks = {
   },
   adoptHost,
   scan,
+  cancelScan,
   confirmHighRisk,
   completePairing,
 };

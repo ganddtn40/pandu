@@ -353,8 +353,9 @@ jobs:
 
   android:
     name: Android companion (signed)
-    # EXPERIMENTAL: Android is not a release blocker and its APK is not attached
-    # to releases until emulator and phone verification are recorded.
+    # EXPERIMENTAL: emulator verification is recorded in
+    # docs/install/android.md (2026-11-12). Android is not a release blocker and
+    # its APK is not attached to releases until a physical phone is verified.
     continue-on-error: true
     needs: plan
     runs-on: ubuntu-22.04

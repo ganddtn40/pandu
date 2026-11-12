@@ -28,6 +28,8 @@ coverage/
 /android/app/build/
 /android/build/
 /android/local.properties
+/app/plugins/*/android/.tauri/
+/app/plugins/*/android/build/
 
 # Playwright
 test-results/

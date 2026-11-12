@@ -13,6 +13,11 @@ mod desktop;
 mod tray;
 
 /// Start the Tauri application.
+///
+/// The mobile entry point generates the JNI symbol Android loads from the
+/// shared library. Without it the APK builds but the library fails Tauri's
+/// runtime-symbol validation.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
 

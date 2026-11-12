@@ -60,6 +60,8 @@ export async function initNotificationChannels(): Promise<void> {
   await invoke('plugin:keystore|notifications_init');
 }
 
+let cancelPendingScan: (() => void) | null = null;
+
 /**
  * Ask for the camera only when the user presses Scan. A denied or unavailable
  * camera returns `null`; pairing by code still works.
@@ -72,12 +74,37 @@ export async function scanPairingQr(): Promise<string | null> {
     camera = (await invoke<CameraPermission>('plugin:barcode-scanner|request_permissions')).camera;
   }
   if (camera !== 'granted') throw new Error('camera_denied');
-  const scanned = await invoke<Scanned>('plugin:barcode-scanner|scan', {
+
+  const scanned = invoke<Scanned>('plugin:barcode-scanner|scan', {
     cameraDirection: 'back',
     formats: ['QR_CODE'],
     windowed: true,
   });
-  return scanned.content && scanned.content.trim() ? scanned.content : null;
+  // The Android plugin clears `savedInvoke` inside `cancel()` before it
+  // rejects it, so the native scan promise never settles. Race it against a
+  // cancellation promise we own instead of waiting forever.
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    cancelPendingScan = () => reject(new Error('cancelled'));
+  });
+  try {
+    const result = await Promise.race([scanned, cancelled]);
+    return result.content && result.content.trim() ? result.content : null;
+  } finally {
+    cancelPendingScan = null;
+  }
+}
+
+/** Close the windowed scanner and reject the pending scan. */
+export async function cancelScan(): Promise<void> {
+  if (!nativeAvailable()) return;
+  const reject = cancelPendingScan;
+  cancelPendingScan = null;
+  reject?.();
+  try {
+    await invoke('plugin:barcode-scanner|cancel');
+  } catch {
+    // The camera is already being torn down; the UI has left the scanner.
+  }
 }
 
 /**

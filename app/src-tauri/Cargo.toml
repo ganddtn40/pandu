@@ -50,7 +50,10 @@ tauri-plugin-autostart = "2"
 # process to the running instance before invoking the callback.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
-[target.'cfg(mobile)'.dependencies]
+# Cargo resolves target dependencies from the target triple, not from the
+# `mobile` cfg that tauri-build sets for Rust code. Use explicit OS cfgs here or
+# the plugins (and their ACL permissions) are absent from the Android graph.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2"
 tauri-plugin-biometric = "2"
 tauri-plugin-notification = "2"

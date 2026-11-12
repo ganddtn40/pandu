@@ -538,8 +538,9 @@ version:
 - Scopes are enforced server-side on every request and every live message.
 - WebSocket upgrades check `Origin`, use a one-time ticket, and re-check scope
   and revocation.
-- Security headers are set on every remote response; no CORS headers are
-  emitted, and cookies are not used.
+- Security headers are set on every remote response. CORS is granted only to
+  the bundled Android companion's fixed `tauri.localhost` origin, and cookies
+  are not used.
 - `/api/remote/health` is not an unauthenticated fingerprint: it returns 404
   unless called from loopback or with a valid device token.
 - Rate limits, exponential lockout, a connection cap, and a body-size limit

@@ -17,7 +17,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { appDir, appPath, readBrand, readJson, repoRoot } from './lib/brand.mjs';
 
 const brand = readBrand();
@@ -27,7 +27,7 @@ const debug = args.includes('--debug');
 const sign = args.includes('--sign');
 const requireSign = args.includes('--require-sign');
 const outIndex = args.indexOf('--out');
-const outDir = outIndex >= 0 ? args[outIndex + 1] : join(repoRoot, 'dist/android');
+const outDir = outIndex >= 0 ? resolve(repoRoot, args[outIndex + 1]) : join(repoRoot, 'dist/android');
 const targets = [];
 for (let index = 0; index < args.length; index += 1) {
   if (args[index] === '--target') {
@@ -109,9 +109,14 @@ if (targets.length > 0) tauriArgs.push('--target', ...targets);
 run('pnpm', tauriArgs);
 
 const apkRoot = appPath('src-tauri/gen/android/app/build/outputs/apk');
-const apks = walk(apkRoot, '.apk');
+// Gradle leaves the other variant's outputs in place, so only package the one
+// this run just built. Otherwise a release run would sign a stale debug APK.
+const variant = debug ? 'debug' : 'release';
+const apks = walk(apkRoot, '.apk').filter((apk) =>
+  apk.split(/[\\/]/).includes(variant),
+);
 if (apks.length === 0) {
-  console.error(`No APK was produced under ${apkRoot}.`);
+  console.error(`No ${variant} APK was produced under ${apkRoot}.`);
   process.exit(1);
 }
 
@@ -143,9 +148,25 @@ if (sign && !existsSync(keystore)) {
 const apksigner = findApksigner();
 const version = tauri.version ?? '0.0.0';
 
+// A single-target build still lands in Gradle's `universal` directory, so name
+// the artifact after the requested ABI instead of claiming it is universal.
+function archForTarget(target) {
+  if (target.startsWith('aarch64')) return 'arm64';
+  if (target.startsWith('armv7')) return 'armv7';
+  if (target.startsWith('i686')) return 'x86';
+  if (target.startsWith('x86_64')) return 'x86_64';
+  return null;
+}
+const targetArch = targets.length === 1 ? archForTarget(targets[0]) : null;
+
 for (const apk of apks) {
+  // `universal/release/app-universal-release.apk` and
+  // `arm64/release/app-arm64-release.apk` both put the variant last.
   const parent = basename(dirname(apk));
-  const arch = parent === 'apk' || parent === 'release' || parent === 'debug' ? 'universal' : parent;
+  const grandparent = basename(dirname(dirname(apk)));
+  const arch = targetArch ?? (parent === 'release' || parent === 'debug'
+    ? (grandparent === 'apk' ? 'universal' : grandparent)
+    : parent);
   const suffix = debug ? 'debug' : 'release';
   const base = `${brand.slug}-${version}-android-${arch}-${suffix}`;
   let output = join(outDir, `${base}${sign ? '-signed' : '-unsigned'}.apk`);

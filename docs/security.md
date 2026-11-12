@@ -306,10 +306,12 @@ token, or read the audit log.
   or panic. Tokens never appear in the URL.
 - **Headers and origins.** Every remote response sets CSP,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and HSTS
-  when HTTPS. The listener emits no CORS headers, so cross-origin reads are not
-  possible. `Host` and `Origin` are checked against the mode (tunnel public host
-  plus loopback, `.ts.net`/tailnet IPs, or LAN IPs/`.local`). Cookies are not
-  used.
+  when HTTPS. The listener emits no CORS headers except one exact grant for the
+  bundled Android companion's fixed `tauri.localhost` origin. That origin is
+  not a browser-reachable site, and a native client still needs a device token;
+  every other cross-origin read stays blocked. `Host` and `Origin` are checked
+  against the mode (tunnel public host plus loopback, `.ts.net`/tailnet IPs, or
+  LAN IPs/`.local`). Cookies are not used.
 - **Abuse limits.** Pairing claims are keyed per claim, authenticated requests
   per device, and unauthenticated attempts per trusted client IP. At most three
   claims can wait for the host and only one pairing code is active at a time.

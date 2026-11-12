@@ -1923,6 +1923,53 @@ async fn host_origin_cors_and_security_headers_are_enforced() {
     let body: Value = bad_origin.json().await.unwrap();
     assert_eq!(body["error"]["code"], "forbidden_origin");
 
+    // The bundled Android companion runs at the fixed Tauri origin and calls
+    // the host cross-origin. It gets a CORS grant; no other origin does.
+    let companion = client
+        .get(format!("{remote}/api/remote/session"))
+        .header("origin", "http://tauri.localhost")
+        .bearer_auth(&device.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(companion.status(), StatusCode::OK);
+    assert_eq!(
+        companion
+            .headers()
+            .get("access-control-allow-origin")
+            .unwrap(),
+        "http://tauri.localhost"
+    );
+
+    let companion_preflight = client
+        .request(
+            reqwest::Method::OPTIONS,
+            format!("{remote}/api/remote/session"),
+        )
+        .header("origin", "http://tauri.localhost")
+        .header("access-control-request-method", "GET")
+        .header("access-control-request-headers", "authorization")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(companion_preflight.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        companion_preflight
+            .headers()
+            .get("access-control-allow-origin")
+            .unwrap(),
+        "http://tauri.localhost"
+    );
+    assert!(
+        companion_preflight
+            .headers()
+            .get("access-control-allow-headers")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("authorization")
+    );
+
     // Same-origin requests work and never emit a wildcard CORS header.
     let same_origin = client
         .get(format!("{remote}/api/remote/session"))

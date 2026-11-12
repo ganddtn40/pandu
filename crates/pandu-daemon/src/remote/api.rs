@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
@@ -259,6 +259,11 @@ pub fn build_remote_router(state: AppState) -> Router {
         ))
         .layer(DefaultBodyLimit::max(REMOTE_BODY_LIMIT))
         .layer(tower_http::trace::TraceLayer::new_for_http())
+        // The Android companion is a bundled page served from
+        // `tauri.localhost`; every call it makes to the host is cross-origin.
+        // Give that one origin a CORS grant, and only that origin. Browsers
+        // cannot forge it, and a native client still needs a device token.
+        .layer(middleware::from_fn(companion_cors))
 }
 
 async fn remote_health(
@@ -1395,6 +1400,71 @@ async fn security_headers(
     response
 }
 
+/// The bundled Android companion is served from `tauri.localhost`. Every
+/// call it makes to the host is cross-origin, so that one origin gets a CORS
+/// grant. A browser cannot forge this origin, and a native client still needs
+/// a device token. No other origin is granted anything.
+const COMPANION_ORIGIN_HOST: &str = "tauri.localhost";
+
+fn is_companion_origin(origin: &str) -> bool {
+    let Some((scheme, rest)) = origin.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return false;
+    }
+    let authority = rest.split('/').next().unwrap_or(rest);
+    if authority.contains('@') {
+        return false;
+    }
+    host_without_port(authority).eq_ignore_ascii_case(COMPANION_ORIGIN_HOST)
+}
+
+async fn companion_cors(request: axum::extract::Request, next: Next) -> Response {
+    let origin = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| is_companion_origin(value))
+        .map(str::to_string);
+    let Some(origin) = origin else {
+        return next.run(request).await;
+    };
+    // A preflight never reaches the router: answer it here, then let the real
+    // request pass through the host, origin, and authentication checks.
+    if request.method() == Method::OPTIONS {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        add_companion_cors(response.headers_mut(), &origin);
+        return response;
+    }
+    let mut response = next.run(request).await;
+    add_companion_cors(response.headers_mut(), &origin);
+    response
+}
+
+fn add_companion_cors(headers: &mut HeaderMap, origin: &str) {
+    if let Ok(value) = HeaderValue::from_str(origin) {
+        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+    }
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("authorization, content-type, x-pairing-secret"),
+    );
+    let expose = format!("{TOKEN_HEADER}, {REMOTE_HEADER}");
+    if let Ok(value) = HeaderValue::from_str(&expose) {
+        headers.insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, value);
+    }
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
+    headers.append(header::VARY, HeaderValue::from_static("Origin"));
+}
+
 async fn check_host_and_origin(
     State(state): State<AppState>,
     request: axum::extract::Request,
@@ -1483,6 +1553,13 @@ fn origin_allowed(state: &AppState, origin: &str, host: Option<&str>) -> bool {
     // must not be able to drive the public tunnel address cross-origin.
     if crate::config::is_loopback_host(&origin_host) {
         return crate::config::is_loopback_host(&request_host);
+    }
+    // The bundled companion is a native webview, not a browser page. It has no
+    // way to share the host's origin, so allow its fixed Tauri origin. Native
+    // clients still need a device token; this only removes the browser CORS
+    // barrier for the app the user installed.
+    if is_companion_origin(origin) {
+        return state.remote.mode() != RemoteMode::Loopback;
     }
     if !origin_host.eq_ignore_ascii_case(&request_host) {
         return false;

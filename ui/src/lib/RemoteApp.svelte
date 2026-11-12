@@ -44,6 +44,8 @@
   let hostInput = $state('');
   let qrFingerprint = $state<string | null>(null);
   let scanBusy = $state(false);
+  let scanActive = $state(false);
+  let scanCancelled = false;
   let pairBusy = $state(false);
   let pairStatus = $state<PairStatus>('idle');
   let pairError = $state<string | null>(null);
@@ -88,6 +90,7 @@
     return () => {
       cleanup?.();
       stopPolling();
+      document.documentElement.classList.remove('remote-scanning');
     };
   });
 
@@ -192,7 +195,13 @@
   async function scanQr(): Promise<void> {
     if (!companion || scanBusy || pairBusy) return;
     scanBusy = true;
+    scanCancelled = false;
     pairError = null;
+    // The plugin puts the camera preview behind the webview and makes the
+    // webview transparent. The page must do the same, or the pairing form
+    // hides the preview.
+    scanActive = true;
+    document.documentElement.classList.add('remote-scanning');
     try {
       const payload = await companion.scan();
       hostInput = await companion.adoptHost(payload.url);
@@ -200,9 +209,28 @@
       qrFingerprint = payload.fingerprint ?? null;
       await submitPairing();
     } catch (error) {
-      pairError = remoteErrorMessage(error);
+      if (!scanCancelled) {
+        const message = error instanceof Error ? error.message : '';
+        pairError = message === 'camera_denied'
+          ? t('companion.cameraDenied')
+          : message === 'cancelled'
+            ? t('companion.qrCancelled')
+            : remoteErrorMessage(error);
+      }
     } finally {
+      scanActive = false;
+      document.documentElement.classList.remove('remote-scanning');
       scanBusy = false;
+    }
+  }
+
+  async function cancelQr(): Promise<void> {
+    if (!companion) return;
+    scanCancelled = true;
+    try {
+      await companion.cancelScan();
+    } catch {
+      // The scan promise rejects on its own; the UI is already leaving.
     }
   }
 
@@ -892,4 +920,15 @@
       </section>
     {/if}
   </main>
+{/if}
+
+{#if scanActive}
+  <div class="remote-scan" role="dialog" aria-modal="true" aria-label={t('companion.scan')}>
+    <p class="remote-scan__hint">{t('companion.scanHint')}</p>
+    <span class="remote-scan__frame" aria-hidden="true"></span>
+    <button class="btn btn--ghost remote-scan__cancel" type="button" onclick={cancelQr}>
+      <Icon name="close" size={16} />
+      {t('common.cancel')}
+    </button>
+  </div>
 {/if}

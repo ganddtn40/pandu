@@ -247,9 +247,10 @@ jobs:
 
   android:
     name: Android companion (unsigned)
-    # EXPERIMENTAL: the companion has not been verified on an emulator and a
-    # physical phone yet, so a broken Android build must not block the repo.
-    # Remove this once Phase 11b verification is recorded in docs/KNOWN-LIMITS.md.
+    # EXPERIMENTAL: emulator verification is recorded in
+    # docs/install/android.md (2026-11-12). A physical phone is still pending,
+    # so a broken Android build must not block the repo. Make this blocking
+    # once phone verification is recorded.
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
