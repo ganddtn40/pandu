@@ -8,7 +8,7 @@ account, no cloud, no telemetry.
 
 Pandu is not an AI agent; it guides, records and protects the agents you already use.
 
-> **Status:** the 0.2.0 rewrite is in progress on the `rewrite` branch. Phases
+> **Status:** the 0.2.0 rewrite is in progress on `main`. Phases
 > 0–11 are complete: the Rust core, proxy, adapters, guards, snapshots, the
 > design v2 UI, the five tabs wired to real daemon data, host-confirmed remote
 > access, the signed skill/MCP market, model controls, updates and backups, and

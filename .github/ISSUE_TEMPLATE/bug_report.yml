@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for taking the time to report a bug.
 
-        **Do not report security vulnerabilities here.** Follow [SECURITY.md](https://github.com/ganddtn40/pandu/blob/rewrite/SECURITY.md) and use GitHub's private vulnerability reporting.
+        **Do not report security vulnerabilities here.** Follow [SECURITY.md](https://github.com/ganddtn40/pandu/blob/main/SECURITY.md) and use GitHub's private vulnerability reporting.
 
         Remove secrets, API keys, prompts, source code, and personal paths from logs and screenshots before posting.
 

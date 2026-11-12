@@ -4,8 +4,8 @@ contact_links:
     url: https://github.com/ganddtn40/pandu/security/advisories/new
     about: Report privately. Do not open a public issue for a security problem.
   - name: Install and troubleshooting
-    url: https://github.com/ganddtn40/pandu/blob/rewrite/docs/install/troubleshooting.md
+    url: https://github.com/ganddtn40/pandu/blob/main/docs/install/troubleshooting.md
     about: Read the install and troubleshooting guides before filing a bug.
   - name: Contributing guide
-    url: https://github.com/ganddtn40/pandu/blob/rewrite/CONTRIBUTING.md
+    url: https://github.com/ganddtn40/pandu/blob/main/CONTRIBUTING.md
     about: Setup, gates, translations, and pull request expectations.

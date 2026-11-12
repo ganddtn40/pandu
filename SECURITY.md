@@ -9,8 +9,8 @@ a sandbox, an anti-malware product, or a certification.
 
 | Version | Branch | Security support |
 | --- | --- | --- |
-| 0.2.x (in progress) | `rewrite` | Yes - the current build |
-| 0.1.x | `main` / `legacy/` | Fixes for confirmed high-severity issues only |
+| 0.2.x (in progress) | `main` | Yes - the current build |
+| 0.1.x | tag `v0.1.0` / `legacy/` | Fixes for confirmed high-severity issues only |
 | Older snapshots | any | No |
 
 The security model for the current build is in [`docs/security.md`](docs/security.md).
