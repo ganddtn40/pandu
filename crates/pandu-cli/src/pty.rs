@@ -600,36 +600,48 @@ mod tests {
         let _serial = serialize();
         let (program, args) = echo_command();
         let mut spawned = spawn_pty(&program, &args, &[]).unwrap();
-        let mut writer = spawned.writer;
+        let writer = Arc::new(Mutex::new(spawned.writer));
+        let reader_writer = Arc::clone(&writer);
         let mut reader = spawned.reader;
 
-        let (output_tx, output_rx) = std::sync::mpsc::channel();
+        let (output_tx, output_rx) = std::sync::mpsc::channel::<Vec<u8>>();
         std::thread::spawn(move || {
-            let mut output = String::new();
+            let mut scan = String::new();
             let mut answered = false;
             let mut buffer = [0u8; 4_096];
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) | Err(_) => break,
                     Ok(count) => {
-                        output.push_str(&String::from_utf8_lossy(&buffer[..count]));
-                        if !answered && output.contains("\x1b[6n") {
-                            answer_cursor_query(&output, &mut writer);
+                        scan.push_str(&String::from_utf8_lossy(&buffer[..count]));
+                        if !answered && scan.contains("\x1b[6n") {
+                            if let Ok(mut writer) = reader_writer.lock() {
+                                answer_cursor_query(&scan, &mut writer);
+                            }
                             answered = true;
+                        } else if scan.len() > 3 {
+                            let keep = scan.len() - 3;
+                            scan.drain(..keep);
                         }
-                        if output.contains("pandu-pty-ok") {
+                        if output_tx.send(buffer[..count].to_vec()).is_err() {
                             break;
                         }
                     }
                 }
             }
-            let _ = output_tx.send(output);
         });
 
-        let output = output_rx
-            .recv_timeout(Duration::from_secs(20))
-            .expect("the PTY should produce output without hanging");
+        // Keep reading while the child exits: a reader that stops at the marker
+        // can leave the child blocked on its final write on macOS.
+        let mut output = String::new();
+        while !output.contains("pandu-pty-ok") {
+            let chunk = output_rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the PTY should produce output without hanging");
+            output.push_str(&String::from_utf8_lossy(&chunk));
+        }
         let status = wait_with_deadline(&mut spawned.child);
+        drop(writer);
         assert_eq!(status.exit_code(), 0);
         assert!(
             output.contains("pandu-pty-ok"),
