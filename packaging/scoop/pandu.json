@@ -11,8 +11,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/ganddtn40/pandu/releases/download/v0.2.0/pandu-cli-x86_64-pc-windows-msvc.zip",
-      "hash": "0000000000000000000000000000000000000000000000000000000000000000",
-      "extract_dir": "pandu-cli-x86_64-pc-windows-msvc"
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   },
   "bin": "pandu.exe",

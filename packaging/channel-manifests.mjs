@@ -114,7 +114,6 @@ const scoop = {
     '64bit': {
       url: `${release}/${cliArchive}`,
       hash: hash(cliArchive),
-      extract_dir: `${brand.crates.cli}-x86_64-pc-windows-msvc`,
     },
   },
   bin: `${brand.cli.command}.exe`,
