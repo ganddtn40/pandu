@@ -1826,7 +1826,10 @@ pub(crate) fn seed_demo_sessions(state: &AppState) -> Result<Vec<Session>, ApiEr
             }],
             metadata: Some(json!({ "demo": true })),
             approval_nonce: None,
-            approval_expires_at: None,
+            // The demo approval is a fixture, not a live request: keep it
+            // actionable for the whole browser run instead of expiring two
+            // minutes after the daemon starts.
+            approval_expires_at: Some(demo_time(-1440)),
         })
         .map_err(|error| {
             ApiError::new(

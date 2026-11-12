@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,6 +38,41 @@ const isMarket =
   mode === 'market' || mode === 'market-offline' || mode === 'market-state';
 const isUpdate = mode === 'update';
 const isMigrate = mode === 'migrate';
+const demoMode = mode === 'demo' || isUpdate || isMigrate;
+
+// The demo daemon must report the same five adapters on every machine. The
+// browser tests assert on the installed count and on the first rows of the
+// agents tile, so a bare CI runner and a developer machine with real CLIs have
+// to agree. Empty shims on PATH give the daemon exactly five installed
+// adapters without pretending an agent is running or changing the product.
+const shimDir = path.join(home, 'shims');
+let pathValue = process.env.PATH ?? '';
+if (demoMode) {
+  mkdirSync(shimDir, { recursive: true });
+  for (const name of ['claude', 'codex', 'gemini', 'opencode', 'qwen']) {
+    if (process.platform === 'win32') {
+      // Windows skips `.cmd` when reading a version, which is fine: detection
+      // only needs the file to exist and be a regular file.
+      writeFileSync(path.join(shimDir, `${name}.cmd`), '@echo off\r\nexit /b 0\r\n');
+    } else {
+      const shim = path.join(shimDir, name);
+      writeFileSync(shim, '#!/bin/sh\nexit 0\n');
+      chmodSync(shim, 0o755);
+    }
+  }
+  // A developer machine can have extra agent CLIs on PATH; CI has none. Use
+  // only the shim directory plus the system directories so the adapter list is
+  // identical everywhere.
+  const systemPath =
+    process.platform === 'win32'
+      ? [
+          path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32'),
+          process.env.SystemRoot ?? 'C:\\Windows',
+        ].join(path.delimiter)
+      : ['/usr/local/bin', '/usr/bin', '/bin'].join(path.delimiter);
+  pathValue = `${shimDir}${path.delimiter}${systemPath}`;
+}
+
 const userHome = path.join(home, 'user');
 const workspace = path.join(home, 'workspace');
 if (isMarket) {
@@ -81,7 +116,8 @@ const child = spawn(binary, ['serve'], {
     PANDU_PORT: port,
     PANDU_LOG_WATCH: '0',
     PANDU_NOTIFICATIONS: '0',
-    PANDU_DEMO: mode === 'demo' || isUpdate || isMigrate ? '1' : '0',
+    PANDU_DEMO: demoMode ? '1' : '0',
+    PATH: pathValue,
     ...(isUpdate
       ? {
           // Debug-only override: read a fixed release document instead of

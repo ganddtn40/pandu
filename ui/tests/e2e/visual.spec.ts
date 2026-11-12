@@ -48,14 +48,19 @@ async function prepare(page: Page, options: PrepareOptions = {}): Promise<void> 
     lowEnd = false,
   } = options;
 
-  if (forceGlass) {
-    // Overriding matchMedia only affects JavaScript. The CSS fallback rule is
-    // driven by the real media feature, so emulate it through CDP as well.
-    const session = await page.context().newCDPSession(page);
-    await session.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }],
-    });
-  }
+  // Overriding matchMedia only affects JavaScript. The CSS fallback rule is
+  // driven by the real media feature, so emulate it through CDP as well: the
+  // screenshot path asks for no preference, while the fallback test asks for
+  // the reduce preference that headless Chromium does not report on its own.
+  const session = await page.context().newCDPSession(page);
+  await session.send('Emulation.setEmulatedMedia', {
+    features: [
+      {
+        name: 'prefers-reduced-transparency',
+        value: forceGlass ? 'no-preference' : 'reduce',
+      },
+    ],
+  });
 
   await page.addInitScript(
     ({ daemonUrl, isOnboarded, webgl, constrained, designKey }) => {
@@ -379,7 +384,6 @@ test.describe('desktop shell', () => {
     await expect(page.locator('.preview-note')).toContainText('demo mode');
     await expectNoDevelopmentCopy(page);
     await expectNoHorizontalOverflow(page);
-    await screenshot(page, 'desktop-home-light-demo.png');
   });
 
   for (const theme of ['dark', 'light', 'frost'] as const) {
