@@ -38,7 +38,7 @@
   </button>
 {/if}
 
-<nav class="tabbar" aria-label="Primary">
+<nav class="tabbar" aria-label={t('nav.primary')}>
   {#each tabs as tab}
     <a
       class="tabbar__item"

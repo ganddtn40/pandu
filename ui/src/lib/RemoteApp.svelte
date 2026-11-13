@@ -22,6 +22,7 @@
     Session,
     Step,
   } from './api/types';
+  import { agentEventKey } from './agent-events';
   import type { CompanionHooks } from './companion/native';
   import { formatDuration, timeAgo } from './format';
   import { t } from './i18n/i18n.svelte';
@@ -908,7 +909,7 @@
             <ul class="remote-app__events-list">
               {#each remoteState.agentEvents.slice(0, 20) as event (event.id)}
                 <li>
-                  <span class="status-pill">{event.type}</span>
+                  <span class="status-pill">{t(agentEventKey(event.type))}</span>
                   <strong>{event.agentName}</strong>
                   <span>{event.message}</span>
                   <span class="remote-app__time">{timeAgo(event.createdAt, t)}</span>

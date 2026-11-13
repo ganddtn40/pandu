@@ -12,22 +12,22 @@ Measured by `pnpm --dir ui check:i18n` on 2026-11-13:
 
 | Language | Code | Keys | Coverage | Direction |
 | --- | --- | --- | --- | --- |
-| English (source) | `en` | 1,083 | 100% | LTR |
-| Bahasa Indonesia | `id` | 994 | 91.8% | LTR |
-| Español | `es` | 111 | 10.3% | LTR |
-| Français | `fr` | 111 | 10.3% | LTR |
-| Deutsch | `de` | 111 | 10.3% | LTR |
-| 日本語 | `ja` | 111 | 10.3% | LTR |
-| 简体中文 | `zh` | 111 | 10.3% | LTR |
-| العربية | `ar` | 111 | 10.3% | RTL |
-| हिन्दी | `hi` | 111 | 10.3% | LTR |
-| 한국어 | `ko` | 111 | 10.3% | LTR |
-| Português (Brasil) | `pt` | 111 | 10.3% | LTR |
-| Русский | `ru` | 111 | 10.3% | LTR |
-| Türkçe | `tr` | 111 | 10.3% | LTR |
-| Tiếng Việt | `vi` | 111 | 10.3% | LTR |
+| English (source) | `en` | 1,199 | 100% | LTR |
+| Bahasa Indonesia | `id` | 1,110 | 92.6% | LTR |
+| Español | `es` | 111 | 9.3% | LTR |
+| Français | `fr` | 111 | 9.3% | LTR |
+| Deutsch | `de` | 111 | 9.3% | LTR |
+| 日本語 | `ja` | 111 | 9.3% | LTR |
+| 简体中文 | `zh` | 111 | 9.3% | LTR |
+| العربية | `ar` | 111 | 9.3% | RTL |
+| हिन्दी | `hi` | 111 | 9.3% | LTR |
+| 한국어 | `ko` | 111 | 9.3% | LTR |
+| Português (Brasil) | `pt` | 111 | 9.3% | LTR |
+| Русский | `ru` | 111 | 9.3% | LTR |
+| Türkçe | `tr` | 111 | 9.3% | LTR |
+| Tiếng Việt | `vi` | 111 | 9.3% | LTR |
 
-The `id` draft translates 994 of the 1,083 English keys, including every key a
+The `id` draft translates 1,110 of the 1,199 English keys, including every key a
 screen references, so no catalog string falls back to English. The remaining 89
 entries are not used by the interface yet; they stay in English until a screen
 needs them. The 111-key drafts cover navigation, common actions, the

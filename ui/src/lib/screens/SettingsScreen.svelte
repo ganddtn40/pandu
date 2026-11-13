@@ -14,11 +14,17 @@
   import { openAddAgent } from '../add-agent.svelte';
   import { CLI_COMMAND } from '../brand';
   import { copyText } from '../clipboard';
-  import { ACCENTS, accentFor } from '../design/accents';
+  import { accentFor } from '../design/accents';
   import { openAppearance } from '../design/appearance.svelte';
   import { designState, resetDesign } from '../design/design.svelte';
-  import { LANGUAGES, RADII, SURFACE_STYLES, THEME_MODES } from '../design/types';
+  import { LANGUAGES } from '../design/types';
   import { formatUptime } from '../format';
+  import {
+    ACCENT_LABELS,
+    RADIUS_LABELS,
+    SURFACE_LABELS,
+    THEME_LABELS,
+  } from '../i18n/design-labels';
   import { t } from '../i18n/i18n.svelte';
   import RemoteAccessCard from '../RemoteAccessCard.svelte';
   import {
@@ -41,14 +47,10 @@
 
   const design = $derived(designState.value);
   const accent = $derived(accentFor(design.accent, design.theme));
-  const themeLabel = $derived(THEME_MODES.find((entry) => entry.id === design.theme)?.label ?? 'Dark');
-  const surfaceLabel = $derived(
-    SURFACE_STYLES.find((entry) => entry.id === design.surface)?.label ?? 'Hybrid',
-  );
-  const radiusLabel = $derived(RADII[design.radius].label);
-  const accentLabel = $derived(
-    ACCENTS.find((entry) => entry.id === design.accent)?.label ?? design.accent,
-  );
+  const themeLabel = $derived(t(THEME_LABELS[design.theme].label));
+  const surfaceLabel = $derived(t(SURFACE_LABELS[design.surface].label));
+  const radiusLabel = $derived(t(RADIUS_LABELS[design.radius]));
+  const accentLabel = $derived(t(ACCENT_LABELS[design.accent]));
   const languageLabel = $derived(
     LANGUAGES.find((entry) => entry.id === design.language)?.label ?? 'English',
   );

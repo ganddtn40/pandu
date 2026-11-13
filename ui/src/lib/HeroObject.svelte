@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from './i18n/i18n.svelte';
+
   let { size = 320 }: { size?: number } = $props();
 </script>
 
@@ -8,7 +10,7 @@
   height={size}
   viewBox="0 0 320 320"
   role="img"
-  aria-label="A graphite sphere held inside a silver ring"
+  aria-label={t('onboarding.heroAlt')}
 >
   <defs>
     <radialGradient id="hero-bg" cx="0.34" cy="0.24" r="0.9">

@@ -16,7 +16,7 @@
 </script>
 
 <header class="topbar float" data-glass data-glass-layer="float" data-glass-depth="1" data-glass-clip="none" data-glass-neutral>
-  <a class="brand" href="/" data-route aria-label={`${PRODUCT_NAME} home`}>
+  <a class="brand" href="/" data-route aria-label={`${PRODUCT_NAME} · ${t('nav.home')}`}>
     <Logo size={30} />
     <span class="brand__name">{PRODUCT_NAME}</span>
   </a>

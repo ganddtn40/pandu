@@ -102,7 +102,7 @@ The full token, surface, theme, and accessibility contract is in
 - [x] 14 language catalogs with lazy loading, RTL layout, and a missing-key CI
       gate (`en` plus 13 draft catalogs; `pnpm --dir ui check:i18n`)
 - [ ] Native review of the 13 draft catalogs (`id` covers every key the UI
-      reads, 994 of 1,083; the other drafts cover 111; English is 1,083 keys)
+      reads, 1,110 of 1,199; the other drafts cover 111; English is 1,199 keys)
 
 ### Install and release
 

@@ -23,6 +23,7 @@
     timeAgo,
   } from './format';
   import { t, type MessageKey } from './i18n/i18n.svelte';
+  import { liveEventKey } from './live-events';
   import { openQuickPrompt } from './quick-prompt.svelte';
   import { navigate } from './router.svelte';
   import { toast } from './toast-store.svelte';
@@ -388,7 +389,7 @@
                   {#each liveEvents as event}
                     <div class="live-step">
                       <span class="live-step__dot is-done"></span>
-                      <span>{event.type}</span>
+                      <span>{t(liveEventKey(event.type))}</span>
                       <small>{timeAgo(event.at, t, now)}</small>
                     </div>
                   {:else}

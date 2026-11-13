@@ -22,6 +22,18 @@
     WALLPAPERS,
   } from './design/types';
   import { readWallpaperFile } from './design/wallpaper';
+  import {
+    ACCENT_LABELS,
+    DENSITY_LABELS,
+    FONT_LABELS,
+    LANGUAGE_NOTES,
+    MOTION_LABELS,
+    RADIUS_LABELS,
+    SURFACE_LABELS,
+    THEME_LABELS,
+    WALLPAPER_LABELS,
+  } from './i18n/design-labels';
+  import { t } from './i18n/i18n.svelte';
   import { toast } from './toast-store.svelte';
 
   let sheet = $state<HTMLElement | null>(null);
@@ -50,9 +62,9 @@
     const url = themeShareUrl(themeToJson(designState.value), window.location.origin);
     try {
       await navigator.clipboard.writeText(url);
-      toast('Share link copied. It carries the look, never your wallpaper.');
+      toast(t('appearance.shareCopied'));
     } catch {
-      toast('Clipboard unavailable. Use Export theme instead.');
+      toast(t('appearance.shareFailed'));
     }
   }
 
@@ -65,7 +77,7 @@
     anchor.download = `${SLUG}-theme.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-    toast('Theme exported as JSON.');
+    toast(t('appearance.exported'));
   }
 
   async function importTheme(event: Event): Promise<void> {
@@ -81,9 +93,9 @@
         return;
       }
       setDesign(designFromTheme(parsed.value, designState.value));
-      toast('Theme imported. Wallpaper and performance stay on this device.');
+      toast(t('appearance.imported'));
     } catch {
-      toast('Could not read that theme file.');
+      toast(t('appearance.importFailed'));
     } finally {
       busy = false;
     }
@@ -98,9 +110,9 @@
     try {
       const image = await readWallpaperFile(file);
       setDesign({ wallpaperImage: image, wallpaper: 'image' });
-      toast('Wallpaper saved on this device only.');
+      toast(t('appearance.wallpaperSaved'));
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Could not read that image.');
+      toast(error instanceof Error ? error.message : t('appearance.wallpaperFailed'));
     } finally {
       busy = false;
     }
@@ -108,12 +120,12 @@
 
   function removeWallpaper(): void {
     setDesign({ wallpaperImage: null, wallpaper: 'procedural' });
-    toast('Wallpaper removed.');
+    toast(t('appearance.wallpaperRemoved'));
   }
 
   function reset(): void {
     resetDesign();
-    toast(`Appearance reset to the ${PRODUCT_NAME} default.`);
+    toast(t('appearance.resetDone', { product: PRODUCT_NAME }));
   }
 </script>
 
@@ -146,10 +158,15 @@
     >
       <header class="sheet__head">
         <div>
-          <p class="kicker">Settings</p>
-          <h2 id="appearance-title">Appearance</h2>
+          <p class="kicker">{t('appearance.kicker')}</p>
+          <h2 id="appearance-title">{t('appearance.title')}</h2>
         </div>
-        <button class="icon-button" type="button" aria-label="Close appearance" onclick={closeAppearance}>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label={t('appearance.close')}
+          onclick={closeAppearance}
+        >
           <Icon name="close" size={19} />
         </button>
       </header>
@@ -157,12 +174,14 @@
       <div class="sheet__body">
         <div class="mini-preview" aria-hidden="true">
           <div class="mini-preview__copy">
-            <span class="mini-preview__label">Live preview</span>
+            <span class="mini-preview__label">{t('appearance.previewLive')}</span>
             <span class="mini-preview__value">$0.42</span>
-            <span class="mini-preview__sub">Today · 3 flights</span>
+            <span class="mini-preview__sub">{t('appearance.previewToday', { count: 3 })}</span>
           </div>
           <div class="mini-preview__side">
-            <span class="status-pill status-pill--accent"><span class="dot dot--live"></span> Live</span>
+            <span class="status-pill status-pill--accent"
+              ><span class="dot dot--live"></span> {t('appearance.previewLivePill')}</span
+            >
             <svg class="mini-preview__spark" viewBox="0 0 120 34" aria-hidden="true">
               <path
                 d="M2 27 18 24 34 26 50 17 66 20 82 11 98 14 118 6"
@@ -174,17 +193,17 @@
               />
             </svg>
             <span class="mini-preview__pill" style={`background: ${accent.base}; color: ${accent.contrast}`}>
-              Primary
+              {t('appearance.previewPrimary')}
             </span>
           </div>
         </div>
 
         <section class="sheet-section" aria-labelledby="appearance-theme">
           <div class="sheet-section__head">
-            <h3 id="appearance-theme">Theme</h3>
-            <p>Light is the default. Dark stays deep; Frost stays cool and airy.</p>
+            <h3 id="appearance-theme">{t('appearance.theme')}</h3>
+            <p>{t('appearance.themeNote')}</p>
           </div>
-          <div class="theme-cards" role="group" aria-label="Theme">
+          <div class="theme-cards" role="group" aria-label={t('appearance.theme')}>
             {#each THEME_MODES as option}
               <button
                 class="theme-card"
@@ -198,8 +217,8 @@
                   <span class="theme-card__tile"></span>
                   <span class="theme-card__dot" style={`background: ${accentFor(design.accent, option.id).base}`}></span>
                 </span>
-                <span class="theme-card__label">{option.label}</span>
-                <span class="theme-card__note">{option.note}</span>
+                <span class="theme-card__label">{t(THEME_LABELS[option.id].label)}</span>
+                <span class="theme-card__note">{t(THEME_LABELS[option.id].note)}</span>
               </button>
             {/each}
           </div>
@@ -207,10 +226,10 @@
 
         <section class="sheet-section" aria-labelledby="appearance-surface">
           <div class="sheet-section__head">
-            <h3 id="appearance-surface">Surface</h3>
-            <p>Matte is fastest. Glass refracts the wallpaper. Hybrid floats glass over matte cards.</p>
+            <h3 id="appearance-surface">{t('appearance.surface')}</h3>
+            <p>{t('appearance.surfaceNote')}</p>
           </div>
-          <div class="seg seg--stack" role="group" aria-label="Surface style">
+          <div class="seg seg--stack" role="group" aria-label={t('appearance.surface')}>
             {#each SURFACE_STYLES as option}
               <button
                 class="seg__option"
@@ -219,8 +238,8 @@
                 aria-pressed={design.surface === option.id}
                 onclick={() => setDesign({ surface: option.id })}
               >
-                <strong>{option.label}</strong>
-                <small>{option.note}</small>
+                <strong>{t(SURFACE_LABELS[option.id].label)}</strong>
+                <small>{t(SURFACE_LABELS[option.id].note)}</small>
               </button>
             {/each}
           </div>
@@ -228,10 +247,10 @@
 
         <section class="sheet-section" aria-labelledby="appearance-accent">
           <div class="sheet-section__head">
-            <h3 id="appearance-accent">Accent</h3>
-            <p>One accent at a time. Status colours stay separate and meaningful.</p>
+            <h3 id="appearance-accent">{t('appearance.accent')}</h3>
+            <p>{t('appearance.accentNote')}</p>
           </div>
-          <div class="accent-grid" role="group" aria-label="Accent colour">
+          <div class="accent-grid" role="group" aria-label={t('appearance.accentColour')}>
             {#each ACCENTS as option}
               {@const swatch = option[design.theme]}
               <button
@@ -242,7 +261,7 @@
                 onclick={() => setDesign({ accent: option.id })}
               >
                 <span class="accent-option__dot" style={`background: ${swatch.base}`}></span>
-                <span class="accent-option__label">{option.label}</span>
+                <span class="accent-option__label">{t(ACCENT_LABELS[option.id])}</span>
               </button>
             {/each}
           </div>
@@ -250,13 +269,13 @@
 
         <section class="sheet-section" aria-labelledby="appearance-shape">
           <div class="sheet-section__head">
-            <h3 id="appearance-shape">Shape and density</h3>
-            <p>Corner radius and spacing apply everywhere, including sheets and cards.</p>
+            <h3 id="appearance-shape">{t('appearance.shape')}</h3>
+            <p>{t('appearance.shapeNote')}</p>
           </div>
           <div class="option-block">
-            <span class="option-block__label">Corners</span>
-            <div class="seg" role="group" aria-label="Corner radius">
-              {#each Object.entries(RADII) as [id, value]}
+            <span class="option-block__label">{t('appearance.corners')}</span>
+            <div class="seg" role="group" aria-label={t('appearance.cornerRadius')}>
+              {#each Object.keys(RADII) as id}
                 <button
                   class="seg__option seg__option--compact"
                   class:is-active={design.radius === id}
@@ -265,15 +284,15 @@
                   onclick={() => setDesign({ radius: id as keyof typeof RADII })}
                 >
                   <span class="corner-chip corner-chip--{id}" aria-hidden="true"></span>
-                  {value.label}
+                  {t(RADIUS_LABELS[id as keyof typeof RADII])}
                 </button>
               {/each}
             </div>
           </div>
           <div class="option-block">
-            <span class="option-block__label">Density</span>
-            <div class="seg" role="group" aria-label="Density">
-              {#each Object.entries(DENSITIES) as [id, value]}
+            <span class="option-block__label">{t('appearance.density')}</span>
+            <div class="seg" role="group" aria-label={t('appearance.density')}>
+              {#each Object.keys(DENSITIES) as id}
                 <button
                   class="seg__option seg__option--compact"
                   class:is-active={design.density === id}
@@ -281,7 +300,7 @@
                   aria-pressed={design.density === id}
                   onclick={() => setDesign({ density: id as keyof typeof DENSITIES })}
                 >
-                  {value.label}
+                  {t(DENSITY_LABELS[id as keyof typeof DENSITIES])}
                 </button>
               {/each}
             </div>
@@ -290,10 +309,10 @@
 
         <section class="sheet-section" aria-labelledby="appearance-type">
           <div class="sheet-section__head">
-            <h3 id="appearance-type">Type</h3>
-            <p>System is fastest. Mono changes code only, never labels.</p>
+            <h3 id="appearance-type">{t('appearance.type')}</h3>
+            <p>{t('appearance.typeNote')}</p>
           </div>
-          <div class="seg" role="group" aria-label="Font">
+          <div class="seg" role="group" aria-label={t('appearance.font')}>
             {#each FONTS as option}
               <button
                 class="seg__option seg__option--compact"
@@ -302,12 +321,12 @@
                 aria-pressed={design.font === option.id}
                 onclick={() => setDesign({ font: option.id })}
               >
-                {option.label}
+                {t(FONT_LABELS[option.id].label)}
               </button>
             {/each}
           </div>
           <label class="slider-row">
-            <span>Text size</span>
+            <span>{t('appearance.textSize')}</span>
             <output>{Math.round(design.fontScale * 100)}%</output>
             <input
               class="slider"
@@ -323,15 +342,11 @@
 
         <section class="sheet-section" aria-labelledby="appearance-glass">
           <div class="sheet-section__head">
-            <h3 id="appearance-glass">Glass</h3>
-            <p>
-              {glassMuted
-                ? 'Matte is active, so these values are saved for the next glass surface.'
-                : 'Tune the floating layers. The renderer updates without a reload.'}
-            </p>
+            <h3 id="appearance-glass">{t('appearance.glass')}</h3>
+            <p>{glassMuted ? t('appearance.glassMuted') : t('appearance.glassNote')}</p>
           </div>
           <label class="slider-row" class:is-muted={glassMuted}>
-            <span>Intensity</span>
+            <span>{t('appearance.intensity')}</span>
             <output>{design.glassIntensity}%</output>
             <input
               class="slider"
@@ -344,7 +359,7 @@
             />
           </label>
           <label class="slider-row" class:is-muted={glassMuted}>
-            <span>Blur</span>
+            <span>{t('appearance.blur')}</span>
             <output>{design.glassBlur}%</output>
             <input
               class="slider"
@@ -357,7 +372,7 @@
             />
           </label>
           <label class="slider-row" class:is-muted={glassMuted}>
-            <span>Refraction</span>
+            <span>{t('appearance.refraction')}</span>
             <output>{design.glassRefraction}%</output>
             <input
               class="slider"
@@ -373,10 +388,10 @@
 
         <section class="sheet-section" aria-labelledby="appearance-wallpaper">
           <div class="sheet-section__head">
-            <h3 id="appearance-wallpaper">Wallpaper</h3>
-            <p>Your own image stays on this device and is never exported with a theme.</p>
+            <h3 id="appearance-wallpaper">{t('appearance.wallpaper')}</h3>
+            <p>{t('appearance.wallpaperNote')}</p>
           </div>
-          <div class="seg" role="group" aria-label="Wallpaper">
+          <div class="seg" role="group" aria-label={t('appearance.wallpaper')}>
             {#each WALLPAPERS as option}
               <button
                 class="seg__option seg__option--compact"
@@ -391,7 +406,7 @@
                   setDesign({ wallpaper: option.id });
                 }}
               >
-                {option.label}
+                {t(WALLPAPER_LABELS[option.id].label)}
               </button>
             {/each}
           </div>
@@ -401,12 +416,12 @@
             {/if}
             <button class="btn btn--small btn--ghost" type="button" disabled={busy} onclick={() => wallpaperInput?.click()}>
               <Icon name="upload" size={15} />
-              {design.wallpaperImage ? 'Replace image' : 'Choose image'}
+              {design.wallpaperImage ? t('appearance.replaceImage') : t('appearance.chooseImage')}
             </button>
             {#if design.wallpaperImage}
               <button class="text-link" type="button" onclick={removeWallpaper}>
                 <Icon name="trash" size={14} />
-                Remove
+                {t('appearance.remove')}
               </button>
             {/if}
           </div>
@@ -415,17 +430,17 @@
             class="sr-only"
             type="file"
             accept="image/*"
-            aria-label="Choose a wallpaper image"
+            aria-label={t('appearance.chooseImageLabel')}
             onchange={importWallpaper}
           />
         </section>
 
         <section class="sheet-section" aria-labelledby="appearance-motion">
           <div class="sheet-section__head">
-            <h3 id="appearance-motion">Motion and performance</h3>
-            <p>Reduced motion removes parallax. Performance mode turns off WebGL and blur.</p>
+            <h3 id="appearance-motion">{t('appearance.motion')}</h3>
+            <p>{t('appearance.motionNote')}</p>
           </div>
-          <div class="seg" role="group" aria-label="Motion">
+          <div class="seg" role="group" aria-label={t('appearance.motionGroup')}>
             {#each MOTIONS as option}
               <button
                 class="seg__option seg__option--compact"
@@ -434,7 +449,7 @@
                 aria-pressed={design.motion === option.id}
                 onclick={() => setDesign({ motion: option.id })}
               >
-                {option.label}
+                {t(MOTION_LABELS[option.id].label)}
               </button>
             {/each}
           </div>
@@ -445,7 +460,7 @@
             onclick={() => setDesign({ performance: !design.performance })}
           >
             <span class="toggle__track" aria-hidden="true"></span>
-            Performance mode
+            {t('appearance.performanceMode')}
           </button>
           <button
             class="toggle"
@@ -454,24 +469,24 @@
             onclick={() => setDesign({ borders: !design.borders })}
           >
             <span class="toggle__track" aria-hidden="true"></span>
-            Card borders
+            {t('appearance.cardBorders')}
           </button>
         </section>
 
         <section class="sheet-section" aria-labelledby="appearance-language">
           <div class="sheet-section__head">
-            <h3 id="appearance-language">Language</h3>
-            <p>English is complete. The other catalogs are drafts and marked as such.</p>
+            <h3 id="appearance-language">{t('appearance.language')}</h3>
+            <p>{t('appearance.languageNote')}</p>
           </div>
           <label class="select-row">
-            <span>Interface language</span>
+            <span>{t('appearance.interfaceLanguage')}</span>
             <select
               value={design.language}
               onchange={(event) =>
                 setDesign({ language: event.currentTarget.value as typeof design.language })}
             >
               {#each LANGUAGES as option}
-                <option value={option.id}>{option.label} · {option.note}</option>
+                <option value={option.id}>{option.label} · {t(LANGUAGE_NOTES[option.id])}</option>
               {/each}
             </select>
           </label>
@@ -479,17 +494,17 @@
 
         <section class="sheet-section" aria-labelledby="appearance-theme-file">
           <div class="sheet-section__head">
-            <h3 id="appearance-theme-file">Theme file</h3>
-            <p>Versioned JSON. Import validates every field and never runs code.</p>
+            <h3 id="appearance-theme-file">{t('appearance.themeFile')}</h3>
+            <p>{t('appearance.themeFileNote')}</p>
           </div>
           <div class="button-row button-row--tight">
             <button class="btn btn--small btn--ghost" type="button" onclick={exportTheme}>
               <Icon name="download" size={15} />
-              Export
+              {t('appearance.export')}
             </button>
             <button class="btn btn--small btn--ghost" type="button" onclick={copyShareLink}>
               <Icon name="copy" size={15} />
-              Copy share link
+              {t('appearance.copyShareLink')}
             </button>
             <button
               class="btn btn--small btn--ghost"
@@ -498,11 +513,11 @@
               onclick={() => themeFileInput?.click()}
             >
               <Icon name="upload" size={15} />
-              Import
+              {t('appearance.import')}
             </button>
             <button class="btn btn--small btn--ghost" type="button" onclick={reset}>
               <Icon name="rotate" size={15} />
-              Reset
+              {t('appearance.reset')}
             </button>
           </div>
           <input
@@ -510,7 +525,7 @@
             class="sr-only"
             type="file"
             accept="application/json,.json"
-            aria-label="Import a theme file"
+            aria-label={t('appearance.importLabel')}
             onchange={importTheme}
           />
         </section>
