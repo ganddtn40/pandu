@@ -8,14 +8,14 @@ This roadmap is honest about scope: v0.2.0 is intentionally small. Features that
 are not in v1 have a written spec and a `help wanted` issue draft, so they can
 come back without reopening old decisions.
 
-## v0.2.0 — the rewrite (Phases 0–11 complete; Phase 12 in progress)
+## v0.2.0 — the rewrite (shipped)
 
 **Theme:** one binary, five tabs, proxy and log-watch capture, design v2.
 
-Phases 0–11 are complete. Windows and PWA benchmarks are recorded in
-[`BENCHMARKS.md`](BENCHMARKS.md); Phase 12 covers the remaining documentation and
-language catalogs. The unchecked product and quality items in this roadmap are
-still open before the release criteria below can be met.
+Release 0.2.0 is published. Windows and PWA benchmarks are recorded in
+[`BENCHMARKS.md`](BENCHMARKS.md); the documentation, install guides, and language
+catalogs are in place. The unchecked product and quality items in this roadmap
+remain open for the next release.
 
 ### Product
 
@@ -27,7 +27,7 @@ still open before the release criteria below can be met.
 - [x] Flights: list and detail, timeline scrubber, step inspector, per-step git
       diff, cost, live output, replay, deep links
 - [ ] Flights: one trust badge and `Fork from here` (replay forks are deferred)
-- [x] Market: signed skill and MCP registry with host-only installs (Phase 8)
+- [x] Market: signed skill and MCP registry with host-only installs
 - [ ] Market: adapter and theme discovery
 - [x] Settings: Add an agent flow, language, privacy, platform support,
       about/updates
@@ -37,8 +37,8 @@ still open before the release criteria below can be met.
 - [ ] Honest per-flight capture label: `Recorded via proxy`, `Observed from
       logs`, or `Observed via hook`
 
-Phase 5 wires the five tabs to real daemon data. Phase 8 adds the signed skill
-and MCP registry; adapter and theme discovery remain later work.
+The five tabs read real daemon data, and the signed skill and MCP registry is
+live; adapter and theme discovery remain later work.
 
 ### Design v2
 
@@ -58,7 +58,7 @@ and MCP registry; adapter and theme discovery remain later work.
 - [x] New logo suite, wordmark, mono mark, and favicon
 - [x] Contrast, style-ban, theme, wallpaper, widget, and visual gates
 - [x] Per-screen empty/loading/error states wired to real data
-- [x] Final visual approval by the user (Phase 4B)
+- [x] Final visual approval by the user
 
 The full token, surface, theme, and accessibility contract is in
 [`DESIGN.md`](DESIGN.md).
@@ -152,12 +152,12 @@ Nothing outside the supported rows is advertised as working.
 - [x] `cargo test --workspace`
 - [x] `pnpm check`
 - [x] `pnpm test` (20 files / 145 tests)
-- [x] Playwright design, visual, and daemon e2e suite (61 tests)
+- [x] Playwright design, visual, and daemon e2e suite (65 tests)
 - [x] Text contrast ≥ 4.5:1 across every theme, surface, and accent pair
 - [x] 44 px minimum touch targets on phone
 - [x] Zero idle canvas redraws and visible focus rings
-- [x] Initial host JavaScript < 90 KB gzip (currently 63.48 KB), lazy route
-      chunks < 25 KB each (largest 18.56 KB), total JS < 200 KB (186.28 KB);
+- [x] Initial host JavaScript < 90 KB gzip (currently 65.07 KB), lazy route
+      chunks < 25 KB each (largest 18.67 KB), total JS < 200 KB (199.1 KB);
       enforced by `pnpm --dir ui size` in CI
 - [x] `cargo deny check`
 - [x] Mock upstream tests for OpenAI, Anthropic, and Gemini (streaming + errors)
@@ -172,19 +172,19 @@ Nothing outside the supported rows is advertised as working.
       with WebView2, TTI 540–814 ms; APK and proxy p99 still unmeasured; see
       [`BENCHMARKS.md`](BENCHMARKS.md))
 
-### Release plan
+### Delivered in 0.2.0
 
-| Phase | Focus |
+| Area | What shipped |
 | --- | --- |
-| 4B | Design v2 complete; user visual approval (hard stop) — complete |
-| 5 | Five tabs wired to the daemon, onboarding, i18n catalogs — complete |
-| 6 | Agent control and notifications — complete |
-| 7 | Remote access security — complete |
-| 8 | Market registry — complete |
-| 9 | Model, effort, and context controls — complete |
-| 10 | Updates and backups — complete |
-| 11 | Packaging: Windows, Android, Web/PWA — complete |
-| 12 | Docs, benchmarks, 14 languages, v0.3.0 — in progress |
+| Design v2 | Tokens, themes, surfaces, appearance engine, user visual approval |
+| Five tabs | Home, Inbox, Flights, Market, Settings wired to the daemon, onboarding, i18n catalogs |
+| Agent control | Run Guard, budgets, approvals, notifications |
+| Remote access | Pairing, scopes, revocation, hash-chained audit log |
+| Market | Signed skill and MCP registry with host-only installs |
+| Models | Verified model table, host-only effort overrides, context meter |
+| Data | Updates, rollback, backups, restore |
+| Packaging | Windows desktop, Android companion, Web/PWA |
+| Documentation | Install guides, benchmarks, 14 language catalogs, release docs |
 
 ## Not in v0.2.0
 
@@ -235,16 +235,16 @@ or picking up a `help wanted` draft.
 
 ## How to pick up work
 
-1. Read `CONTRIBUTING.md` (added in Phase 12).
+1. Read `CONTRIBUTING.md`.
 2. Pick an issue labeled `help wanted`.
 3. Comment with your plan before large changes.
 4. Keep the five-tab promise: new surface area needs a strong reason.
 5. Every PR must pass fmt, clippy, tests, `pnpm check`, Vitest, Playwright, and
    the relevant adapter/e2e checks.
 
-## Release criteria for v0.2.0
+## Release criteria for a stable release
 
-- All v0.2.0 checkboxes above are complete.
+- All checkboxes above are complete.
 - A clean-machine install works on Windows and Web/PWA. Android installs and
   runs on an emulator; a physical-phone install is still pending.
 - macOS, iOS, and Linux remain clearly labeled as planned until their bundles

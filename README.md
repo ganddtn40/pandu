@@ -40,14 +40,13 @@
   </picture>
 </p>
 
-> **Status: pre-1.0.** The 0.2.0 rewrite is the active line on `main`. Phases
-> 0–11 are complete; Phase 12 (docs, catalogs, release polish) is in progress.
-> Windows and the PWA are supported. Android is an experimental companion
-> verified on an emulator. macOS, iOS, and Linux are planned. English ships with
-> 13 draft catalogs that fall back to English per key. The 0.2.0 preview release
-> is unsigned and has no automatic update; the updater and registry trust roots
-> are not provisioned, so both fail closed. The 0.1.0 TypeScript/Node
-> implementation is preserved under `legacy/` as the behavior spec.
+> **Status: pre-1.0.** Release 0.2.0 is the current line on `main`. Windows and
+> the PWA are supported. Android is an experimental companion verified on an
+> emulator. macOS, iOS, and Linux are planned. English ships with 13 draft
+> catalogs that fall back to English per key. The 0.2.0 preview release is
+> unsigned and has no automatic update; the updater and registry trust roots are
+> not provisioned, so both fail closed. The 0.1.0 TypeScript/Node implementation
+> is preserved under `legacy/` as the behavior spec.
 
 ## Contents
 
@@ -640,9 +639,10 @@ remote-management routes.
 
 ## Benchmarks
 
-Measured numbers for the packaged app, not estimates. Last measured on
-2026-11-12 on Windows 11 (Ryzen 5 6600H, 16 GB, WebView2 157). The full report,
-methodology, and reproduction commands are in
+Measured numbers for the packaged app, not estimates. Packaged-app figures were
+last measured on 2026-11-12 on Windows 11 (Ryzen 5 6600H, 16 GB, WebView2 157);
+UI budget figures were re-measured on 2026-11-13. The full report, methodology,
+and reproduction commands are in
 [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 | Artifact | Size |
@@ -661,9 +661,9 @@ methodology, and reproduction commands are in
 | Recorder idle RAM | < 40 MB | 34.8 MB | pass |
 | Daemon ready | < 300 ms | 54 ms | pass |
 | Android APK (arm64) | < 15 MB | 9.21 MB | pass |
-| Initial host JS | < 90 KB gzip | 79.02 KB | pass |
-| Total JS | < 200 KB | 163.73 KB | pass |
-| CSS | < 30 KB | 20.48 KB | pass |
+| Initial host JS | < 90 KB gzip | 65.07 KB | pass |
+| Total JS | < 200 KB | 199.1 KB | pass |
+| CSS | < 30 KB | 20.59 KB | pass |
 
 The whole-app working set is 396.9–426.6 MB and time to interactive is
 540–814 ms. Almost all of that is WebView2; the Rust recorder stays around
@@ -769,7 +769,7 @@ rules are in [`docs/assets/README.md`](docs/assets/README.md).
 | [Updating](docs/updating.md) | Update checks, signed installs, rollback, Android |
 | [Translating](docs/TRANSLATING.md) | Catalog layout, coverage, drafts, RTL |
 | [Rewrite decision record](docs/REWRITE.md) | What is kept, cut, and changed in 0.2.0 |
-| [Roadmap](docs/ROADMAP.md) | v0.2.0 scope, phases, and deferred features |
+| [Roadmap](docs/ROADMAP.md) | v0.2.0 scope, status, and deferred features |
 
 ### Install
 

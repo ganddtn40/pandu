@@ -1,6 +1,6 @@
 # Market
 
-Status: Phase 8. Market is the Pandu catalogue for agent skills and MCP
+Status: 0.2.0. Market is the Pandu catalogue for agent skills and MCP
 servers. It is **host-only**, **signed**, and **never executes an installer**.
 Pandu copies files and edits configuration; the agent runs the installed
 skill or MCP server later, under the user's account.

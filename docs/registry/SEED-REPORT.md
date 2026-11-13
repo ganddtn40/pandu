@@ -1,4 +1,4 @@
-# Registry seed report — Phase 8b
+# Registry seed report
 
 - **Date:** 2026-11-10
 - **Branch:** `rewrite`
@@ -168,7 +168,7 @@ Checked on 2026-11-10 against the current vendor documentation:
 | **Codex CLI** | `~/.agents/skills`, `.agents/skills`; Codex also reads ancestor `.agents/skills` and admin `/etc/codex/skills` | `~/.codex/config.toml`, `.codex/config.toml` under `[mcp_servers.<name>]` |
 | **OpenCode** | `~/.config/opencode/skills`, `.opencode/skills`; compatibility paths `~/.claude/skills`, `~/.agents/skills`, `.claude/skills`, `.agents/skills` | `mcp.servers` in `opencode.json` / `opencode.jsonc` |
 
-The Codex `[skills]` section was added to `adapters/codex.toml` in this phase
+The Codex `[skills]` section was added to `adapters/codex.toml` in this release
 and is marked `verified = true`. The target table in `docs/market.md` was
 updated to match.
 
@@ -216,7 +216,7 @@ the test key id `pandu-market-test-2026`.
   key matches `TEST_REGISTRY_PUBLIC_KEY_BASE64` in
   `crates/pandu-daemon/src/market/mod.rs`.
 - No private key is in the repository. The production index and revocation
-  list were not signed in this phase.
+  list were not signed in this release.
 - A release build rejects the test key by design
   (`trust_root_error`), so these entries cannot ship in a release until they
   are reviewed and signed with the production key.

@@ -3,9 +3,9 @@
 Svelte 5 + TypeScript + Vite. No heavy UI or animation libraries. The glass
 renderer is custom WebGL2 code in `src/glass`.
 
-> **Status:** Phases 4B and 5 are complete. The five tabs read real daemon data
-> over HTTP and WebSocket, first run opens a three-step tour, and the i18n
-> catalogs are in place (English complete, drafts fall back per key).
+> **Status:** 0.2.0 is shipped. The five tabs read real daemon data over HTTP
+> and WebSocket, first run opens a three-step tour, and the i18n catalogs are in
+> place (English complete, 13 drafts that fall back per key).
 
 ## Design direction
 
@@ -111,11 +111,11 @@ over an opaque `--sheet-bg`; the canvas sits below their scrims.
 
 ## Budgets
 
-- Initial host JavaScript < 90 KB gzip (current build: 78.98 KB). The remote
-  shell is a separate 70.88 KB gzip entry that loads only on a remote origin.
-- Lazy route and overlay chunks < 25 KB gzip each; total JavaScript < 200 KB
-  (current build: 163.34 KB).
-- CSS: 134.8 KB raw, 20.24 KB gzip
+- Initial host JavaScript < 90 KB gzip (current build: 65.07 KB). The remote
+  shell is a separate 58.85 KB gzip entry that loads only on a remote origin.
+- Lazy route and overlay chunks < 25 KB gzip each (largest 18.67 KB); total
+  JavaScript < 200 KB (current build: 199.1 KB).
+- CSS: 139.68 KB raw, 20.59 KB gzip
 - The size gate reads Vite's manifest and runs in CI after every build
 - No layout shift from font loading
 - 44 px minimum touch targets
@@ -134,8 +134,8 @@ pnpm test
 pnpm exec playwright test
 ```
 
-Screenshots from the visual suite land in `../docs/screenshots/phase*/`.
-`pnpm test` currently runs 20 files / 143 tests. The Playwright suite runs 59
+Screenshots from the visual suite land under `../docs/screenshots/`.
+`pnpm test` currently runs 20 files / 145 tests. The Playwright suite runs 65
 tests across desktop (1440×900) and phone (390×844, plus 360×640) in Dark,
 Light, and Frost, covering real daemon data, demo labels, first-run onboarding,
 Inbox decisions, flight replay and deep links, lazy snapshot diffs, live

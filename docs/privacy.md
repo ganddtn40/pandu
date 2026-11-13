@@ -1,6 +1,6 @@
 # Privacy
 
-Status: Phase 9. Branch `rewrite`.
+Status: 0.2.0.
 
 Pandu is a local tool. There is no account, no cloud sync, no telemetry, and no
 background upload. The daemon binds to a loopback address, records flights in

@@ -1,7 +1,6 @@
 # Pandu security model
 
-Status: Phase 11 (packaging, Windows shell, Android companion, PWA). Branch
-`rewrite`.
+Status: 0.2.0. Branch `rewrite` (merged).
 This document describes what the current build protects, how, and what it does
 not protect yet. It is a working threat model, not a certification.
 
@@ -588,10 +587,10 @@ Unit tests: `proxy::rewrite::tests::*`, `cost::tests::*`,
   model window, the breakdown, and the source URL are not in the status payload.
   A content-scoped device sees the full flight record as before.
 
-## 4. Tests that gate this phase
+## 4. Tests that gate this area
 
-Phase 9 is not considered done unless these pass (the Phase 8 market and remote
-gates still apply):
+The security work is not considered done unless these pass (the market and
+remote gates still apply):
 
 - The remote listener never mounts proxy or host-management routes.
 - Every remote endpoint enforces its scope; the test iterates the same matrix
@@ -748,7 +747,7 @@ management route (`status`, `enable`, `disable`, `panic`, `devices`, `pair/code`
 ## 6. Not protected yet
 
 These are known limits of this build. They are not silently accepted; they are
-listed so a reviewer can decide whether a later phase must close them.
+listed so a reviewer can decide whether a later release must close them.
 
 1. **A stolen device token is powerful within its scopes.** Remote access is
    opt-in, but a bearer token needs no further user presence. Status can leak

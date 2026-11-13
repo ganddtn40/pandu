@@ -1,7 +1,7 @@
 # Pandu 0.2.0 — Rewrite decision record
 
-Status: Phase 5 complete
-Branch: `rewrite`
+Status: implemented in 0.2.0
+Branch: `rewrite` (merged)
 Baseline: `main` at `1d65df2` (the 0.1.0 release commit)
 
 This document records what release 0.1.0 does, what the rewrite keeps, what it
@@ -214,7 +214,7 @@ Old screens also fold into the five new tabs:
    response, tool calls), per-step git diff, cost, one trust badge, `Fork from
    here`.
 4. **Market** — agent adapters, shared themes, and the future registry of
-   capture integrations. The registry itself ships in a later phase.
+   capture integrations. The registry itself ships in a later release.
 5. **Settings** — Add an agent wizard, appearance, language, privacy,
    `Report a bug`, about/updates.
 
@@ -338,17 +338,21 @@ never exported. The full token and component contract is in
 | --- | --- |
 | Agent log formats change | Adapters are versioned TOML; fixtures and parser tests; `verified` flag; `doctor` reports drift |
 | WebGL2 unavailable or slow | CSS fallback, matte surface, reduced-transparency mode, Performance mode, 16-shape cap, on-demand rendering |
-| Binary exceeds 12 MB | `opt-level = "z"`, LTO, strip, `panic = "abort"`, rustls, embedded AVIF/WebP assets, Phase 12 size check |
+| Binary exceeds 12 MB | `opt-level = "z"`, LTO, strip, `panic = "abort"`, rustls, embedded AVIF/WebP assets, Milestone 12 size check |
 | SSE edge cases break clients | Byte-for-byte passthrough; parser only observes a copy; integration tests with mock upstreams; property tests |
 | Fail-open hides real failures | Every degraded path emits a typed warning and a visible UI badge; `doctor` reports recent warnings |
 | Cross-platform paths and file watching | Platform dirs via `directories`, path tests on Windows/macOS/Linux, no shell assumptions |
 | Android pairing exposure | Single-use short codes, hashed tokens, TTL, rate limits, loopback trust, explicit pairing screen |
-| Rewrite stalls before parity | Phases with hard gates; legacy code remains runnable until Phase 12; cut features are issue drafts, not silent removals |
-| Rust toolchain absent on this machine | Phase 0 writes configs and CI; Phase 1 starts by installing stable Rust or documenting the blocker before code changes |
+| Rewrite stalls before parity | Milestones with hard gates; legacy code remains runnable until Milestone 12; cut features are issue drafts, not silent removals |
+| Rust toolchain absent on this machine | Milestone 0 writes configs and CI; Milestone 1 starts by installing stable Rust or documenting the blocker before code changes |
 
-## 8. Phase plan
+## 8. Milestone plan (historical)
 
-| Phase | Deliverable | Gate |
+The milestone numbers below are the original delivery plan. Every milestone
+shipped in 0.2.0; the implementation notes are kept as a record of how it was
+built.
+
+| Milestone | Deliverable | Gate |
 | --- | --- | --- |
 | 0 | Audit, rewrite record, roadmap, issue drafts, legacy move, workspace scaffold | Docs reviewed; workspace layout committed |
 | 1 | Rust core, proxy, SQLite, SSE passthrough, redaction, tests | `cargo test`, clippy clean, mock upstream tests pass |
@@ -363,9 +367,9 @@ never exported. The full token and component contract is in
 | 9 | Model, effort, and context controls | Provider capability tests; no silent defaults |
 | 10 | Updates and backups | Manual update check; backup/restore test |
 | 11 | Packaging: Windows, Android, Web/PWA | Signed bundles; clean-machine install |
-| 12 | Docs, benchmarks, 14 languages, v0.3.0 | All budgets measured; release checklist signed off |
+| 12 | Docs, benchmarks, 14 languages | All budgets measured; release checklist signed off |
 
-### Phase 2 implementation notes
+### Milestone 2 implementation notes
 
 - Adapters are embedded from `adapters/*.toml` with rust-embed. User files in
   `<home>/adapters/*.toml` override built-ins by id; a broken user file becomes
@@ -387,15 +391,15 @@ never exported. The full token and component contract is in
   never pass through a fake running state.
 - `pandu pair` issues a six-digit, hashed, single-use code with a five-minute
   TTL and five attempts. A claim returns a 64-hex device token; only its hash is
-  stored. Requiring the token on non-loopback requests lands in Phase 7.
+  stored. Requiring the token on non-loopback requests lands in Milestone 7.
 - CLI commands `run`, `demo`, `doctor`, `report`, and `pair` are in place.
   `pandu run` starts an owned daemon if needed, sets proxy environment
   variables from the matched adapter, and passes a local sentinel instead of the
   user's real API key.
-- 123 tests pass at the Phase 2 gate (4 CLI, 65 core, 47 daemon unit, 7
+- 123 tests pass at the Milestone 2 gate (4 CLI, 65 core, 47 daemon unit, 7
   integration); fmt and clippy with `-D warnings` are clean.
 
-### Phase 3 implementation notes
+### Milestone 3 implementation notes
 
 - Guards and redaction share one pattern list in `pandu-core`. A secret is
   masked before storage; the forwarded bytes are never changed. Overlapping
@@ -426,12 +430,12 @@ never exported. The full token and component contract is in
   `/api/guards/events/{id}/decision`, `/api/budgets`, `/api/budgets/{id}`,
   `/api/sessions/{id}/budgets`, `/api/sessions/{id}/replay`,
   `/api/sessions/{id}/scan`, and `/api/snapshots/{id}`.
-- 147 tests pass at the Phase 3 gate (4 CLI, 75 core, 60 daemon unit, 8
+- 147 tests pass at the Milestone 3 gate (4 CLI, 75 core, 60 daemon unit, 8
   integration). Snapshot tests assert that HEAD, the real index, and the reflog
   are unchanged; proxy tests assert that guard and budget blocks never reach the
   upstream provider. fmt and clippy with `-D warnings` are clean.
 
-### Phase 4 implementation notes
+### Milestone 4 implementation notes
 
 - `ui/` is a standalone Svelte 5 + TypeScript + Vite app with two gate routes:
   `/` (shell preview) and `/glass-preview` (visual test page). The daemon keeps
@@ -439,8 +443,8 @@ never exported. The full token and component contract is in
   `cargo build` does not depend on `ui/dist`.
 - The glass engine is one custom WebGL2 canvas in `ui/src/glass`. A procedural
   wallpaper is rendered once to a full-resolution texture; a quarter-resolution
-  two-pass blur feeds instanced SDF squircle shapes (max 12 at Phase 4, raised
-  to 16 in Phase 4B) with edge refraction, chromatic aberration, specular rim
+  two-pass blur feeds instanced SDF squircle shapes (max 12 at Milestone 4, raised
+  to 16 in Milestone 4B) with edge refraction, chromatic aberration, specular rim
   light, tint, depth, and pointer parallax. Rendering is on demand, capped at
   60 fps desktop / 30 fps mobile, and paused while the page is hidden.
 - Inner tiles are clipped to their nearest `[data-glass]` ancestor in the
@@ -468,10 +472,10 @@ never exported. The full token and component contract is in
   path.
 - The built UI is 27.2 KB JavaScript + 4.1 KB CSS gzip, well under the 150 KB
   budget.
-- Screenshots are committed in `docs/screenshots/phase4/`. Phase 4 stops here
+- Screenshots are committed in `docs/screenshots/phase4/`. Milestone 4 stops here
   for user visual approval before the five screens are wired to the daemon.
 
-### Phase 4 visual review fixes
+### Milestone 4 visual review fixes
 
 - Phone scroll areas reserve the floating tab pill height plus 16 px and the
   safe-area inset; Playwright scrolls to the bottom at 390×844 and 360×640 and
@@ -494,7 +498,7 @@ never exported. The full token and component contract is in
   redraws. The debug readout is excluded from the mutation observer, and a
   Playwright test asserts zero canvas redraws after three idle seconds.
 
-### Phase 4B implementation notes (Design v2)
+### Milestone 4B implementation notes (Design v2)
 
 - Design v2 replaces the pure-glass shell with graphite bento dashboards: matte
   cards, 1 px hairlines, 20–28 px card radii, large light numerals, thin charts,
@@ -545,10 +549,10 @@ never exported. The full token and component contract is in
   styles, fallback, live appearance, Performance mode, quick prompt, widget
   editing, theme import/export/share, wallpaper storage, focus rings, and touch
   targets. Screenshots are in `docs/screenshots/phase4b/`.
-- Phase 4B stops here for user visual approval before Phase 5 wires the screens
+- Milestone 4B stops here for user visual approval before Milestone 5 wires the screens
   to the daemon.
 
-### Phase 4B review fixes
+### Milestone 4B review fixes
 
 - One logo, in the top bar only. The rail starts with the nav icons and then a
   `+` that opens Add agent (tooltip plus `aria-label="Add agent"`).
@@ -570,7 +574,7 @@ never exported. The full token and component contract is in
   raster tile at 28 px and above, and switches to the flat vector P below 28 px.
   `ui/public/logo-small.svg` is the flat 32 px favicon with no gradients.
 
-### Phase 5 implementation notes (real data)
+### Milestone 5 implementation notes (real data)
 
 - `ui/src/lib/api/` adds a typed daemon client and a reactive store. The client
   resolves the base URL from `window.__panduDaemonUrl`, then
@@ -617,16 +621,16 @@ never exported. The full token and component contract is in
   WebSocket output, appearance, theme JSON, widgets, glass budgets, focus rings,
   and touch targets. The build is 228.6 KB JavaScript (72.6 KB gzip) and
   73.0 KB CSS (12.5 KB gzip). Screenshots are in `docs/screenshots/phase5/`.
-- Phase 5 stops here for review before Phase 6 (agent control and
+- Milestone 5 stops here for review before Milestone 6 (agent control and
   notifications).
 
-At Phase 0, this machine had Node `v24.21.0` and pnpm `12.9.1`, but no `cargo`,
-`rustc`, or `rustup`. Phase 1 installed a repo-local stable toolchain under the
+At Milestone 0, this machine had Node `v24.21.0` and pnpm `12.9.1`, but no `cargo`,
+`rustc`, or `rustup`. Milestone 1 installed a repo-local stable toolchain under the
 gitignored `.rustup/` and `.cargo/` directories, so builds do not touch a global
-Rust install. The Phase 2 gate ran on `rustc 1.99.1` / `cargo 1.99.1`
+Rust install. The Milestone 2 gate ran on `rustc 1.99.1` / `cargo 1.99.1`
 (`x86_64-pc-windows-msvc`).
 
-Phase 0 checks that did run:
+Milestone 0 checks that did run:
 
 - Every TOML file parses with Python `tomllib`.
 - Every relative Markdown link resolves.
@@ -635,7 +639,7 @@ Phase 0 checks that did run:
   Ignored build artifacts from 0.1.0 remain untracked under `legacy/` and are
   safe to delete later with an explicit, verified in-repo path.
 
-Commands run at each phase gate:
+Commands run at each milestone gate:
 
 ```powershell
 cargo fmt --all -- --check

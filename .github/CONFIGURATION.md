@@ -14,8 +14,7 @@ Release automation and review routing live here:
   gates need.
 
 The community files live at the repository root: `SECURITY.md`,
-`CODE_OF_CONDUCT.md`, and `CONTRIBUTING.md`. Dependabot is still open Phase 12
-work.
+`CODE_OF_CONDUCT.md`, and `CONTRIBUTING.md`. Dependabot is still open.
 
 This file is not named `README.md` on purpose. GitHub renders
 `.github/README.md` on the repository landing page instead of the project

@@ -1,6 +1,6 @@
 # Pandu design system
 
-Status: Phase 4B (Design v2) complete. This document is the source of truth for
+Status: 0.2.0. This document is the source of truth for
 the visual language, design tokens, appearance settings, theme file format, and
 the accessibility and performance rules that gate UI work.
 
@@ -200,8 +200,8 @@ Controls:
 - **Card borders** — on/off.
 - **Motion** — Full, Reduced, Off.
 - **Performance mode** — pauses WebGL and uses CSS surfaces; no reload.
-- **Language** — English plus six draft language preferences; the translation
-  catalogs land in Phase 5.
+- **Language** — English plus 13 draft language preferences; the translation
+  catalogs ship in 0.2.0 and fall back to English per key.
 
 Preferences are per-device. They persist in `localStorage` under
 `pandu.design`; the wallpaper image uses its own key. The legacy keys

@@ -1,6 +1,6 @@
 # Remote access
 
-Status: Phase 7. Remote access is optional, **off by default**, and can be
+Status: 0.2.0. Remote access is optional, **off by default**, and can be
 switched off or revoked at any time from the computer running Pandu.
 
 This guide is written for someone who has never used Tailscale or a Cloudflare

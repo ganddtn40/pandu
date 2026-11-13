@@ -1,6 +1,6 @@
 # Models, effort, overrides, and context
 
-Status: Phase 9. Branch `rewrite`.
+Status: 0.2.0.
 
 Pandu ships a small, verified table of popular models so it can price a flight,
 show how full the context window is, and offer a host-only model override without
