@@ -23,6 +23,8 @@ const en = {
   'nav.flights': 'Flights',
   'nav.market': 'Market',
   'nav.settings': 'Settings',
+  'route.welcome': 'Welcome',
+  'route.glassPreview': 'Glass preview',
   'rail.addAgent': 'Add agent',
   'topbar.search': 'Ask your agent anything',
   'topbar.appearance': 'Appearance',

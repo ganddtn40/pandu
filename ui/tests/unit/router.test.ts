@@ -64,13 +64,14 @@ describe('resolveRoute', () => {
 });
 
 describe('routeLabel', () => {
-  it('labels every route for the window title', () => {
-    expect(routeLabel('/')).toBe('Home');
-    expect(routeLabel('/inbox')).toBe('Inbox');
-    expect(routeLabel('/flights')).toBe('Flights');
-    expect(routeLabel('/market')).toBe('Market');
-    expect(routeLabel('/settings')).toBe('Settings');
-    expect(routeLabel('/welcome')).toBe('Welcome');
-    expect(routeLabel('/glass-preview')).toBe('Glass preview');
+  it('labels every route with a catalog key for the window title', () => {
+    expect(routeLabel('/')).toBe('nav.home');
+    expect(routeLabel('/inbox')).toBe('nav.inbox');
+    expect(routeLabel('/flights')).toBe('nav.flights');
+    expect(routeLabel('/market')).toBe('nav.market');
+    expect(routeLabel('/settings')).toBe('nav.settings');
+    expect(routeLabel('/session')).toBe('session.kicker');
+    expect(routeLabel('/welcome')).toBe('route.welcome');
+    expect(routeLabel('/glass-preview')).toBe('route.glassPreview');
   });
 });

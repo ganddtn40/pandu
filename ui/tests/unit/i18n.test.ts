@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { englishCatalog, isCatalogLoaded, loadCatalog, translate, type Message } from '../../src/lib/i18n/catalog';
+import {
+  englishCatalog,
+  isCatalogLoaded,
+  loadCatalog,
+  translate,
+  type Message,
+  type MessageKey,
+} from '../../src/lib/i18n/catalog';
 import { LANGUAGES, isRtlLanguage } from '../../src/lib/design/types';
+import es from '../../src/lib/i18n/catalogs/es';
 
 function forms(value: Message): string[] {
   if (typeof value === 'string') return [value];
@@ -31,7 +39,11 @@ describe('translation catalogs', () => {
   it('falls back to English per key for draft languages', async () => {
     await loadCatalog('id');
     expect(translate('id', 'common.online')).toBe('Daring');
-    expect(translate('id', 'flights.lede')).toBe(englishCatalog['flights.lede']);
+    await loadCatalog('es');
+    expect(translate('es', 'nav.home')).toBe(es['nav.home']);
+    const untranslated = (Object.keys(englishCatalog) as MessageKey[]).find((key) => !(key in es));
+    expect(untranslated).toBeDefined();
+    expect(translate('es', untranslated!)).toBe(englishCatalog[untranslated!]);
   });
 
   it('interpolates variables and leaves unknown placeholders alone', async () => {

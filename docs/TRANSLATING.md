@@ -8,12 +8,12 @@ catalog as a draft until a reviewer signs it off.
 
 ## Current coverage
 
-Measured by `pnpm --dir ui check:i18n` on 2026-11-12:
+Measured by `pnpm --dir ui check:i18n` on 2026-11-13:
 
 | Language | Code | Keys | Coverage | Direction |
 | --- | --- | --- | --- | --- |
-| English (source) | `en` | 1,081 | 100% | LTR |
-| Bahasa Indonesia | `id` | 385 | 35.6% | LTR |
+| English (source) | `en` | 1,083 | 100% | LTR |
+| Bahasa Indonesia | `id` | 994 | 91.8% | LTR |
 | Español | `es` | 111 | 10.3% | LTR |
 | Français | `fr` | 111 | 10.3% | LTR |
 | Deutsch | `de` | 111 | 10.3% | LTR |
@@ -27,9 +27,15 @@ Measured by `pnpm --dir ui check:i18n` on 2026-11-12:
 | Türkçe | `tr` | 111 | 10.3% | LTR |
 | Tiếng Việt | `vi` | 111 | 10.3% | LTR |
 
-The 111-key draft covers navigation, common actions, the home/flights/inbox
-headings, onboarding, updates, backups, and migration notices. Everything else
-is still English.
+The `id` draft translates 994 of the 1,083 English keys, including every key a
+screen references, so no catalog string falls back to English. The remaining 89
+entries are not used by the interface yet; they stay in English until a screen
+needs them. The 111-key drafts cover navigation, common actions, the
+home/flights/inbox headings, onboarding, updates, backups, and migration
+notices; everything else is still English.
+
+`id` is still a draft. The maintainer translated it, but no native reviewer has
+signed it off, so the appearance sheet keeps the `Draft, needs review` note.
 
 Do not describe a draft as a complete translation. The release notes and README
 must use the same numbers as this table.

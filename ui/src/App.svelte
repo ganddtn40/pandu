@@ -13,6 +13,7 @@
   import { startRemoteHostWatch } from './lib/api/remote-host.svelte';
   import { appearanceState } from './lib/design/appearance.svelte';
   import { openQuickPrompt, quickPromptState } from './lib/quick-prompt.svelte';
+  import { t } from './lib/i18n/i18n.svelte';
   import { routeLabel } from './lib/router';
   import { initRouter, routeState } from './lib/router.svelte';
   import { initGlass, type GlassController } from './glass/engine';
@@ -95,7 +96,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <svelte:head>
-  <title>{routeLabel(routeState.path)} · {PRODUCT_NAME}</title>
+  <title>{t(routeLabel(routeState.path))} · {PRODUCT_NAME}</title>
 </svelte:head>
 
 <canvas bind:this={canvas} class="glass-canvas" aria-hidden="true"></canvas>
@@ -114,7 +115,7 @@
           <Lazy load={() => import('./lib/GlassPreview.svelte')} label="Glass preview" />
         {:else if activeLoader}
           {#key routeState.path}
-            <Lazy load={activeLoader} label={routeLabel(routeState.path)} />
+            <Lazy load={activeLoader} label={t(routeLabel(routeState.path))} />
           {/key}
         {:else}
           <Lazy load={() => import('./lib/HomePreview.svelte')} label="Home" />

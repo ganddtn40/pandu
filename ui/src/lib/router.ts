@@ -1,4 +1,5 @@
 import { SLUG } from './brand';
+import type { MessageKey } from './i18n/catalog';
 
 export const ROUTES = [
   '/',
@@ -58,23 +59,24 @@ export function resolveRoute(
   return { path, search };
 }
 
-export function routeLabel(path: RoutePath): string {
+/** The catalog key for a route name, so the window title follows the language. */
+export function routeLabel(path: RoutePath): MessageKey {
   switch (path) {
     case '/inbox':
-      return 'Inbox';
+      return 'nav.inbox';
     case '/flights':
-      return 'Flights';
+      return 'nav.flights';
     case '/market':
-      return 'Market';
+      return 'nav.market';
     case '/settings':
-      return 'Settings';
+      return 'nav.settings';
     case '/session':
-      return 'Live session';
+      return 'session.kicker';
     case '/welcome':
-      return 'Welcome';
+      return 'route.welcome';
     case '/glass-preview':
-      return 'Glass preview';
+      return 'route.glassPreview';
     default:
-      return 'Home';
+      return 'nav.home';
   }
 }
